@@ -17,6 +17,7 @@ import json
 import sys
 import tempfile
 
+import psycopg2
 import pytest
 
 sys.path.insert(0, "src")
@@ -88,6 +89,53 @@ class _LoggingConn:
 
     def rollback(self):
         pass
+
+
+class _ArtifactDownConn:
+    """I1: the artifact INSERT fails open (OperationalError -> record_artifact
+    returns None), and a tool_call INSERT with a NULL artifact_id would raise
+    NotNullViolation (non-Operational -> re-raised -> build dies). The build must
+    NOT attempt the tool_call write when there is no artifact id."""
+
+    def __init__(self):
+        self.committed = 0
+        self.toolcall_attempted = False
+
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        if "lineage_artifacts" in sql:
+            raise psycopg2.OperationalError("db unreachable")
+        if "lineage_tool_calls" in sql:
+            self.toolcall_attempted = True
+            raise psycopg2.errors.NotNullViolation("NULL artifact_id")
+
+    def fetchone(self):
+        return None
+
+    def commit(self):
+        self.committed += 1
+
+    def rollback(self):
+        pass
+
+
+def _bad_params_driver(messages):
+    """M3: issues a query_dataset op whose params make the tool RAISE (non-numeric
+    top_n), then returns the final spec once the tool result comes back."""
+    user_last = messages[-1].get("content", "") if messages[-1]["role"] == "user" else ""
+    if "Tool results:" in user_last:
+        return ('{"title":"Test","description":"d","panels":[{"figure":"bar",'
+                '"stat":"requests_received_q1"}]}')
+    return ('[{"tool":"query_dataset","op":"filter_agencies",'
+            '"params":{"measure":"received","top_n":"not-a-number"}}]')
 
 
 def _reads(led: Ledger) -> list[dict]:
@@ -238,6 +286,35 @@ def test_pre_created_artifact_id_is_used():
     assert not any("lineage_artifacts" in sql and "INSERT" in sql for sql, _ in conn.log)
 
 
+def test_build_survives_artifact_fail_open():
+    # I1: record_artifact is best-effort and may fail open to None (DB unreachable).
+    # The builder must then SKIP the lineage_tool_calls write entirely — inserting
+    # NULL into the NOT NULL artifact_id FK would re-raise and kill the build.
+    led = Ledger(ledger_path=tempfile.mktemp(suffix=".jsonl"))
+    conn = _ArtifactDownConn()
+    spec = asyncio.run(build_spec(
+        "top agencies by requests received", Frame(normalise_all()),
+        _tool_driver, led, conn))
+    assert spec["title"] == "Test"                 # the build completed
+    assert not conn.toolcall_attempted             # never wrote a NULL-artifact tool call
+    tc = [e for e in _reads(led) if e.get("event") == "tool_call"]
+    assert tc and tc[0]["tool"] == "query_dataset"  # the JSONL firehose still captured it
+    led.close()
+
+
+def test_tool_error_is_a_result_not_a_crash():
+    # M3: a known tool that RAISES on bad params (int() on a non-numeric top_n)
+    # must feed the exception back as a tool result, not propagate out of build_spec.
+    led = Ledger(ledger_path=tempfile.mktemp(suffix=".jsonl"))
+    spec = asyncio.run(build_spec(
+        "top agencies by requests received", Frame(normalise_all()),
+        _bad_params_driver, led, None))
+    assert spec["title"] == "Test"                 # the build kept going
+    tc = [e for e in _reads(led) if e.get("event") == "tool_call"]
+    assert tc and "error" in tc[0]["result"]       # the tool failure is a recorded result
+    led.close()
+
+
 # --- helper parsers ----------------------------------------------------------
 
 
@@ -286,6 +363,33 @@ def test_render_fails_loud_on_unknown_citation():
     with pytest.raises(SystemExit) as e:
         render_dashboard_page(spec, Frame(normalise_all()), 42, transcript)
     assert "FAIL LOUD" in str(e.value)
+
+
+def test_render_rejects_literal_digit_in_stat():
+    # M4: the model is forbidden from writing digits. A stat that is neither a
+    # STAT_KEY nor a {c:...} pointer is a hallucinated number — fail loud, never
+    # render it. ("q1" enum keys like requests_received_q1 stay allowed.)
+    spec = {"title": "Test", "panels": [{"figure": "bar", "stat": "12345"}]}
+    with pytest.raises(SystemExit) as e:
+        render_dashboard_page(spec, Frame(normalise_all()), 42, [])
+    assert "FAIL LOUD" in str(e.value)
+
+
+def test_render_rejects_literal_digit_in_figure():
+    spec = {"title": "Test", "panels": [{"figure": "99999"}]}
+    with pytest.raises(SystemExit) as e:
+        render_dashboard_page(spec, Frame(normalise_all()), 42, [])
+    assert "FAIL LOUD" in str(e.value)
+
+
+def test_render_allows_enum_keys_with_digits_and_citations():
+    # the M4 guard must not reject legitimate enum keys that contain digits
+    # (q1 stats, top20 figures) or citation pointers
+    spec = {"title": "Test", "panels": [
+        {"figure": "bar", "stat": "requests_received_q1"},
+        {"figure": "received_top20"}]}
+    page = render_dashboard_page(spec, Frame(normalise_all()), 42, [])
+    assert "12,359" in page           # golden requests_received_q1 renders, not rejected
 
 
 def test_render_does_not_mint_compare_period_zero_as_no_decisions():

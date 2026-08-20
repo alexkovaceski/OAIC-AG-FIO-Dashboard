@@ -13,9 +13,36 @@ frame, it does not copy transcript results into the page.
 from __future__ import annotations
 import html
 import json
+import re
 
 from stats.dsl import resolve_citations
 from stats.catalog import FIG_CAPTIONS, FIG_KEYS, STAT_KEYS, foi_stats
+
+# a panel's "figure" is either a FIG_KEYS source OR a chart type (presentation)
+_CHART_TYPES = ("bar", "hbar", "line", "area", "pie", "table", "kpi")
+# a full {c:job.turn.call.field} citation pointer (the sanctioned way to reference
+# a number — resolve_citations replaces it with the recorded value)
+_CIT_RE = re.compile(r"^\{c:[\w.\[\]]+\}$")
+
+
+def _check_no_hallucinated_number(p: dict) -> None:
+    """M4: the model is forbidden from writing digits. A panel's stat/figure must
+    be an enum key, a chart type (figure only), or a {c:...} citation pointer. A
+    value that is none of those (e.g. a literal "12345") is a hallucinated number
+    and FAILS LOUD — never rendered. Runs on the ORIGINAL spec so a citation
+    pointer is still recognisable (resolve_citations replaces it with a value)."""
+    stat = p.get("stat")
+    if stat is not None and stat not in STAT_KEYS \
+            and not (isinstance(stat, str) and _CIT_RE.match(stat)):
+        raise SystemExit(
+            f"FAIL LOUD: panel stat {stat!r} is not a STAT_KEY or {{c:...}} pointer "
+            "— the model invented a number (never write a digit)")
+    fig = p.get("figure")
+    if fig is not None and fig not in FIG_KEYS and fig not in _CHART_TYPES \
+            and not (isinstance(fig, str) and _CIT_RE.match(fig)):
+        raise SystemExit(
+            f"FAIL LOUD: panel figure {fig!r} is not a chart type, FIG_KEY or "
+            "{{c:...}} pointer — the model invented a number (never write a digit)")
 
 
 def _stat_key(p: dict) -> str | None:
@@ -57,6 +84,8 @@ def render_dashboard_page(spec, frame, artifact_id, transcript) -> str:
     Panel numbers are computed from the frame; basis labels ride beside them.
     artifact_id renders a lineage link when one exists.
     """
+    for p in spec.get("panels", []):
+        _check_no_hallucinated_number(p)
     s = resolve_citations(spec, transcript)
     panels = []
     for i, p in enumerate(s.get("panels", [])):

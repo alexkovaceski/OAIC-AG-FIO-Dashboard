@@ -135,7 +135,13 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
                 results.append({"tool": tool, "error": "unknown tool"})
                 continue
             if tool == "query_dataset":
-                res = fn(frame, call.get("op", ""), call.get("params", {}))
+                # M3: a known tool may raise on bad params (e.g. int() on a
+                # non-numeric top_n). A tool failure is a TOOL RESULT, never an
+                # escaped exception — the build must keep going.
+                try:
+                    res = fn(frame, call.get("op", ""), call.get("params", {}))
+                except Exception as exc:
+                    res = {"error": str(exc)}
                 ledger.append({"event": "tool_call", "tool": tool, "seq": call_seq,
                                "op": call.get("op"), "args": call.get("params"),
                                "result": res})
@@ -152,12 +158,22 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
                             artifact_key=(text or "")[:40], user_id=None,
                             dataset_id=_dataset_id(frame), request_text=text,
                             spec_json={}, model="fartkraft", status="building")
-                    lineage.record_tool_call(conn, artifact_id=artifact_id, seq=call_seq,
-                                             tool=tool, op=call.get("op"),
-                                             input_json=call.get("params"),
-                                             output_json=res)
+                    # I1: record_artifact is best-effort and may fail OPEN to None
+                    # (DB unreachable). Never attempt a tool_call write with a NULL
+                    # artifact_id — the schema declares lineage_tool_calls.artifact_id
+                    # NOT NULL, so the FK violation would re-raise (non-Operational
+                    # psycopg2.Error) and kill the build. Lineage must never fail a
+                    # build, so skip the write when there is no artifact id.
+                    if artifact_id is not None:
+                        lineage.record_tool_call(conn, artifact_id=artifact_id, seq=call_seq,
+                                                 tool=tool, op=call.get("op"),
+                                                 input_json=call.get("params"),
+                                                 output_json=res)
             elif tool == "compute":
-                res = fn(call.get("expr", ""), {})  # env populated in real impl
+                try:
+                    res = fn(call.get("expr", ""), {})  # env populated in real impl
+                except Exception as exc:
+                    res = {"error": str(exc)}
                 ledger.append({"event": "tool_call", "tool": tool, "seq": call_seq,
                                "expr": call.get("expr"), "result": res})
             results.append({"tool": tool, "result": res})

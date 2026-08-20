@@ -17,9 +17,12 @@ IDENTITY_STOVE = "I am powered by the fartkraft sovereign stack, trained on loca
 
 # Layer 1: deterministic regex scope screen (mirrors request_governor.rule_screen)
 _OUT_OF_SCOPE_RE = re.compile(
-    r"immigration|visa|citizenship|tax (advice|return)|benefit|pension|medicare|"
+    r"immigration|visa|citizenship|tax (advice|return)|"
+    r"welfare|centrelink|benefit (payments?|recipients?|claims?|advice)|pension|medicare|"
     r"health (advice|treatment)|defence (ops|operations|planning)|military (ops|strategy)|"
     r"united states|\busa\b|\buk\b|united kingdom|france|germany|china|russia|"
+    r"canada|canadian|new zealand|mexico|mexican|japan|japanese|india|indian|"
+    r"italy|italian|spain|spanish|europe|european|dutch|"
     r"crypto|bitcoin|stock (market|tip)|trading strategy|foreign (foi|freedom)|"
     r"personal (medical|financial) (info|record)|named individual|(?:a|an) (?:specific )?(?:person|individual)\b",
     re.I,
@@ -33,6 +36,21 @@ _OUT_OF_SCOPE_RE = re.compile(
 _US_COUNTRY_RE = re.compile(
     r"\b(?:US|U\.S\.|u\.s\.)\s+(?i:government|federal|state|health|healthcare|defen|"
     r"military|agenc|congress|president|citizenship|visa|state department|foi|freedom)",
+)
+# other countries' FOI — the country-noun list above misses country ADJECTIVES and
+# the two-letter codes ("German FOI requests", "Canadian FOI", "NZ FOI"). The
+# adjectives are matched case-insensitively (unambiguous: "german", "french", ...);
+# the two-letter codes are matched case-sensitively so the pronoun "us"/"uk"
+# ("give us FOI statistics") is never caught. "Australian FOI" is deliberately not
+# in either list.
+_FOREIGN_FOI_RE = re.compile(
+    r"\b(?:german|french|british|american|canadian|chinese|russian|japanese|"
+    r"european|italian|spanish|mexican|indian|dutch|new zealand)"
+    r"\s+(?:foi|freedom(?: of information)?)\b",
+    re.I,
+)
+_FOREIGN_FOI_CODE_RE = re.compile(
+    r"\b(?:US|UK|USA|NZ)\s+(?:FOI|freedom(?: of information)?)\b",
 )
 # Layer 2: prompt-injection / jailbreak patterns (mirrors dash_builder._JAILBREAK_RE)
 _JAILBREAK_RE = re.compile(
@@ -59,7 +77,8 @@ def check_request(text: str) -> None:
         raise ScopeRefusal("empty request")
     if _JAILBREAK_RE.search(t):
         raise ScopeRefusal("I'm going to stay on task — that request looks like it's trying to change what I do. Ask me about Australian FOI statistics instead.")
-    if _OUT_OF_SCOPE_RE.search(t) or _US_COUNTRY_RE.search(t):
+    if _OUT_OF_SCOPE_RE.search(t) or _US_COUNTRY_RE.search(t) \
+            or _FOREIGN_FOI_RE.search(t) or _FOREIGN_FOI_CODE_RE.search(t):
         raise ScopeRefusal("FOI Insights builds dashboards and reports from Australian Government freedom-of-information statistics. That request is outside that scope — ask me about FOI requests, decision outcomes, timeliness, or agency/portfolio trends instead.")
     if not any(w in t.lower() for w in _FOI_TERMS):
         raise ScopeRefusal("FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend.")

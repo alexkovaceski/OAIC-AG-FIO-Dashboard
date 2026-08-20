@@ -15,7 +15,10 @@ def test_out_of_scope_refused():
                 "named individual conduct", "tax advice for my return",
                 "defence operations planning", "stock market tip",
                 "u.s. federal agencies FOI", "US FOI requests",  # other country's FOI
-                "US congress records"]:
+                "US congress records",
+                "German FOI requests", "Canadian FOI", "NZ FOI",  # M2: foreign FOI adjectives/codes
+                "FOI requests in Canada",
+                "benefit payment rates", "welfare benefit claim"]:  # M1: welfare benefits
         try:
             check_request(bad)
             assert False, f"should refuse {bad}"
@@ -29,7 +32,8 @@ def test_in_scope_allowed():
                  "trend in timeliness of decision-making",
                  "requests received by agency over five years",
                  "show us the trend of requests received",  # pronoun "us" is not the US country code
-                 "FOI requests received by healthcare agencies"]:
+                 "FOI requests received by healthcare agencies",
+                 "what are the benefits of the FOI Act"]:  # M1: "benefits of" is not welfare
         check_request(good)  # must not raise
 
 
