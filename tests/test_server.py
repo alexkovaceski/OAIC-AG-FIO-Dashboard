@@ -341,6 +341,17 @@ def test_dashboard_route_degrades_when_db_down(monkeypatch):
     assert "Dashboard unavailable" in r.text
 
 
+def test_dashboard_route_degrades_on_synthetic_nonint_id(monkeypatch):
+    # N1: a non-numeric id (the local-<hex> synthetic id when /ask failed open)
+    # against a LIVE db must degrade, never 500 (the id = %s compare would raise
+    # psycopg2.DataError, not OperationalError).
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())  # a live conn
+    c = TestClient(create_app())
+    r = c.get("/dashboards/local-2c")
+    assert r.status_code == 200
+    assert "Dashboard unavailable" in r.text
+
+
 def test_complete_fn_falls_back_when_llm_unreachable(monkeypatch):
     # Task 9 load-bearing requirement: on ANY failure (endpoint down, timeout,
     # non-2xx, bad body) _complete_fn returns the deterministic canned spec so

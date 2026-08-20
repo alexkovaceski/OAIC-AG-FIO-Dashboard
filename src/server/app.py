@@ -198,6 +198,17 @@ def _load_dashboard(artifact_id, conn):
     """
     if conn is None:
         return None, []
+    # N1: the route passes the URL path segment as a string. A numeric string is
+    # a real artifact id; a non-numeric one (the local-<hex> synthetic id when
+    # /ask failed open) against a LIVE db would raise psycopg2.DataError
+    # (non-Operational) on the `id = %s` compare and 500. Normalize the id and
+    # degrade on anything non-numeric.
+    if isinstance(artifact_id, int):
+        pass
+    elif isinstance(artifact_id, str) and artifact_id.isdigit():
+        artifact_id = int(artifact_id)
+    else:
+        return None, []
     spec = None
     calls = []
     try:
