@@ -88,6 +88,41 @@ def record_artifact(conn, *, artifact_type, artifact_key, user_id, dataset_id,
         raise
 
 
+def update_artifact(conn, artifact_id, *, spec_json=None, status=None):
+    """Update a lineage_artifacts row (spec_json / status). No-op when nothing
+    to set. Best-effort, same split as record_artifact: OperationalError ->
+    swallowed (the build must never fail on an unreachable DB); any other
+    psycopg2.Error raises so a schema/programming error is not hidden."""
+    fields, values = [], []
+    if spec_json is not None:
+        fields.append("spec_json = %s")
+        values.append(json.dumps(spec_json))
+    if status is not None:
+        fields.append("status = %s")
+        values.append(status)
+    if not fields:
+        return
+    values.append(artifact_id)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE horizon.lineage_artifacts SET "
+                + ", ".join(fields) + " WHERE id = %s",
+                tuple(values))
+            conn.commit()
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    except psycopg2.Error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+
+
 def record_op(conn, *, artifact_id, dataset_id, kind, op, params, row_count, rows_hash, result_value):
     """Insert a lineage_ops row. Best-effort, same split as record_artifact."""
     try:
