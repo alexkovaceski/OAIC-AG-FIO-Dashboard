@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foi-insights"
+version = "0.1.0"
+description = "FOI Insights dashboard POC — OAIC FOI statistics, golden-benchmarked normalising ingest"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "openpyxl",
+    "psycopg2-binary",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+# src layout: modules are imported as top-level (`import config`) with src on
+# the path — see tests' sys.path.insert(0, "src") and scripts/ingest.py.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-q"
