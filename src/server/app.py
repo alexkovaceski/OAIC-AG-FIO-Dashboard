@@ -19,7 +19,8 @@ Lineage is best-effort by design (Task 4): a reachable Postgres records the
 artifact and tool-call transcript; an unreachable one degrades the /ask reply
 to a synthetic artifact id and the lineage page to an honest degraded render —
 the build must never fail on a down DB, but it must also never pretend it wrote
-something it did not.
+something it did not. /ask pre-runs check_request before any artifact row is
+created, so a scope refusal never leaves a stuck status="building" row.
 
 CPython 3.13 freezes the stdlib `site` module, so src/site cannot be imported
 as `site.*` without the shim. site_shim.install() MUST run before any
@@ -30,6 +31,8 @@ from __future__ import annotations
 
 import site_shim  # noqa: E402
 site_shim.install()  # noqa: E402
+
+import psycopg2  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
@@ -44,6 +47,7 @@ from storage.lineage import Ledger, record_artifact, update_artifact  # noqa: E4
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
 from agentic.builder import build_spec  # noqa: E402
+from agentic.guardrails import check_request, ScopeRefusal  # noqa: E402
 
 # The golden boot check runs once at import; the frame and pages are immutable
 # within a process, so they are cached at module scope rather than re-derived
@@ -51,6 +55,16 @@ from agentic.builder import build_spec  # noqa: E402
 # recomputes every figure from the frame — both are pure frame/disk -> HTML).
 _FRAME = None
 _PAGES = None
+# A module-scope ledger reused by every /ask: Ledger() opens a file handle, so
+# a per-request ledger would leak one FD per request (reviewer I4).
+_LEDGER = None
+
+
+def _get_ledger() -> Ledger:
+    global _LEDGER
+    if _LEDGER is None:
+        _LEDGER = Ledger()
+    return _LEDGER
 
 
 def _boot() -> tuple[Frame, dict[str, str]]:
@@ -101,45 +115,73 @@ def create_app():
 
     @app.post("/ask")
     async def ask(req: AskRequest):
-        # Task 6 carry-forward: the artifact row is PRE-CREATED (record_artifact
-        # returns its real id) and that id is passed into build_spec, so the
-        # builder's tool_calls key to THIS row — never to a second artifact.
-        # The artifact row (id, status="building") must exist before any tool call
-        # is recorded: lineage_tool_calls.artifact_id is a NOT NULL FK.
-        ledger = Ledger()
+        # I3: pre-run the scope guard BEFORE any artifact row is created, so a
+        # refusal never leaves a stuck status="building" row behind. build_spec
+        # runs it again for defence-in-depth; the route-level run is what
+        # guarantees no row exists for a refused request.
+        try:
+            check_request(req.request)
+        except ScopeRefusal as exc:
+            return {"error": str(exc), "artifact_id": None,
+                    "dashboard_url": None, "lineage_url": None}
+        ledger = _get_ledger()
+        # build_id is what build_spec receives; response_id is what the client
+        # gets. build_id is a real int only when a lineage_artifacts row truly
+        # exists (or None otherwise) — never a synthetic string.
+        build_id = None
+        response_id = f"local-{len((req.request or '').encode('utf-8')):x}"
         try:
             conn = get_conn()
             ensure_schema(conn)
-        except RuntimeError:
-            # fail-open: an unreachable DB must not kill /ask. No artifact row
-            # exists, so the builder gets artifact_id=None (it then skips tool
-            # calls — never writes NULL into the NOT NULL FK) and we synthesize
-            # a deterministic id so the client still gets a stable lineage URL.
+        except (RuntimeError, psycopg2.OperationalError):
+            # I2: fail-open — an unreachable DB (connect or schema) must not
+            # kill /ask. No artifact row exists, so the builder gets
+            # conn=None + build_id=None (its None-path skips tool-call writes,
+            # never NULLing the NOT NULL FK) and the client gets a deterministic
+            # synthetic id so the lineage URL stays stable.
             conn = None
-            artifact_id = f"local-{len((req.request or '').encode('utf-8')):x}"
         else:
-            artifact_id = record_artifact(
+            # Task 6 carry-forward: the artifact row is PRE-CREATED
+            # (record_artifact returns its real id) and that id is passed into
+            # build_spec, so the builder's tool_calls key to THIS row — never to
+            # a second artifact. The row (id, status="building") must exist
+            # before any tool call is recorded: lineage_tool_calls.artifact_id
+            # is a NOT NULL FK.
+            build_id = record_artifact(
                 conn, artifact_type="builder_request",
                 artifact_key=(req.request or "")[:40], user_id=None,
                 dataset_id=1, request_text=req.request, spec_json={},
                 model="fartkraft", status="building")
-            if artifact_id is None:
-                # the artifact INSERT itself failed open to None (I1) — keep the
-                # build going, but the lineage page can only be the degraded one.
-                artifact_id = f"local-{len((req.request or '').encode('utf-8')):x}"
+            if build_id is None:
+                # I1: the artifact INSERT failed open to None even though the
+                # conn is live. No real row exists — drop the conn and give the
+                # builder the None-path. Never hand build_spec a synthetic
+                # string as a real artifact_id with a live conn: a recovered DB
+                # would make the builder's record_tool_call hit "invalid input
+                # syntax for type integer" (a non-Operational psycopg2.Error)
+                # and re-raise, aborting the build.
+                conn = None
+            response_id = (build_id if build_id is not None
+                           else f"local-{len((req.request or '').encode('utf-8')):x}")
         try:
             spec = await build_spec(
                 req.request, frame, _complete_fn, ledger, conn,
-                max_turns=6, artifact_id=artifact_id)
+                max_turns=6, artifact_id=build_id)
         except Exception as exc:
-            return {"error": str(exc), "artifact_id": artifact_id,
+            # a genuine build error (not a refusal — those were screened above):
+            # flip any real row to status="error" so it is not stuck "building"
+            if conn is not None and isinstance(build_id, int):
+                try:
+                    update_artifact(conn, build_id, status="error")
+                except Exception:
+                    pass  # best-effort: the error response always wins
+            return {"error": str(exc), "artifact_id": response_id,
                     "dashboard_url": None, "lineage_url": None}
-        if conn is not None and isinstance(artifact_id, int):
-            update_artifact(conn, artifact_id,
-                            spec_json=spec, status="ready")
-        return {"artifact_id": artifact_id,
+        if conn is not None and isinstance(build_id, int):
+            update_artifact(conn, build_id, spec_json=spec, status="ready")
+        return {"artifact_id": response_id,
                 "dashboard_url": "/at-a-glance.html",
-                "lineage_url": f"/lineage/{artifact_id}"}
+                "lineage_url": f"/lineage/{response_id}"}
 
     @app.get("/lineage/{artifact_id}")
     def lineage(artifact_id: str):

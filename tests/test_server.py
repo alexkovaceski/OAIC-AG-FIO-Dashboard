@@ -8,9 +8,12 @@ integrity gate is wrong.
 """
 import sys
 
+import pytest
+
 sys.path.insert(0, "src")
 from fastapi.testclient import TestClient
 from server.app import create_app
+import server.app as app_mod
 
 
 def test_health():
@@ -52,3 +55,60 @@ def test_unknown_page_is_404():
     c = TestClient(create_app())
     r = c.get("/not-a-real-page.html")
     assert r.status_code == 404
+
+
+def test_ask_record_artifact_fails_open_passes_none_not_string(monkeypatch):
+    # Reviewer I1: record_artifact fails open to None even though the conn is
+    # live. The route must NOT hand build_spec a synthetic string as a real
+    # artifact_id (a recovered DB would make record_tool_call raise a
+    # non-Operational "invalid input syntax for integer" error and abort the
+    # build). It drops the conn and passes artifact_id=None instead.
+    captured = {}
+
+    async def fake_build_spec(text, frame, complete_fn, ledger, conn,
+                              max_turns=6, artifact_id=None):
+        captured["conn"] = conn
+        captured["artifact_id"] = artifact_id
+        return {"title": "FOI request summary", "panels": []}
+
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())
+    monkeypatch.setattr(app_mod, "ensure_schema", lambda conn: None)
+    monkeypatch.setattr(app_mod, "record_artifact", lambda *a, **k: None)
+    monkeypatch.setattr(app_mod, "build_spec", fake_build_spec)
+    c = TestClient(create_app())
+    r = c.post("/ask", json={"request": "show me requests received by agency"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["artifact_id"].startswith("local-")
+    assert captured["artifact_id"] is None  # never a string id into the builder
+    assert captured["conn"] is None         # conn dropped with it (None-path)
+
+
+def test_ask_scope_refusal_rejected_before_artifact(monkeypatch):
+    # Reviewer I3: a refused request is screened BEFORE any artifact row is
+    # created, so no stuck status="building" row is left behind.
+    calls = []
+    monkeypatch.setattr(
+        app_mod, "record_artifact", lambda *a, **k: calls.append(1) or 42)
+    c = TestClient(create_app())
+    r = c.post("/ask", json={"request": "crypto trading strategy"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"]
+    assert body["artifact_id"] is None
+    assert calls == []  # no artifact row was created for a refusal
+
+
+def test_golden_gate_aborts_on_bad_data(monkeypatch):
+    # Reviewer (c): the boot data-integrity gate must abort loudly (SystemExit)
+    # when the normaliser emits data that fails the golden check — the app must
+    # never serve wrong data. Reset the module cache and patch normalise_all to
+    # produce a frame that cannot pass golden_check.
+    saved_frame, saved_pages = app_mod._FRAME, app_mod._PAGES
+    app_mod._FRAME, app_mod._PAGES = None, None
+    try:
+        monkeypatch.setattr(app_mod, "normalise_all", lambda: [])
+        with pytest.raises(SystemExit):
+            app_mod.create_app()
+    finally:
+        app_mod._FRAME, app_mod._PAGES = saved_frame, saved_pages
