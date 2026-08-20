@@ -1,30 +1,47 @@
-"""templates — shared OAIC-styled page chrome (nav, breadcrumb, footer).
+"""templates — shared OAIC-styled page chrome (header nav, sidenav, footer).
 
-The chrome mirrors the OAIC site: masthead, top-level nav (Privacy / FOI /
-Consumer Data Right / Digital ID / Engage with us / About), a breadcrumb, and a
-footer with the Acknowledgement of Country. The identity stovepipe
-(fartkraft sovereign stack) rides in the footer on every page so it is never
-out of sight, exactly as the Task 6 guardrail carries it on the chat path.
+The chrome adopts the OAIC identity: a dark navy masthead with the top-level
+OAIC nav (Privacy / FOI / Consumer Data Right / Digital ID / Engage with us /
+About — links OUT to the live OAIC site), a breadcrumb, a two-column layout of
+sidenav + main, and a footer with the Acknowledgement of Country, ©
+Commonwealth of Australia, legal links, and the identity stovepipe
+(fartkraft sovereign stack). The stovepipe rides in the footer on every page so
+it is never out of sight, exactly as the Task 6 guardrail carries it on the
+chat path.
 """
 from __future__ import annotations
 import html
 
-# top-level nav mirroring the OAIC site; the FOI section carries the POC pages.
-# Entries are (label, href); those with a submenu list the POC pages it contains
-# (the submenu itself is rendered as the breadcrumb context, not a fly-out).
+# top-level OAIC nav; the FOI section carries the POC pages. Entries are
+# (label, href); those with a submenu list the POC pages it contains (the
+# submenu itself is rendered as the breadcrumb context, not a fly-out). The
+# links point OUT to the live OAIC site; the FOI section is where the POC sits.
 NAV = [
-    ("Privacy", "#"),
-    ("Freedom of information", "/", [
+    ("Privacy", "https://www.oaic.gov.au/privacy"),
+    ("Freedom of information", "https://www.oaic.gov.au/freedom-of-information", [
         ("Australian Government FOI statistics", "/"),
-        ("Requests received", "/requests-received.html"),
-        ("Decision outcomes", "/decision-outcomes.html"),
-        ("Timeliness", "/timeliness.html"),
-        ("API access", "/api.html"),
     ]),
-    ("Consumer Data Right", "#"),
-    ("Digital ID", "#"),
-    ("Engage with us", "#"),
-    ("About the OAIC", "#"),
+    ("Consumer Data Right", "https://www.oaic.gov.au/consumer-data-right"),
+    ("Digital ID", "https://www.oaic.gov.au/digital-id"),
+    ("Engage with us", "https://www.oaic.gov.au/engage-with-us"),
+    ("About the OAIC", "https://www.oaic.gov.au/about-the-oaic"),
+]
+
+# left portal nav groups: (group_label, [(page_key, label)])
+SIDENAV_GROUPS = [
+    ("Overview", [("at-a-glance", "FOI at a glance")]),
+    ("Requests", [("requests-received", "Requests received"),
+                  ("key-agency-contributions-received", "Key agency contributions"),
+                  ("requests-finalised", "Requests finalised")]),
+    ("Decisions", [("requests-decided", "Requests decided"),
+                   ("key-agency-contributions-decided", "Key agency contributions"),
+                   ("decision-outcomes", "Decision outcomes"),
+                   ("change-decision-outcomes", "Change in decision outcomes")]),
+    ("Timeliness", [("timeliness", "Timeliness"),
+                    ("change-timeliness", "Change in timeliness")]),
+    ("Reference", [("data-notes", "Data notes"),
+                   ("how-to-use", "How to use"),
+                   ("api", "API access")]),
 ]
 
 # every page points back to the FOI section; the POC pages live under it
@@ -41,7 +58,8 @@ def _flat_nav():
 
 
 def nav_html(active_nav: str | None = None) -> str:
-    """Top-level nav row. `active_nav` marks the current section as active."""
+    """Top-level OAIC nav row. `active_nav` marks the current section as active
+    (the gold accent)."""
     links = []
     for t, href in _flat_nav():
         cls = 'nav-link active' if t == active_nav else 'nav-link'
@@ -49,8 +67,21 @@ def nav_html(active_nav: str | None = None) -> str:
     return "\n".join(links)
 
 
-def chrome(title: str, active_nav: str | None = None, body_html: str = "") -> str:
-    """The OAIC-styled shell: masthead + nav, breadcrumb, body, footer.
+def sidenav_html(page_key: str) -> str:
+    out = ['<nav class="sidenav" aria-label="FOI statistics">']
+    for group, items in SIDENAV_GROUPS:
+        out.append(f'<div class="group">{html.escape(group)}</div>')
+        for key, label in items:
+            cls = "navbtn active" if key == page_key else "navbtn"
+            out.append(f'<a class="{cls}" href="/{key}.html">{html.escape(label)}</a>')
+    out.append("</nav>")
+    return "\n".join(out)
+
+
+def chrome(title: str, active_nav: str | None = None, body_html: str = "",
+           page_key: str | None = None) -> str:
+    """The OAIC-styled shell: dark masthead + top nav, breadcrumb, a two-column
+    layout of sidenav + main, and the footer.
 
     Returns a complete, self-contained HTML document. Every page carries the
     identity stovepipe in the footer (never out of sight).
@@ -69,14 +100,18 @@ def chrome(title: str, active_nav: str | None = None, body_html: str = "") -> st
 <link rel="stylesheet" href="/assets/site.css">
 </head>
 <body>
-<header class="masthead">
+<header class="site-header">
   <div class="logo"><a href="/">OAIC <span class="logo-rule">·</span> FOI Insights</a></div>
   <nav class="topnav">{nav_html(active_nav)}</nav>
 </header>
 <div class="breadcrumb">{BREADCRUMB}</div>
-<main>{body_html}</main>
+<div class="layout">
+  {sidenav_html(page_key)}
+  <main>{body_html}</main>
+</div>
 <footer class="sitefoot">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
+  <div class="legal">© Commonwealth of Australia <span class="sep">·</span> <a href="https://www.oaic.gov.au/privacy">Privacy</a> <span class="sep">·</span> <a href="https://www.oaic.gov.au/freedom-of-information">FOI</a></div>
   <div class="stack">FOI Insights — fartkraft sovereign stack · data from data.gov.au (OAIC FOI statistics)</div>
 </footer>
 </body>

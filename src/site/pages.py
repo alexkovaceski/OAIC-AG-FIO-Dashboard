@@ -223,7 +223,8 @@ def _page_at_a_glance(frame) -> str:
     <p class="basis">basis: financial year</p>
     {_chart(g('requests_received_trend')['value'])}</section>
     {_lineage_panel("at-a-glance")}"""
-    return chrome("FOI at a glance", "Freedom of information", body)
+    return chrome("FOI at a glance", "Freedom of information", body,
+                  page_key="at-a-glance")
 
 
 def _page_requests_received(frame) -> str:
@@ -235,7 +236,8 @@ def _page_requests_received(frame) -> str:
     {_kpis(frame, ["requests_received_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig)}
     {_lineage_panel("requests-received")}"""
-    return chrome("Requests received", "Freedom of information", body)
+    return chrome("Requests received", "Freedom of information", body,
+                  page_key="requests-received")
 
 
 def _page_key_agency_contributions_received(frame) -> str:
@@ -247,7 +249,8 @@ def _page_key_agency_contributions_received(frame) -> str:
     {_top20_section(FIG_CAPTIONS["received_top20"], fig)}
     {_lineage_panel("key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
-                  "Freedom of information", body)
+                  "Freedom of information", body,
+                  page_key="key-agency-contributions-received")
 
 
 def _page_requests_finalised(frame) -> str:
@@ -259,7 +262,8 @@ def _page_requests_finalised(frame) -> str:
     {_kpis(frame, ["requests_finalised_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig)}
     {_lineage_panel("requests-finalised")}"""
-    return chrome("Requests finalised", "Freedom of information", body)
+    return chrome("Requests finalised", "Freedom of information", body,
+                  page_key="requests-finalised")
 
 
 def _page_requests_decided(frame) -> str:
@@ -272,7 +276,8 @@ def _page_requests_decided(frame) -> str:
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig)}
     {_lineage_panel("requests-decided")}"""
-    return chrome("Requests decided", "Freedom of information", body)
+    return chrome("Requests decided", "Freedom of information", body,
+                  page_key="requests-decided")
 
 
 def _page_key_agency_contributions_decided(frame) -> str:
@@ -285,7 +290,8 @@ def _page_key_agency_contributions_decided(frame) -> str:
     {_top20_section(FIG_CAPTIONS["decided_top20"], fig)}
     {_lineage_panel("key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",
-                  "Freedom of information", body)
+                  "Freedom of information", body,
+                  page_key="key-agency-contributions-decided")
 
 
 def _page_decision_outcomes(frame) -> str:
@@ -300,7 +306,8 @@ def _page_decision_outcomes(frame) -> str:
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig)}
     {_lineage_panel("decision-outcomes")}"""
-    return chrome("Decision outcomes", "Freedom of information", body)
+    return chrome("Decision outcomes", "Freedom of information", body,
+                  page_key="decision-outcomes")
 
 
 def _page_change_decision_outcomes(frame) -> str:
@@ -311,7 +318,8 @@ def _page_change_decision_outcomes(frame) -> str:
     in part, by financial year.</p>
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig)}
     {_lineage_panel("change-decision-outcomes")}"""
-    return chrome("Change in decision outcomes", "Freedom of information", body)
+    return chrome("Change in decision outcomes", "Freedom of information", body,
+                  page_key="change-decision-outcomes")
 
 
 def _page_timeliness(frame) -> str:
@@ -324,7 +332,8 @@ def _page_timeliness(frame) -> str:
     {_kpis(frame, ["within_statutory_pct_q1"])}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig)}
     {_lineage_panel("timeliness")}"""
-    return chrome("Timeliness", "Freedom of information", body)
+    return chrome("Timeliness", "Freedom of information", body,
+                  page_key="timeliness")
 
 
 def _page_change_timeliness(frame) -> str:
@@ -335,7 +344,8 @@ def _page_change_timeliness(frame) -> str:
     time period, by financial year.</p>
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig)}
     {_lineage_panel("change-timeliness")}"""
-    return chrome("Change in timeliness", "Freedom of information", body)
+    return chrome("Change in timeliness", "Freedom of information", body,
+                  page_key="change-timeliness")
 
 
 def _page_data_notes() -> str:
@@ -348,7 +358,8 @@ def _page_data_notes() -> str:
                  "The data notes document is missing from the corpus.")
     body = ("<h1>Data notes and disclaimer</h1>"
             f'<div class="notes">{_md(notes)}</div>')
-    return chrome("Data notes and disclaimer", "Freedom of information", body)
+    return chrome("Data notes and disclaimer", "Freedom of information", body,
+                  page_key="data-notes")
 
 
 def _page_how_to_use() -> str:
@@ -380,7 +391,8 @@ def _page_how_to_use() -> str:
     <p>The <a href="/data-notes.html">Data notes and disclaimer</a> page carries
     the OAIC's definitional notes verbatim.</p>
     """
-    return chrome("How to use", "Freedom of information", body)
+    return chrome("How to use", "Freedom of information", body,
+                  page_key="how-to-use")
 
 
 def _page_api() -> str:
@@ -430,7 +442,8 @@ curl https://foi.axoquant.com/api/</code></pre>
     and report has a <a href="/lineage/local-1">lineage page</a> — the
     explainability trail is part of the demo.</p>
     """
-    return chrome("API access", "Freedom of information", body)
+    return chrome("API access", "Freedom of information", body,
+                  page_key="api")
 
 
 def _md(text: str) -> str:
