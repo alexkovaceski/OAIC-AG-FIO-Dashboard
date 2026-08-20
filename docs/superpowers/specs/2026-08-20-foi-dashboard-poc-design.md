@@ -1,8 +1,10 @@
 # Design — OAIC FOI statistics dashboard POC
 
 **Date:** 2026-08-20
-**Status:** Agreed design (awaiting implementation plan)
+**Status:** Agreed design (implementing)
 **Owner:** Alex
+**Demo name:** FOI Insights
+**Public hostname:** `foi.fartkraft.ai`
 
 ## 1. Purpose
 
@@ -355,8 +357,8 @@ stored value.
 ### 7.3 Deploy
 
 - idc-1 origin (FastAPI chat-proxy), Cloudflare tunnel + Worker, no auth.
-- Public hostname: `*.fartkraft.ai` (e.g. `xxx.fartkraft.ai`), resolving to the
-  Worker → tunnel → idc-1 origin.
+- Public hostname: `foi.fartkraft.ai` (demo name "FOI Insights"), resolving to
+  the Worker → tunnel → idc-1 origin.
 - Static 12 pages file-based → render with the chat/LLM path down.
 - As-at-18-May-2026 snapshot baked in → no live data.gov.au fetch on demo day.
 - Lineage tables additive to the idempotent `migrate.sql` (~60 lines).
