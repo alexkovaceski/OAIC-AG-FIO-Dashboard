@@ -407,13 +407,13 @@ def _page_api() -> str:
     </table>
     <h2>Examples</h2>
     <pre><code># all figures (with basis)
-curl https://foi.fartkraft.ai/api/figures
+curl https://foi.axoquant.com/api/figures
 
 # facts for a single measure
-curl "https://foi.fartkraft.ai/api/facts?measure=received&fy=2024-25&bucket=total"
+curl "https://foi.axoquant.com/api/facts?measure=received&fy=2024-25&bucket=total"
 
 # dataset info
-curl https://foi.fartkraft.ai/api/</code></pre>
+curl https://foi.axoquant.com/api/</code></pre>
     <h2>Throttling</h2>
     <p>The API is rate-limited per client IP (a fixed window) so a public,
     unauthenticated demo isn't overloaded. A <code>429</code> response carries a
