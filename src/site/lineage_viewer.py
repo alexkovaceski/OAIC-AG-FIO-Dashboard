@@ -14,6 +14,8 @@ from __future__ import annotations
 import html
 import json
 
+import psycopg2
+
 from site.templates import chrome
 
 
@@ -41,8 +43,10 @@ def _load_artifact(artifact_id, conn):
                 "user_id": row[2], "dataset_id": row[3],
                 "request_text": row[4], "spec_json": row[5],
                 "model": row[6], "status": row[7]}
-    except Exception:
-        return None  # best-effort: a lineage read must never crash a page
+    except psycopg2.OperationalError:
+        return None  # fail-open: an unreachable DB must not crash a page
+    except psycopg2.Error:
+        raise        # fail-loud: a schema/programming error must surface
 
 
 def _load_dataset(dataset_id, conn):
@@ -60,8 +64,10 @@ def _load_dataset(dataset_id, conn):
         return {"period_label": row[0], "window_mode": row[1],
                 "source_files": row[2], "normaliser_ver": row[3],
                 "canonical_hash": row[4], "fact_count": row[5]}
-    except Exception:
-        return None
+    except psycopg2.OperationalError:
+        return None  # fail-open: an unreachable DB must not crash a page
+    except psycopg2.Error:
+        raise        # fail-loud: a schema/programming error must surface
 
 
 def _load_ops(artifact_id, conn):
@@ -77,8 +83,10 @@ def _load_ops(artifact_id, conn):
         return [{"id": r[0], "kind": r[1], "op": r[2], "params": r[3],
                  "row_count": r[4], "rows_hash": r[5], "result_value": r[6]}
                 for r in rows]
-    except Exception:
-        return None
+    except psycopg2.OperationalError:
+        return None  # fail-open: an unreachable DB must not crash a page
+    except psycopg2.Error:
+        raise        # fail-loud: a schema/programming error must surface
 
 
 def _load_tool_calls(artifact_id, conn):
@@ -93,8 +101,10 @@ def _load_tool_calls(artifact_id, conn):
             rows = cur.fetchall()
         return [{"seq": r[0], "tool": r[1], "op": r[2],
                  "input_json": r[3], "output_json": r[4]} for r in rows]
-    except Exception:
-        return None
+    except psycopg2.OperationalError:
+        return None  # fail-open: an unreachable DB must not crash a page
+    except psycopg2.Error:
+        raise        # fail-loud: a schema/programming error must surface
 
 
 def _pre(obj) -> str:
@@ -155,7 +165,8 @@ def render_lineage_page(artifact_id, conn=None, *, data=None) -> str:
                 srcs = json.loads(srcs)
             except Exception:
                 srcs = [srcs]
-        src_lines = "\n".join(f"- {s}" for s in srcs)
+        src_lines = "\n".join(
+            f"- {html.escape(str(s))}" for s in srcs)
         snapshot = (f'<pre id="snapshot">period_label: {html.escape(str(dataset.get("period_label", "")))}\n'
                     f'window_mode: {html.escape(str(dataset.get("window_mode", "")))}\n'
                     f'normaliser_ver: {html.escape(str(dataset.get("normaliser_ver", "")))}\n'

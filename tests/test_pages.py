@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, "src")
 from ingest.normalise import normalise_all
 from storage.frame import Frame
-from site.pages import render_all_pages
+from site.pages import _bar, _md, render_all_pages
 from site.lineage_viewer import render_lineage_page
 
 PAGE_KEYS = [
@@ -117,3 +117,44 @@ def test_lineage_viewer_degrades_without_db_and_data():
     assert "<!doctype html>" in html.lower()
     assert "fartkraft" in html.lower()
     assert "unavailable" in html.lower()
+
+
+# --- review-fix regressions: XSS escaping, _bar aria-label, _md lists/emphasis
+
+
+def test_lineage_title_escapes_xss():
+    # Task 8 routes /lineage/{artifact_id} from the URL; an unescaped path
+    # segment must not become reflected XSS in <title> (the body <h1> escapes,
+    # the title must too)
+    html = render_lineage_page("<script>alert(1)</script>", None)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<title>Lineage — &lt;script&gt;alert(1)&lt;/script&gt;</title>" in html
+
+
+def test_bar_aria_label_escapes_category():
+    # the aria-label must escape cat exactly like the sibling title attribute
+    html = _bar('<img src=x onerror=alert(1)>', "name", 100, "#2a78d6", 0, 100)
+    assert 'aria-label="&lt;img src=x onerror=alert(1)&gt;: 100"' in html
+    assert 'aria-label="<img src=x onerror=alert(1)>: 100"' not in html
+
+
+def test_md_renders_bullet_list_as_ul():
+    # a "- " bullet block renders as <ul><li>, with wrapped continuation lines
+    # joined into the item, and *emphasis* as <em>
+    html = _md("- first item\n- second *emphasised* item\n  wrapped continuation")
+    assert "<ul>" in html
+    assert "<li>first item</li>" in html
+    assert ("<li>second <em>emphasised</em> item wrapped continuation</li>"
+            in html)
+    # no run-on <p> carrying literal "- " prefixes
+    assert "- first item" not in html
+
+
+def test_data_notes_renders_bullets_and_emphasis():
+    # the corpus data-notes.md list and FOI Act emphasis render as real markup
+    html = _pages()["data-notes"]
+    assert "<em>Freedom of Information Act 1982</em>" in html
+    assert "*Freedom of Information Act 1982*" not in html
+    assert "<ul>" in html
+    assert "- the number of Freedom" not in html

@@ -7,6 +7,7 @@ footer with the Acknowledgement of Country. The identity stovepipe
 out of sight, exactly as the Task 6 guardrail carries it on the chat path.
 """
 from __future__ import annotations
+import html
 
 # top-level nav mirroring the OAIC site; the FOI section carries the POC pages.
 # Entries are (label, href); those with a submenu list the POC pages it contains
@@ -52,7 +53,12 @@ def chrome(title: str, active_nav: str | None = None, body_html: str = "") -> st
 
     Returns a complete, self-contained HTML document. Every page carries the
     identity stovepipe in the footer (never out of sight).
+
+    The title is escaped here (not at call sites) so any caller-supplied
+    string — e.g. the URL-routed artifact_id on the lineage page — can never
+    become reflected XSS in <title>.
     """
+    title = html.escape(title)
     return f"""<!doctype html>
 <html lang="en">
 <head>

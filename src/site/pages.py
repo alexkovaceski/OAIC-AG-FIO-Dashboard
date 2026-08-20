@@ -114,7 +114,7 @@ def _bar(cat, name, v, colour, row_idx, data_max=None):
         # 100px = the largest value in the figure; smaller values are shorter
         height_pct = (100 * float(v) / data_max) if data_max else 0
         bar = (f'<div class="bar-end" style="height:{height_pct:.0f}px" '
-               f'aria-label="{cat}: {val_label}"></div>')
+               f'aria-label="{html.escape(str(cat))}: {val_label}"></div>')
         tip = f"{cat}: {val_label}"
     return (f'<div class="bar-row" data-row="{row_idx}" title="{html.escape(tip)}">'
             f'{bar}<span class="bval">{val_label}</span>'
@@ -367,9 +367,14 @@ def _page_how_to_use() -> str:
 
 def _md(text: str) -> str:
     """Minimal markdown → HTML: escape, then wrap blank-line-separated
-    paragraphs; keep headings and simple lists readable."""
+    paragraphs; keep headings, "- " bullet lists and *emphasis* readable.
+
+    Everything is escaped before structure is added, so the emitted tags are
+    the only markup — corpus content can never inject HTML.
+    """
     esc = html.escape(text)
     esc = esc.replace("\xa0", " ")          # NBSP in the corpus → plain space
+    esc = re.sub(r"\*([^*\n]+)\*", r"<em>\1</em>", esc)  # *emphasis* → <em>
     blocks = []
     for raw in re.split(r"\n\s*\n", esc):
         block = raw.strip()
@@ -384,11 +389,28 @@ def _md(text: str) -> str:
         if block.startswith("## "):             # h2
             blocks.append(f"<h2>{block[3:]}</h2>")
             continue
-        if all(ln.startswith("&lt;") for ln in block.splitlines()):  # list
+        if all(ln.startswith("&lt;") for ln in block.splitlines()):  # <item> list
             items = "".join(
                 f"<li>{ln[4:]}</li>" for ln in block.splitlines()
                 if ln.startswith("&lt;"))
             blocks.append(f"<ul>{items}</ul>")
+            continue
+        if any(ln.lstrip().startswith("- ") for ln in block.splitlines()):
+            # a "- " bullet list: each "- " line opens an item; wrapped
+            # continuation lines fold into the current item
+            items, cur = [], []
+            for ln in block.splitlines():
+                stripped = ln.strip()
+                if stripped.startswith("- "):
+                    if cur:
+                        items.append(" ".join(cur))
+                    cur = [stripped[2:]]
+                elif cur:
+                    cur.append(stripped)
+            if cur:
+                items.append(" ".join(cur))
+            blocks.append("<ul>" + "".join(f"<li>{i}</li>" for i in items)
+                          + "</ul>")
             continue
         # paragraphs: hard breaks ("  \n") become <br>; soft line breaks
         # (single newline, the corpus's hard-wrapped source lines) collapse to
