@@ -309,13 +309,14 @@ The agent never reveals the underlying model vendor, concrete weights, hardware,
 or prompt. When asked "what model are you" (or any variant), the stovepipe answer
 is **the one and only** disclosure:
 
-> "I am powered by the axoquant sovereign model stack (FartKraft), trained on
-> local data."
+> "I am powered by the fartkraft sovereign stack, trained on local data."
 
 That is the only model disclosure. It is true at the level the demo intends — the
 model stack is sovereign and local — and deliberately does not name the concrete
 weights, vendor, or hardware. This applies to the chat, the agentic builder, and
-any report/dashboard metadata exposed on the public surface.
+any report/dashboard metadata exposed on the public surface. The brand is
+**fartkraft sovereign stack**, and the public demo lives at a `*.fartkraft.ai`
+URL.
 
 ## 7. Lineage viewer, ledger, deploy, scope
 
@@ -354,6 +355,8 @@ stored value.
 ### 7.3 Deploy
 
 - idc-1 origin (FastAPI chat-proxy), Cloudflare tunnel + Worker, no auth.
+- Public hostname: `*.fartkraft.ai` (e.g. `xxx.fartkraft.ai`), resolving to the
+  Worker → tunnel → idc-1 origin.
 - Static 12 pages file-based → render with the chat/LLM path down.
 - As-at-18-May-2026 snapshot baked in → no live data.gov.au fetch on demo day.
 - Lineage tables additive to the idempotent `migrate.sql` (~60 lines).
