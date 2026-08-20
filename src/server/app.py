@@ -7,13 +7,16 @@ Routes:
   GET  /assets/{file}             static assets (site.css, ...)
   POST /ask                       {request} -> {artifact_id, dashboard_url, lineage_url}
   GET  /lineage/{artifact_id}     lineage explainability page
+  GET  /dashboards/{artifact_id}  the built dashboard page (rendered from spec_json + transcript)
 
 Boot gate: create_app() builds the frame from normalise_all() and runs
 frame.golden_check() — the data-integrity gate. A mismatch aborts loudly
 (SystemExit) so the app never serves wrong data. The frame and the rendered
 pages are built once and cached at module scope: re-normalising 7 xlsx files
 per request would make every page load spend ~1.5s on IO the data cannot change
-within a process.
+within a process. The boot also seeds the durable Postgres facts once
+(storage.facts.ingest_facts, idempotent on canonical_hash) so foi_datasets holds
+the snapshot that /ask's artifact rows reference by FK.
 
 Lineage is best-effort by design (Task 4): a reachable Postgres records the
 artifact and tool-call transcript; an unreachable one degrades the /ask reply
@@ -32,6 +35,8 @@ from __future__ import annotations
 import site_shim  # noqa: E402
 site_shim.install()  # noqa: E402
 
+import html  # noqa: E402
+import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 
@@ -51,11 +56,15 @@ from config import STATIC_DIR  # noqa: E402
 from ingest.normalise import normalise_all  # noqa: E402
 from storage.frame import Frame  # noqa: E402
 from storage.db import get_conn, ensure_schema  # noqa: E402
-from storage.lineage import Ledger, record_artifact, update_artifact  # noqa: E402
+from storage.facts import ingest_facts  # noqa: E402
+from storage.lineage import Ledger, record_artifact, record_op, update_artifact  # noqa: E402
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
+from site.templates import chrome  # noqa: E402
 from agentic.builder import build_spec  # noqa: E402
 from agentic.guardrails import check_request, ScopeRefusal  # noqa: E402
+from agentic.render import _stat_key, render_dashboard_page  # noqa: E402
+from stats.catalog import foi_stats  # noqa: E402
 
 # The golden boot check runs once at import; the frame and pages are immutable
 # within a process, so they are cached at module scope rather than re-derived
@@ -63,6 +72,9 @@ from agentic.guardrails import check_request, ScopeRefusal  # noqa: E402
 # recomputes every figure from the frame — both are pure frame/disk -> HTML).
 _FRAME = None
 _PAGES = None
+# I2/C1: the foi_datasets id captured by the boot facts seed. record_artifact's
+# NOT NULL FK references this row, so it is resolved here (never a hardcoded 1).
+_DATASET_ID = None
 # A module-scope ledger reused by every /ask: Ledger() opens a file handle, so
 # a per-request ledger would leak one FD per request (reviewer I4).
 _LEDGER = None
@@ -81,15 +93,158 @@ def _boot() -> tuple[Frame, dict[str, str]]:
     The golden check is the hard gate: a mismatch means the normaliser or the
     source data has drifted from the published Q1 2025-26 figures — the app must
     not serve wrong data, so it aborts loudly (SystemExit) instead of degrading.
+    Once the frame passes, the durable Postgres facts are seeded (I2/C1).
     """
     global _FRAME, _PAGES
     if _FRAME is None:
         frame = Frame(normalise_all())
         frame.golden_check()
         _FRAME = frame
+        _seed_facts(frame)  # I2/C1: seed the durable facts once at boot
     if _PAGES is None:
         _PAGES = render_all_pages(_FRAME)
     return _FRAME, _PAGES
+
+
+def _seed_facts(frame) -> None:
+    """Seed the durable Postgres facts (foi_datasets + foi_facts) once at boot.
+
+    I2/C1: ingest_facts materialises the durable data spine and captures the
+    real dataset_id that record_artifact's NOT NULL FK references — no more
+    hardcoded 1, and no ForeignKeyViolation 500 against a live-but-unseeded
+    Postgres. Idempotent on canonical_hash, so a re-boot over the same facts is
+    a no-op.
+
+    The seed is best-effort and FAIL-OPEN AT BOOT: the durable facts/lineage
+    store is optional (Task 4) — an unreachable DB is skipped, and even a
+    schema/programming error here must never refuse boot (it is logged loudly so
+    an operator sees it). The fail-loud discipline is preserved where a live DB
+    is expected: scripts/ingest.py exits 1 on a psycopg2.Error, and the /ask
+    lazy seed (_dataset_id_for) re-raises a non-Operational psycopg2.Error.
+    """
+    global _DATASET_ID
+    try:
+        conn = get_conn()
+    except RuntimeError:
+        # fail-open: no live Postgres — the durable spine is simply absent; the
+        # app still boots and /ask degrades to the synthetic-id path.
+        _LOGGER.info("_seed_facts: Postgres unreachable; durable facts spine "
+                     "skipped (fail-open)")
+        return
+    except Exception:
+        _LOGGER.exception("_seed_facts: unexpected connect error; durable facts "
+                          "spine skipped (fail-open)")
+        return
+    try:
+        ensure_schema(conn)
+        _DATASET_ID = ingest_facts(frame.facts, conn=conn)
+    except Exception:
+        _LOGGER.exception("_seed_facts: facts seed failed; durable spine "
+                          "skipped (best-effort)")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _dataset_id_for(conn) -> int | None:
+    """The seeded foi_datasets id for a live conn, seeding on demand.
+
+    The boot seed normally captures it; this re-seeds when the DB was
+    unreachable at boot but is reachable now. None on a transient DB error
+    (fail-open, ingest_facts owns that split); a schema/programming error raises
+    so it is not silently hidden.
+    """
+    global _DATASET_ID
+    if _DATASET_ID is None:
+        _DATASET_ID = ingest_facts(_FRAME.facts, conn=conn)
+    return _DATASET_ID
+
+
+def _record_figure_ops(conn, frame, artifact_id, dataset_id, spec) -> None:
+    """I3: record a lineage_ops row for every figure/stat the spec resolves.
+
+    kind='figure', op=the catalog key, params={}, and the platform's computed
+    result_value + rows_hash (from foi_stats — never a model number), so the
+    lineage viewer's "Computed figures" is populated and replay_verify can
+    recompute-and-compare. Best-effort: record_op owns the fail-open split, so a
+    transient DB error is swallowed; a schema/programming error raises.
+    """
+    if conn is None or artifact_id is None:
+        return
+    for panel in spec.get("panels", []):
+        key = _stat_key(panel)
+        if key is None:
+            continue  # presentation-only (chart type) — nothing to replay
+        stat = foi_stats(frame, key)
+        record_op(conn, artifact_id=artifact_id, dataset_id=dataset_id,
+                  kind="figure", op=key, params={},
+                  row_count=stat.get("source_rows"),
+                  rows_hash=stat.get("rows_hash"),
+                  result_value=stat.get("value"))
+
+
+def _load_dashboard(artifact_id, conn):
+    """Load (spec, transcript) for an artifact from the live DB.
+
+    The spec is the durable spec_json the builder produced; the transcript is
+    the recorded lineage_tool_calls rebuilt as {seq, tool, result} entries so
+    render_dashboard_page's citation resolver ({c:job.turn.call.field}) can
+    resolve against it. (spec, transcript) is (None, []) when the DB is
+    unreachable (fail-open) or the artifact has no durable spec — the caller
+    renders the honest degraded page instead. A schema/programming error raises
+    (fail-loud, like the lineage viewer).
+    """
+    if conn is None:
+        return None, []
+    spec = None
+    calls = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT spec_json FROM horizon.lineage_artifacts WHERE id = %s",
+                (artifact_id,))
+            row = cur.fetchone()
+            if row is not None:
+                spec = row[0]
+            cur.execute(
+                "SELECT seq, tool, output_json FROM horizon.lineage_tool_calls "
+                "WHERE artifact_id = %s ORDER BY seq", (artifact_id,))
+            calls = cur.fetchall()
+    except psycopg2.OperationalError:
+        return None, []
+    except psycopg2.Error:
+        raise
+    if spec is None:
+        return None, []
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except Exception:
+            return None, []  # not a spec we can render — degrade, never crash
+    transcript = []
+    for seq, tool, out in calls:
+        if isinstance(out, str):
+            try:
+                out = json.loads(out)
+            except Exception:
+                pass
+        transcript.append({"seq": seq, "tool": tool, "result": out})
+    return spec, transcript
+
+
+def _degraded_dashboard_page(artifact_id) -> str:
+    """Honest fail-open page for a dashboard that cannot be rendered (unreachable
+    DB, or no durable spec for the artifact). Never a 500, never a fabricated
+    dashboard."""
+    body = (
+        f"<h1>Dashboard unavailable</h1>"
+        f"<p>No durable dashboard could be found for artifact "
+        f"{html.escape(str(artifact_id))} — the Postgres lineage store is "
+        f"unreachable or the artifact has no recorded spec.</p>"
+        f'<p><a href="/">← back to at-a-glance</a></p>')
+    return chrome(f"Dashboard — {artifact_id}", "Freedom of information", body)
 
 
 class AskRequest(BaseModel):
@@ -135,61 +290,88 @@ def create_app():
         ledger = _get_ledger()
         # build_id is what build_spec receives; response_id is what the client
         # gets. build_id is a real int only when a lineage_artifacts row truly
-        # exists (or None otherwise) — never a synthetic string.
+        # exists (or None otherwise) — never a synthetic string. `conn` is the
+        # conn handed to build_spec (None on any fail-open); `raw` is the actual
+        # psycopg2 conn, always closed in the finally below.
         build_id = None
+        dataset_id = None
         response_id = f"local-{len((req.request or '').encode('utf-8')):x}"
+        conn = None
+        raw = None
         try:
-            conn = get_conn()
-            ensure_schema(conn)
-        except (RuntimeError, psycopg2.OperationalError):
-            # I2: fail-open — an unreachable DB (connect or schema) must not
-            # kill /ask. No artifact row exists, so the builder gets
-            # conn=None + build_id=None (its None-path skips tool-call writes,
-            # never NULLing the NOT NULL FK) and the client gets a deterministic
-            # synthetic id so the lineage URL stays stable.
-            conn = None
-        else:
-            # Task 6 carry-forward: the artifact row is PRE-CREATED
-            # (record_artifact returns its real id) and that id is passed into
-            # build_spec, so the builder's tool_calls key to THIS row — never to
-            # a second artifact. The row (id, status="building") must exist
-            # before any tool call is recorded: lineage_tool_calls.artifact_id
-            # is a NOT NULL FK.
-            build_id = record_artifact(
-                conn, artifact_type="builder_request",
-                artifact_key=(req.request or "")[:40], user_id=None,
-                dataset_id=1, request_text=req.request, spec_json={},
-                model="fartkraft", status="building")
-            if build_id is None:
-                # I1: the artifact INSERT failed open to None even though the
-                # conn is live. No real row exists — drop the conn and give the
-                # builder the None-path. Never hand build_spec a synthetic
-                # string as a real artifact_id with a live conn: a recovered DB
-                # would make the builder's record_tool_call hit "invalid input
-                # syntax for type integer" (a non-Operational psycopg2.Error)
-                # and re-raise, aborting the build.
-                conn = None
-            response_id = (build_id if build_id is not None
-                           else f"local-{len((req.request or '').encode('utf-8')):x}")
-        try:
-            spec = await build_spec(
-                req.request, frame, _complete_fn, ledger, conn,
-                max_turns=6, artifact_id=build_id)
-        except Exception as exc:
-            # a genuine build error (not a refusal — those were screened above):
-            # flip any real row to status="error" so it is not stuck "building"
+            try:
+                raw = get_conn()
+                ensure_schema(raw)
+                # C1: the boot seed (or this lazy resolve) supplies the real
+                # foi_datasets id, so record_artifact's NOT NULL FK resolves —
+                # no more ForeignKeyViolation 500 on a live-but-unseeded DB.
+                dataset_id = _dataset_id_for(raw)
+            except (RuntimeError, psycopg2.OperationalError):
+                # I2: fail-open — an unreachable DB (connect or schema) must not
+                # kill /ask. No artifact row exists, so the builder gets
+                # conn=None + build_id=None (its None-path skips tool-call
+                # writes, never NULLing the NOT NULL FK) and the client gets a
+                # deterministic synthetic id so the lineage URL stays stable.
+                raw = None
+            if raw is not None:
+                # Task 6 carry-forward: the artifact row is PRE-CREATED
+                # (record_artifact returns its real id) and that id is passed
+                # into build_spec, so the builder's tool_calls key to THIS row —
+                # never to a second artifact. The row (id, status="building")
+                # must exist before any tool call is recorded:
+                # lineage_tool_calls.artifact_id is a NOT NULL FK.
+                if dataset_id is not None:
+                    build_id = record_artifact(
+                        raw, artifact_type="builder_request",
+                        artifact_key=(req.request or "")[:40], user_id=None,
+                        dataset_id=dataset_id, request_text=req.request,
+                        spec_json={}, model="fartkraft", status="building")
+                if build_id is not None:
+                    conn = raw  # a real artifact row exists — the builder may write tool calls
+                    response_id = build_id
+                else:
+                    # I1: the artifact INSERT failed open to None (or no dataset
+                    # is seeded on this conn). No real row exists — give the
+                    # builder the None-path. Never hand build_spec a synthetic
+                    # string as a real artifact_id with a live conn: a recovered
+                    # DB would make the builder's record_tool_call hit "invalid
+                    # input syntax for type integer" (a non-Operational
+                    # psycopg2.Error) and re-raise, aborting the build.
+                    conn = None
+            try:
+                spec = await build_spec(
+                    req.request, frame, _complete_fn, ledger, conn,
+                    max_turns=6, artifact_id=build_id)
+            except Exception as exc:
+                # a genuine build error (not a refusal — those were screened
+                # above): flip any real row to status="error" so it is not stuck
+                # "building"
+                if conn is not None and isinstance(build_id, int):
+                    try:
+                        update_artifact(conn, build_id, status="error")
+                    except Exception:
+                        pass  # best-effort: the error response always wins
+                return {"error": str(exc), "artifact_id": response_id,
+                        "dashboard_url": None, "lineage_url": None}
             if conn is not None and isinstance(build_id, int):
+                update_artifact(conn, build_id, spec_json=spec, status="ready")
+                # I3: per-figure lineage — record each computed figure as a
+                # lineage_ops row (kind='figure', op=key, result + rows_hash) so
+                # the viewer's "Computed figures" is populated and replay can
+                # run. Best-effort inside record_op.
+                _record_figure_ops(conn, frame, build_id, dataset_id, spec)
+            # I4: point at the artifact's own dashboard, rendered from its
+            # durable spec_json + transcript on GET /dashboards/{id} — not the
+            # static at-a-glance page.
+            return {"artifact_id": response_id,
+                    "dashboard_url": f"/dashboards/{response_id}",
+                    "lineage_url": f"/lineage/{response_id}"}
+        finally:
+            if raw is not None:
                 try:
-                    update_artifact(conn, build_id, status="error")
+                    raw.close()
                 except Exception:
-                    pass  # best-effort: the error response always wins
-            return {"error": str(exc), "artifact_id": response_id,
-                    "dashboard_url": None, "lineage_url": None}
-        if conn is not None and isinstance(build_id, int):
-            update_artifact(conn, build_id, spec_json=spec, status="ready")
-        return {"artifact_id": response_id,
-                "dashboard_url": "/at-a-glance.html",
-                "lineage_url": f"/lineage/{response_id}"}
+                    pass
 
     @app.get("/lineage/{artifact_id}")
     def lineage(artifact_id: str):
@@ -204,6 +386,30 @@ def create_app():
         except (RuntimeError, psycopg2.OperationalError):
             conn = None
         return HTMLResponse(render_lineage_page(artifact_id, conn))
+
+    @app.get("/dashboards/{artifact_id}")
+    def dashboard(artifact_id: str):
+        # I4: render the artifact's OWN dashboard from its durable spec_json and
+        # recorded tool-call transcript — not the static at-a-glance page. The
+        # conn is closed in the finally; a live-but-unreachable DB degrades to
+        # the honest "unavailable" page (never a 500).
+        conn = None
+        try:
+            try:
+                conn = get_conn()
+                spec, transcript = _load_dashboard(artifact_id, conn)
+            except (RuntimeError, psycopg2.OperationalError):
+                spec, transcript = None, []
+            if spec is None:
+                return HTMLResponse(_degraded_dashboard_page(artifact_id))
+            return HTMLResponse(
+                render_dashboard_page(spec, frame, artifact_id, transcript))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     return app
 

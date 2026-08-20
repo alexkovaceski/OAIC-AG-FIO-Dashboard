@@ -27,6 +27,20 @@ Public demo: **`https://foi.fartkraft.ai`** (no auth).
   1,950; withdrawn 3,955). A mismatch aborts loudly, so the app never serves
   wrong data.
 
+## What the POC can answer
+
+The pinned snapshot covers the golden Q1 2025-26 headline figures plus the
+per-agency **requests received** and **requests finalised** series (the annual
+files publish those at agency granularity). Everything else the demo shows is
+either a platform-computed share of those, or an honest "No published data"
+gap — the POC does not fabricate a number it cannot source. Specifically, the
+four acceptance questions are only partially answerable with the published
+data: per-agency **refusal movers** (refusal rate per agency), a **timeliness
+correlation**, **portfolio** breakdowns, and the **data-notes** citations need
+measures (decided, refused, within-statutory, notes) that only exist as
+single-quarter Q1 facts or are not published at agency granularity, so those
+pages report the gap rather than guessing.
+
 ## Run it locally
 
 ```bash
