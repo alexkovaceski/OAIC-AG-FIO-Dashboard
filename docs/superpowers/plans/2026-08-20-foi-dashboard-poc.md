@@ -177,7 +177,7 @@ def normalise_agency(name: str) -> str:
     return RENAME_MAP.get(n, n)
 ```
 
-- [ ] **Step 5: Write `src/ingest/normalise.py`** — the core. It reads the 6 sheets of the current file + the Request numbers/Action/Response times sheets of the annual files, resolves each quirk, and emits long-form facts. **The single-quarter Q1 headline figures are sourced from the published Power BI figures (`GOLDEN_Q1_FIGURES`) as golden ground truth, marked `derived=True`** — because the current file is Q1–Q3 cumulative (34,418 received) and there is no Q1-only published extract to difference against. The Q1 total-level facts are emitted from the golden constants; per-agency Q1 breakdowns come from the cumulative file (which is the honest gap per the trend-window decision).
+- [ ] **Step 5: Write `src/ingest/normalise.py`** — the core. It reads the 6 sheets of the current file + the Request numbers/Action/Response times sheets of the annual files, resolves each quirk, and emits long-form facts. **The single-quarter Q1 headline figures are sourced from the published Power BI figures (`GOLDEN_Q1_FIGURES`) as golden ground truth, marked `derived=True`** — because the current file is Q1–Q3 cumulative (34,418 received) and there is no Q1-only published extract to difference against. The Q1 total-level facts are emitted from the golden constants; per-agency Q1 breakdowns come from the cumulative file (the honest gap per the trend-window decision).
 
 ```python
 """normalise — resolve every data quirk once, emit long-form facts."""
@@ -257,7 +257,7 @@ def normalise_all(source_dir: Path = DATA_SOURCES_DIR) -> list[dict]:
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_normalise.py -v`
-Expected: PASS (3 tests). The Q1 `received` total sums to 12,359 via the derived row set; the `x`-rows are stripped; the Total row is present but never re-summed.
+Expected: PASS (3 tests). The Q1 `received` total sums to 12,359 from the golden constants (marked derived); the `x`-rows are stripped; the Total row is present but never re-summed.
 
 - [ ] **Step 7: Commit**
 
@@ -1252,6 +1252,12 @@ from __future__ import annotations
 import asyncio
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+# NOTE: CPython 3.13 freezes the stdlib `site` module, so `src/site` cannot be
+# imported as `site.*` directly. Call site_shim.install() BEFORE any
+# `from site.pages import ...` / `from site.templates import ...` import. This
+# must also precede `import server.app` in scripts/serve.py.
+import site_shim
+site_shim.install()
 from pydantic import BaseModel
 from ingest.normalise import normalise_all
 from storage.frame import Frame
@@ -1318,6 +1324,8 @@ async def _complete_fn(messages):
 """Run the FOI Insights POC: python scripts/serve.py (uvicorn on :8095 or :FOI_PORT)."""
 import sys, os
 sys.path.insert(0, "src")
+import site_shim
+site_shim.install()  # must precede importing server.app (which imports site.*)
 import uvicorn
 from server.app import create_app
 

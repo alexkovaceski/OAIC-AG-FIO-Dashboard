@@ -3,5 +3,13 @@ __pycache__/
 *.pyc
 .idea/
 background/jpg/
+
+# ignore xlsx/csv everywhere except the pinned data snapshot
 *.xlsx
 *.csv
+!data/sources/
+!data/sources/*.xlsx
+!data/sources/*.csv
+
+# runtime lineage ledger (Task 4 firehose; regenerated per boot)
+data/generated/lineage.jsonl
