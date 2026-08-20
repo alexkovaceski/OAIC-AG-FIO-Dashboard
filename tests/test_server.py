@@ -61,6 +61,38 @@ def test_lineage_page_renders():
     assert "fartkraft" in r.text.lower()
 
 
+def test_lineage_route_reads_live_db_when_available(monkeypatch):
+    # Task 11: /lineage must attempt a live Postgres read so the REAL transcript
+    # recorded by build_spec renders on demo day — a hardcoded conn=None would
+    # always show the degraded "no live lineage" page even with the DB up.
+    captured = {}
+    sentinel_conn = object()
+    monkeypatch.setattr(app_mod, "get_conn", lambda: sentinel_conn)
+    monkeypatch.setattr(
+        app_mod, "render_lineage_page",
+        lambda artifact_id, conn: captured.update(artifact_id=artifact_id,
+                                                  conn=conn)
+        or "<!doctype html><p>ok</p>")
+    c = TestClient(create_app())
+    r = c.get("/lineage/42")
+    assert r.status_code == 200
+    assert captured["artifact_id"] == "42"
+    assert captured["conn"] is sentinel_conn  # the live conn reached the viewer
+
+
+def test_lineage_route_degrades_when_db_down(monkeypatch):
+    # an unreachable DB (get_conn raises RuntimeError) must still render the
+    # honest degraded page — never a 500.
+    def raise_conn():
+        raise RuntimeError("no db")
+
+    monkeypatch.setattr(app_mod, "get_conn", raise_conn)
+    c = TestClient(create_app())
+    r = c.get("/lineage/42")
+    assert r.status_code == 200
+    assert "fartkraft" in r.text.lower()
+
+
 def test_unknown_page_is_404():
     c = TestClient(create_app())
     r = c.get("/not-a-real-page.html")

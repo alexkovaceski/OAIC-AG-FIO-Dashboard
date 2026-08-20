@@ -193,10 +193,17 @@ def create_app():
 
     @app.get("/lineage/{artifact_id}")
     def lineage(artifact_id: str):
-        # conn=None: the viewer degrades to an honest "no live lineage" page
-        # (data dict + no conn -> no artifact/dataset/ops/tool_calls). A live
-        # Postgres wiring is Task 9/10; the page must never 500 on a down DB.
-        return HTMLResponse(render_lineage_page(artifact_id, None))
+        # Live Postgres wiring (Task 9/10): read the artifact/snapshot/ops/tool
+        # calls from the horizon lineage tables so the explainability page shows
+        # the REAL transcript recorded by build_spec. Best-effort — an unreachable
+        # DB degrades to the honest "no live lineage" page (render_lineage_page
+        # handles conn=None), so the page never 500s on a down DB.
+        conn = None
+        try:
+            conn = get_conn()
+        except (RuntimeError, psycopg2.OperationalError):
+            conn = None
+        return HTMLResponse(render_lineage_page(artifact_id, conn))
 
     return app
 

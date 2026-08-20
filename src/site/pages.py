@@ -182,13 +182,31 @@ def _lineage_panel(artifact) -> str:
 # --- the 12 pages ------------------------------------------------------------
 
 
+def _q1_total(frame, measure) -> str:
+    """Raw single-quarter Q1 2025-26 total for a measure, computed from the
+    canonical facts — the published figure rendered directly, never hardcoded."""
+    rows = frame.filter(fy="2025-26", quarter=1, measure=measure, bucket="total")
+    return _num(round(sum(f["value"] for f in rows), 0))
+
+
 def _page_at_a_glance(frame) -> str:
     g = lambda k: _stat(frame, k)
-    kpis = _kpis(frame, [
-        "requests_received_q1", "requests_finalised_q1", "decided_q1",
-        "within_statutory_pct_q1", "granted_full_share_q1",
-        "granted_part_share_q1", "refused_share_q1", "withdrawn_q1",
-    ])
+    basis_sq = _basis_label(g("requests_received_q1"))
+    share = lambda k: f"{g(k)['value']}% of decisions"
+    kpis = ("<div class=\"kpis\">"
+            + _kpi("Requests received", _q1_total(frame, "received"), basis_sq)
+            + _kpi("Requests finalised", _q1_total(frame, "finalised"), basis_sq)
+            + _kpi("Requests decided", _q1_total(frame, "decided"), basis_sq)
+            + _kpi("Decided within statutory", _q1_total(frame, "within_statutory"),
+                   basis_sq, title=share("within_statutory_pct_q1"))
+            + _kpi("Granted in full", _q1_total(frame, "granted_full"), basis_sq,
+                   title=share("granted_full_share_q1"))
+            + _kpi("Granted in part", _q1_total(frame, "granted_part"), basis_sq,
+                   title=share("granted_part_share_q1"))
+            + _kpi("Refused", _q1_total(frame, "refused"), basis_sq,
+                   title=share("refused_share_q1"))
+            + _kpi("Withdrawn", _q1_total(frame, "withdrawn"), basis_sq)
+            + "</div>")
     kpis += ("<div class=\"kpis\">"
              + _kpi("Granted full / part / refused (share of decisions)",
                     f"{g('granted_full_share_q1')['value']}/{g('granted_part_share_q1')['value']}/{g('refused_share_q1')['value']}%",

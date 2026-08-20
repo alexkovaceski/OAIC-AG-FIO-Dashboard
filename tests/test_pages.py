@@ -42,6 +42,18 @@ def test_no_model_numbers_in_pages():
     assert "12,359" in atag and "single quarter" in atag.lower()
 
 
+def test_at_a_glance_shows_all_published_q1_figures():
+    # spec page 1: the at-a-glance KPI tiles carry every published Q1 figure as
+    # a raw value (5,167 within statutory; 1,426 full / 3,968 part / 1,950
+    # refused) alongside the share-of-decisions percentage, with basis labels —
+    # a share alone ("70%") is not the published figure.
+    atag = _pages()["at-a-glance"]
+    for fig in ["12,359", "11,549", "7,344", "5,167", "1,426", "3,968",
+                "1,950", "3,955"]:
+        assert fig in atag, f"at-a-glance missing published Q1 figure {fig}"
+    assert atag.lower().count("basis: single quarter") >= 8  # one per KPI tile
+
+
 def test_every_kpi_carries_a_basis_label():
     # constraint: basis printed beside every figure (single quarter / cumulative / fy)
     for name in ["at-a-glance", "requests-received", "requests-finalised",
