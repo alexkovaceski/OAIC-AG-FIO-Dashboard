@@ -256,3 +256,13 @@ def test_replay_verify_default_is_lazy_and_fails_open():
     row = {"dataset_id": 1, "op": "requests_received_q1", "params": {},
            "result_value": 12359, "rows_hash": "x"}
     assert lineage_mod.replay_verify(None, row) is False
+
+
+def test_replay_verify_fails_open_on_non_dict_row():
+    # a non-dict op_row (None / a list) must return False, never raise — the
+    # stored-hash access lives inside the same try as the recompute.
+    def compute(op_row):
+        return (1, "H")
+
+    assert lineage_mod.replay_verify(None, None, compute=compute) is False
+    assert lineage_mod.replay_verify(None, ["not", "a", "dict"], compute=compute) is False

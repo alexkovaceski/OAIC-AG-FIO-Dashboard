@@ -156,7 +156,7 @@ def replay_verify(conn, op_row, compute=None) -> bool:
     compute = compute or _replay_default_compute
     try:
         _, rows_hash = compute(op_row)
+        stored = op_row.get("rows_hash")
     except Exception:
         return False
-    stored = op_row.get("rows_hash")
     return bool(stored) and rows_hash == stored
