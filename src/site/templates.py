@@ -19,6 +19,7 @@ NAV = [
         ("Requests received", "/requests-received.html"),
         ("Decision outcomes", "/decision-outcomes.html"),
         ("Timeliness", "/timeliness.html"),
+        ("API access", "/api.html"),
     ]),
     ("Consumer Data Right", "#"),
     ("Digital ID", "#"),

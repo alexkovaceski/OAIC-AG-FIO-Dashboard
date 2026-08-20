@@ -35,23 +35,24 @@ from __future__ import annotations
 import site_shim  # noqa: E402
 site_shim.install()  # noqa: E402
 
+import asyncio  # noqa: E402
 import html  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 
-import httpx  # noqa: E402
 import psycopg2  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING,
                     format="%(levelname)s %(name)s %(message)s")
 _LOGGER = logging.getLogger("foi-insights.server")
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+import api  # noqa: E402
 from config import STATIC_DIR  # noqa: E402
 from ingest.normalise import normalise_all  # noqa: E402
 from storage.frame import Frame  # noqa: E402
@@ -277,6 +278,54 @@ def create_app():
     def health():
         return {"status": "ok", "model": "fartkraft sovereign stack"}
 
+    # ---- read-only data API (throttled) ------------------------------------
+    # Exposes the SAME platform-computed figures + canonical facts the
+    # visualisations use. Every /api/* call is rate-limited per client IP so
+    # the public no-auth demo doesn't get smashed.
+
+    def _throttled(request):
+        allowed, remaining, retry_after = api.check(api._client_ip(request))
+        if not allowed:
+            return JSONResponse(
+                {"error": "rate limit exceeded",
+                 "retry_after_seconds": round(retry_after, 1)},
+                status_code=429,
+                headers={"Retry-After": str(int(retry_after))})
+        return None
+
+    @app.get("/api/")
+    def api_root(request: Request):
+        b = _throttled(request)
+        if b:
+            return b
+        return api.dataset_info(frame)
+
+    @app.get("/api/figures")
+    def api_figures(request: Request):
+        b = _throttled(request)
+        if b:
+            return b
+        return api.figures(frame)
+
+    @app.get("/api/facts")
+    def api_facts(request: Request, fy: str | None = None,
+                  measure: str | None = None, bucket: str | None = None,
+                  agency: str | None = None, quarter: int | None = None,
+                  limit: int = 1000, offset: int = 0):
+        b = _throttled(request)
+        if b:
+            return b
+        return api.facts(frame, fy=fy, measure=measure, bucket=bucket,
+                         agency=agency, quarter=quarter, limit=limit,
+                         offset=offset)
+
+    @app.get("/api/measures")
+    def api_measures(request: Request):
+        b = _throttled(request)
+        if b:
+            return b
+        return api.measures(frame)
+
     @app.get("/")
     def index():
         return HTMLResponse(pages["at-a-glance"])
@@ -434,22 +483,26 @@ _FALLBACK_SPEC = ('{"title": "FOI request summary", '
 
 
 async def _complete_fn(messages):
-    """Call the local model endpoint (idc-1, or FOI_LLM_URL) with the messages.
+    """Call the axoquant-llm author endpoint with the messages.
 
     The identity stovepipe lives in build_spec (Task 6); this function only
-    forwards the assembled messages and returns the model's raw text. On ANY
-    failure — including a model that answers with content=null (a tool-call
-    payload or empty content, which raises no exception) — it returns
-    _FALLBACK_SPEC so build_spec never receives a None it would crash on.
+    forwards the assembled messages and returns the model's raw text. The call
+    goes through the axoquant-llm library (resolved by ROLE, not by URL — the
+    author role maps to the front-door chat endpoint). The library is sync
+    (stdlib urllib), so it runs in a worker thread. On ANY failure — including
+    a model that answers with content=null (a tool-call payload or empty
+    content, which raises no exception) — it returns _FALLBACK_SPEC so
+    build_spec never receives a None it would crash on.
     """
-    url = os.environ.get("FOI_LLM_URL", "http://idc-1:8012/v1/chat/completions")
     try:
-        payload = {"model": os.environ.get("FOI_LLM_MODEL", "qwen3next-80b"),
-                   "messages": messages, "temperature": 0.2}
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(url, json=payload)
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
+        from axoquant_llm import chat
+
+        def _call():
+            resp = chat("author", messages, app="foi-insights/ask",
+                        temperature=0.2, no_thinking=True)
+            return resp.text
+
+        text = await asyncio.to_thread(_call)
         if not text or not isinstance(text, str):
             # content=null (tool-call turn), "" or a malformed non-string is not
             # a usable spec — same failure class as an unreachable endpoint.

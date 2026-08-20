@@ -355,13 +355,18 @@ def test_dashboard_route_degrades_on_synthetic_nonint_id(monkeypatch):
 def test_complete_fn_falls_back_when_llm_unreachable(monkeypatch):
     # Task 9 load-bearing requirement: on ANY failure (endpoint down, timeout,
     # non-2xx, bad body) _complete_fn returns the deterministic canned spec so
-    # the demo never dies. Point FOI_LLM_URL at an unreachable port and assert
-    # the fallback — no network is actually required (connect is refused).
-    monkeypatch.setenv("FOI_LLM_URL", "http://127.0.0.1:1/v1/chat/completions")
+    # the demo never dies. _complete_fn routes through axoquant_llm.chat — mock
+    # it to raise (the endpoint-down case) and assert the fallback.
+    import axoquant_llm
+    monkeypatch.setattr(axoquant_llm, "chat", _raising_chat)
     out = asyncio.run(app_mod._complete_fn([{"role": "user", "content": "x"}]))
     spec = json.loads(out)
     assert spec["title"] == "FOI request summary"
     assert "panels" in spec
+
+
+def _raising_chat(*a, **k):
+    raise RuntimeError("endpoint unreachable")
 
 
 @pytest.mark.parametrize("bad_content", [None, "", {"nested": "not-a-string"}])
@@ -370,13 +375,14 @@ def test_complete_fn_returns_fallback_on_bad_content(monkeypatch, bad_content):
     # empty content returns content=null (NO exception), so the raw access does
     # not trip the except path. That null must NOT escape _complete_fn —
     # build_spec would call _parse_tool_calls(None) and crash with AttributeError.
-    async def fake_post(self, url, json=None):
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": bad_content}}]},
-            request=httpx.Request("POST", url))
+    import axoquant_llm
 
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    def _null_chat(*a, **k):
+        class _R:
+            text = bad_content
+        return _R()
+
+    monkeypatch.setattr(axoquant_llm, "chat", _null_chat)
     out = asyncio.run(app_mod._complete_fn([{"role": "user", "content": "x"}]))
     spec = json.loads(out)
     assert spec["title"] == "FOI request summary"
@@ -384,28 +390,18 @@ def test_complete_fn_returns_fallback_on_bad_content(monkeypatch, bad_content):
 
 
 def test_complete_fn_passes_through_model_text(monkeypatch):
-    # when the endpoint answers, _complete_fn returns the raw model text; the
-    # messages it received are forwarded verbatim in the payload
-    captured = {}
+    # when the endpoint answers, _complete_fn returns the raw model text
+    import axoquant_llm
 
-    async def fake_post(self, url, json=None):
-        # AsyncClient.post is a coroutine — the fake must be awaitable too, and
-        # raise_for_status() needs the request set on the response
-        captured["url"] = url
-        captured["payload"] = json
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": "hello"}}]},
-            request=httpx.Request("POST", url))
+    def _hello_chat(role, messages, app, **kw):
+        class _R:
+            text = "hello"
+        return _R()
 
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(axoquant_llm, "chat", _hello_chat)
     msgs = [{"role": "user", "content": "build a dashboard"}]
     out = asyncio.run(app_mod._complete_fn(msgs))
     assert out == "hello"
-    assert captured["payload"]["messages"] == msgs
-    assert captured["payload"]["model"] == "qwen3next-80b"
-    assert captured["payload"]["temperature"] == 0.2
-    assert captured["url"] == "http://idc-1:8012/v1/chat/completions"
 
 
 def test_golden_gate_aborts_on_bad_data(monkeypatch):

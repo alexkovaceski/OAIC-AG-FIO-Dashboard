@@ -18,7 +18,7 @@ PAGE_KEYS = [
     "at-a-glance", "requests-received", "key-agency-contributions-received",
     "requests-finalised", "requests-decided", "key-agency-contributions-decided",
     "decision-outcomes", "change-decision-outcomes", "timeliness",
-    "change-timeliness", "data-notes", "how-to-use",
+    "change-timeliness", "data-notes", "how-to-use", "api",
 ]
 
 

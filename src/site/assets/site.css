@@ -239,6 +239,16 @@ pre {
 section { margin: 1.4rem 0; }
 .op, .call { margin: 0.9rem 0; }
 .meta { color: var(--muted); font-size: 0.8rem; }
+.apitable { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.apitable th, .apitable td {
+  border: 1px solid var(--hairline);
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+.apitable th { background: #f7f7f7; font-weight: 600; }
+.apitable code { background: #fafafa; padding: 0.1rem 0.3rem; border-radius: 3px;
+  font-size: 0.85em; }
 
 /* --- data notes (verbatim corpus) ----------------------------------------- */
 
