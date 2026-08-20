@@ -5,3 +5,4 @@ psycopg2-binary
 httpx
 pytest
 pytest-asyncio
+axoquant-llm @ git+https://github.com/axoquant/llm.git@235ce71
