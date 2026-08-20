@@ -12,6 +12,7 @@ line. A figure's missing year renders as '—', never '0'. The basis label
 """
 from __future__ import annotations
 import html
+import json
 import re
 from pathlib import Path
 
@@ -20,6 +21,28 @@ from site.templates import chrome
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
 _DATA_NOTES = _CORPUS / "data-notes.md"
+
+# script tags every chart page loads, rendered before </body> by chrome()
+_CHART_SCRIPTS = ('<script src="/assets/echarts.min.js"></script>\n'
+                  '<script src="/assets/foi-charts.js"></script>')
+
+# page_key -> the figure keys that page's chartboxes reference (the keys the
+# page's window.__pageData blob ships). Pages without charts ship no figures.
+PAGE_FIGURE_KEYS = {
+    "at-a-glance": ["requests_received_trend"],
+    "requests-received": ["requests_received_trend"],
+    "key-agency-contributions-received": ["received_top20"],
+    "requests-finalised": ["requests_finalised_trend"],
+    "requests-decided": ["requests_decided_trend"],
+    "key-agency-contributions-decided": ["decided_top20"],
+    "decision-outcomes": ["decision_outcomes_trend"],
+    "change-decision-outcomes": ["granted_full_part_change"],
+    "timeliness": ["timeliness_trend"],
+    "change-timeliness": ["timeliness_change"],
+    "data-notes": [],
+    "how-to-use": [],
+    "api": [],
+}
 
 # series colours (validated categorical palette, slots 1-4 — see site.css)
 _BAR_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
@@ -63,40 +86,51 @@ def _num(value) -> str:
     return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
-def _series_label(fig, series):
-    """A series gets its name only when the figure carries more than one series
-    (a single-series line names itself in the caption)."""
-    if len(fig.get("series", [])) > 1:
-        return html.escape(str(series.get("name", "")))
-    return ""
+def _chart_container(chart_key, fig) -> str:
+    """A mount point for an ECharts figure. The chart itself is rendered by
+    foi-charts.js (Task 3) from window.__pageData.figures[chart_key].
+
+    A figure with no published data keeps the honest server-rendered
+    placeholder inside the same chartbox — so the page reads as "no data",
+    not broken, even before any JS runs. The placeholder text matches the old
+    inline `_chart` no-data copy verbatim."""
+    inner = ""
+    if not _figure_has_data(fig):
+        inner = ('<div class="nodata">No published data for this measure. '
+                 'The source files do not report this breakdown for the '
+                 'financial years covered.</div>')
+    return (f'<div class="chartbox" id="chart-{chart_key}" '
+            f'data-figure="{chart_key}">{inner}</div>')
 
 
-def _chart(fig, height="chart-h") -> str:
-    """Render a figure as an inline HTML/CSS bar chart. A missing year is '—'
-    (never 0); an empty series shows an honest no-data placeholder instead of a
-    fabricated flat-zero line."""
+def _figure_has_data(fig) -> bool:
     series = fig.get("series") or []
-    if not series or not any(s.get("values") for s in series):
-        return ('<div class="nodata">No published data for this measure. '
-                'The source files do not report this breakdown for the '
-                'financial years covered.</div>')
-    cats = fig.get("categories") or []
-    # scale bars to the largest value in the figure, not to a fixed cap — so a
-    # 42,759 bar reads taller than a 33,630 bar, and a 1,426 bar is clearly
-    # smaller than a 3,968 bar
-    data_max = max((v for s in series for v in (s.get("values") or [])
-                    if v is not None), default=None)
-    row_idx = 0
-    cells = []
-    for i, s in enumerate(series):
-        name = _series_label(fig, s)
-        values = s.get("values") or []
-        for j, v in enumerate(values):
-            cells.append(_bar(cats[j] if j < len(cats) else "", name, v,
-                              _BAR_COLOURS[i % len(_BAR_COLOURS)], row_idx,
-                              data_max))
-            row_idx += 1
-    return f'<div class="chart {height}">{chr(10).join(cells)}</div>'
+    return any(s.get("values") for s in series)
+
+
+def _filters_blob(frame) -> dict:
+    """Platform-derived filter options, straight off the Frame — no new
+    aggregates. Task 4 wires the real filter behaviour; this ships only what
+    the source data itself distinguishes."""
+    return {
+        "agencies": sorted({f["agency_name"] for f in frame.facts}),
+        "types": sorted({f["bucket"] for f in frame.facts}),
+        "fys": sorted({f["fy"] for f in frame.facts}),
+    }
+
+
+def _page_data_script(frame, page_key) -> str:
+    """The window.__pageData blob for one page: the foi_stats results for the
+    page's figure keys plus the platform-derived filter options. PURE frame ->
+    JSON — no fabricated figures, no new aggregates.
+
+    SECURITY: the JSON is escaped so a source value containing "</script>"
+    cannot break out of its <script> tag (json.dumps's default ensures a str
+    "</" never occurs in output, so the .replace is a belt-and-braces guard)."""
+    figures = {k: _stat(frame, k) for k in PAGE_FIGURE_KEYS.get(page_key, [])}
+    blob = {"figures": figures, "filters": _filters_blob(frame)}
+    safe = json.dumps(blob).replace("</", "<\\/")
+    return f"<script>window.__pageData = {safe};</script>"
 
 
 def _bar(cat, name, v, colour, row_idx, data_max=None):
@@ -150,20 +184,21 @@ def _kpis(frame, keys) -> str:
     return f'<div class="kpis">{chr(10).join(cells)}</div>'
 
 
-def _trend_section(title, fig) -> str:
+def _trend_section(title, fig, chart_key) -> str:
     basis = _basis_label({"basis": "fy"})
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="basis">{basis}</p>{_chart(fig)}</section>')
+            f'<p class="basis">{basis}</p>'
+            f'{_chart_container(chart_key, fig)}</section>')
 
 
-def _top20_section(title, fig) -> str:
+def _top20_section(title, fig, chart_key) -> str:
     basis = _basis_label({"basis": "fy"})
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="basis">{basis}</p>{_chart(fig, height="chart-h-tall")}'
-            f'</section>')
+            f'<p class="basis">{basis}</p>'
+            f'{_chart_container(chart_key, fig)}</section>')
 
 
-def _notes_section(title, fig) -> str:
+def _notes_section(title, fig, chart_key) -> str:
     """A dedicated note under a chart when the figure's series are empty (the
     annual files do not publish the measure) — states WHY there is no data,
     so the empty chart reads as honest, not broken."""
@@ -171,7 +206,7 @@ def _notes_section(title, fig) -> str:
             f'<p class="note">No published data for this measure. The annual '
             f'FOI files report only requests received and finalised per '
             f'financial year; this breakdown is not published on a yearly '
-            f'basis.</p>{_chart(fig)}</section>')
+            f'basis.</p>{_chart_container(chart_key, fig)}</section>')
 
 
 def _lineage_panel(artifact) -> str:
@@ -219,12 +254,13 @@ def _page_at_a_glance(frame) -> str:
     2025-26). All figures are computed from the source data.</p>
     {kpis}
     <div class="filters">Filters: portfolio / agency · type (personal/other) · FY or quarter</div>
-    <section class="figure-card"><h2>Requests received, FY trend</h2>
-    <p class="basis">basis: financial year</p>
-    {_chart(g('requests_received_trend')['value'])}</section>
-    {_lineage_panel("at-a-glance")}"""
+    {_trend_section("Requests received, FY trend",
+                    g('requests_received_trend')['value'],
+                    "requests_received_trend")}
+    {_lineage_panel("at-a-glance")}
+    {_page_data_script(frame, "at-a-glance")}"""
     return chrome("FOI at a glance", "Freedom of information", body,
-                  page_key="at-a-glance")
+                  page_key="at-a-glance", scripts=_CHART_SCRIPTS)
 
 
 def _page_requests_received(frame) -> str:
@@ -234,10 +270,12 @@ def _page_requests_received(frame) -> str:
     <p class="intro">FOI requests received by Australian Government agencies and
     ministers, by financial year.</p>
     {_kpis(frame, ["requests_received_q1"])}
-    {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig)}
-    {_lineage_panel("requests-received")}"""
+    {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
+                    "requests_received_trend")}
+    {_lineage_panel("requests-received")}
+    {_page_data_script(frame, "requests-received")}"""
     return chrome("Requests received", "Freedom of information", body,
-                  page_key="requests-received")
+                  page_key="requests-received", scripts=_CHART_SCRIPTS)
 
 
 def _page_key_agency_contributions_received(frame) -> str:
@@ -246,11 +284,13 @@ def _page_key_agency_contributions_received(frame) -> str:
     <h1>Key agency contributions — requests received</h1>
     <p class="intro">Top 20 agencies by FOI requests received in FY2024-25
     (the latest complete financial year in the annual files).</p>
-    {_top20_section(FIG_CAPTIONS["received_top20"], fig)}
-    {_lineage_panel("key-agency-contributions-received")}"""
+    {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20")}
+    {_lineage_panel("key-agency-contributions-received")}
+    {_page_data_script(frame, "key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
                   "Freedom of information", body,
-                  page_key="key-agency-contributions-received")
+                  page_key="key-agency-contributions-received",
+                  scripts=_CHART_SCRIPTS)
 
 
 def _page_requests_finalised(frame) -> str:
@@ -260,10 +300,12 @@ def _page_requests_finalised(frame) -> str:
     <p class="intro">FOI requests finalised by Australian Government agencies
     and ministers, by financial year.</p>
     {_kpis(frame, ["requests_finalised_q1"])}
-    {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig)}
-    {_lineage_panel("requests-finalised")}"""
+    {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
+                    "requests_finalised_trend")}
+    {_lineage_panel("requests-finalised")}
+    {_page_data_script(frame, "requests-finalised")}"""
     return chrome("Requests finalised", "Freedom of information", body,
-                  page_key="requests-finalised")
+                  page_key="requests-finalised", scripts=_CHART_SCRIPTS)
 
 
 def _page_requests_decided(frame) -> str:
@@ -274,10 +316,12 @@ def _page_requests_decided(frame) -> str:
     ministers. The annual files do not publish decisions by financial year, so
     this page reports the latest published quarter.</p>
     {_kpis(frame, ["decided_q1"])}
-    {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig)}
-    {_lineage_panel("requests-decided")}"""
+    {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
+                    "requests_decided_trend")}
+    {_lineage_panel("requests-decided")}
+    {_page_data_script(frame, "requests-decided")}"""
     return chrome("Requests decided", "Freedom of information", body,
-                  page_key="requests-decided")
+                  page_key="requests-decided", scripts=_CHART_SCRIPTS)
 
 
 def _page_key_agency_contributions_decided(frame) -> str:
@@ -287,11 +331,13 @@ def _page_key_agency_contributions_decided(frame) -> str:
     <p class="intro">Top 20 agencies by FOI requests decided in FY2024-25.
     Decisions by financial year are not published in the annual files, so this
     figure is empty until the source data reports them.</p>
-    {_top20_section(FIG_CAPTIONS["decided_top20"], fig)}
-    {_lineage_panel("key-agency-contributions-decided")}"""
+    {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20")}
+    {_lineage_panel("key-agency-contributions-decided")}
+    {_page_data_script(frame, "key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",
                   "Freedom of information", body,
-                  page_key="key-agency-contributions-decided")
+                  page_key="key-agency-contributions-decided",
+                  scripts=_CHART_SCRIPTS)
 
 
 def _page_decision_outcomes(frame) -> str:
@@ -304,10 +350,12 @@ def _page_decision_outcomes(frame) -> str:
     not published on a yearly basis.</p>
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
-    {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig)}
-    {_lineage_panel("decision-outcomes")}"""
+    {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
+                    "decision_outcomes_trend")}
+    {_lineage_panel("decision-outcomes")}
+    {_page_data_script(frame, "decision-outcomes")}"""
     return chrome("Decision outcomes", "Freedom of information", body,
-                  page_key="decision-outcomes")
+                  page_key="decision-outcomes", scripts=_CHART_SCRIPTS)
 
 
 def _page_change_decision_outcomes(frame) -> str:
@@ -316,10 +364,12 @@ def _page_change_decision_outcomes(frame) -> str:
     <h1>Change in decision outcomes</h1>
     <p class="intro">Change in the percentage of decisions granted in full or
     in part, by financial year.</p>
-    {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig)}
-    {_lineage_panel("change-decision-outcomes")}"""
+    {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
+                    "granted_full_part_change")}
+    {_lineage_panel("change-decision-outcomes")}
+    {_page_data_script(frame, "change-decision-outcomes")}"""
     return chrome("Change in decision outcomes", "Freedom of information", body,
-                  page_key="change-decision-outcomes")
+                  page_key="change-decision-outcomes", scripts=_CHART_SCRIPTS)
 
 
 def _page_timeliness(frame) -> str:
@@ -330,10 +380,11 @@ def _page_timeliness(frame) -> str:
     the statutory time period. Only the within-statutory measure is published,
     and not on a financial-year basis in the annual files.</p>
     {_kpis(frame, ["within_statutory_pct_q1"])}
-    {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig)}
-    {_lineage_panel("timeliness")}"""
+    {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend")}
+    {_lineage_panel("timeliness")}
+    {_page_data_script(frame, "timeliness")}"""
     return chrome("Timeliness", "Freedom of information", body,
-                  page_key="timeliness")
+                  page_key="timeliness", scripts=_CHART_SCRIPTS)
 
 
 def _page_change_timeliness(frame) -> str:
@@ -342,10 +393,11 @@ def _page_change_timeliness(frame) -> str:
     <h1>Change in timeliness</h1>
     <p class="intro">Change in the percentage of decisions within the statutory
     time period, by financial year.</p>
-    {_notes_section(FIG_CAPTIONS["timeliness_change"], fig)}
-    {_lineage_panel("change-timeliness")}"""
+    {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change")}
+    {_lineage_panel("change-timeliness")}
+    {_page_data_script(frame, "change-timeliness")}"""
     return chrome("Change in timeliness", "Freedom of information", body,
-                  page_key="change-timeliness")
+                  page_key="change-timeliness", scripts=_CHART_SCRIPTS)
 
 
 def _page_data_notes() -> str:

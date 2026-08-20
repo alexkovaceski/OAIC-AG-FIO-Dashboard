@@ -79,18 +79,23 @@ def sidenav_html(page_key: str) -> str:
 
 
 def chrome(title: str, active_nav: str | None = None, body_html: str = "",
-           page_key: str | None = None) -> str:
+           page_key: str | None = None, scripts: str | None = None) -> str:
     """The OAIC-styled shell: dark masthead + top nav, breadcrumb, a two-column
     layout of sidenav + main, and the footer.
 
     Returns a complete, self-contained HTML document. Every page carries the
     identity stovepipe in the footer (never out of sight).
 
+    `scripts` (a str of <script> tags, e.g. the ECharts + init bundle) is
+    rendered immediately before </body>. It is caller-controlled markup, not
+    escaped — only the page renderers pass it, never a URL-routed value.
+
     The title is escaped here (not at call sites) so any caller-supplied
     string — e.g. the URL-routed artifact_id on the lineage page — can never
     become reflected XSS in <title>.
     """
     title = html.escape(title)
+    tail_scripts = f"{scripts}\n" if scripts else ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -114,5 +119,5 @@ def chrome(title: str, active_nav: str | None = None, body_html: str = "",
   <div class="legal">© Commonwealth of Australia <span class="sep">·</span> <a href="https://www.oaic.gov.au/privacy">Privacy</a> <span class="sep">·</span> <a href="https://www.oaic.gov.au/freedom-of-information">FOI</a></div>
   <div class="stack">FOI Insights — fartkraft sovereign stack · data from data.gov.au (OAIC FOI statistics)</div>
 </footer>
-</body>
+{tail_scripts}</body>
 </html>"""
