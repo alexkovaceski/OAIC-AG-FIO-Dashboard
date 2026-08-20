@@ -4,9 +4,9 @@ __pycache__/
 .idea/
 background/jpg/
 
-# keep the pinned data snapshot (Task 1: baked into deploy) despite *.xlsx/*.csv
+# ignore xlsx/csv everywhere except the pinned data snapshot
+*.xlsx
+*.csv
 !data/sources/
 !data/sources/*.xlsx
 !data/sources/*.csv
-*.xlsx
-*.csv
