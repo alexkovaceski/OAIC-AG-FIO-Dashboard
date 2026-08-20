@@ -1,0 +1,276 @@
+/* site.css — OAIC-style chrome + the FOI Insights chart system.
+
+The chrome mirrors the OAIC site: white background, blue links, a clean
+government layout with a masthead, top-level nav, breadcrumb and a footer that
+carries the Acknowledgement of Country and the identity stovepipe.
+
+The chart system follows the dataviz method: series colours are a validated
+categorical palette (slots 1-4), thin bars anchored to a baseline with the
+value printed on every data-end (an empty-series page is never mistaken for a
+zero line), and text always wears ink rather than a series colour. A missing
+year renders as "—"; a genuinely absent measure renders an explicit no-data
+placeholder.
+*/
+
+:root {
+  /* gov chrome — white surface, blue links */
+  --surface:      #ffffff;
+  --page:         #f7f7f6;
+  --ink:          #0b0b0b;
+  --ink-2:        #52514e;
+  --muted:        #6b6a66;
+  --hairline:     #e5e5e0;
+  --rule:         #c9c9c2;
+  --link:         #1f5fbf;
+  --link-visited: #5a4a96;
+  --accent:       #0b4b99;
+  --blue-1:       #2a78d6;   /* categorical slot 1 */
+  --blue-2:       #eb6834;   /* categorical slot 2 */
+  --blue-3:       #1baf7a;   /* categorical slot 3 */
+  --blue-4:       #eda100;   /* categorical slot 4 */
+  --blue-neg:     #b4552d;   /* signed-change negative hue */
+  --nodata:       #6b6a66;
+  --serif:        Georgia, 'Times New Roman', serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* --- masthead + nav ------------------------------------------------------ */
+
+.masthead {
+  background: var(--surface);
+  border-bottom: 3px solid var(--accent);
+  padding: 0.8rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.logo { font-size: 1.35rem; font-weight: 700; letter-spacing: 0.01em; }
+.logo a { color: var(--ink); text-decoration: none; }
+.logo-rule { color: var(--accent); padding: 0 0.15em; }
+
+.topnav { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; }
+.topnav .nav-link {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 0.92rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+}
+.topnav .nav-link:hover { color: var(--link); background: #eef3fa; }
+.topnav .nav-link.active { color: var(--accent); font-weight: 600; }
+
+/* --- breadcrumb ---------------------------------------------------------- */
+
+.breadcrumb {
+  background: var(--page);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.5rem 2rem;
+}
+
+/* --- main ---------------------------------------------------------------- */
+
+main {
+  background: var(--surface);
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem;
+  min-height: 70vh;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+}
+
+.intro { color: var(--ink-2); max-width: 60ch; margin: 0 0 1.25rem; }
+
+a { color: var(--link); }
+a:visited { color: var(--link-visited); }
+
+/* --- KPI tiles ----------------------------------------------------------- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-top: 3px solid var(--blue-1);
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.kpi .label { font-size: 0.8rem; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.02em; }
+.kpi .tlabel { font-size: 0.72rem; color: var(--muted); }
+.kpi .value { font-size: 1.9rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi .basis { font-size: 0.72rem; color: var(--muted); border-top: 1px dashed var(--rule); padding-top: 0.3rem; margin-top: 0.3rem; }
+
+/* --- figure cards -------------------------------------------------------- */
+
+.figure-card {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  margin: 1.5rem 0;
+}
+.figure-card h2 {
+  font-family: var(--serif);
+  font-size: 1.35rem;
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+}
+.figure-card .basis { color: var(--muted); font-size: 0.8rem; margin: 0 0 1rem; }
+
+.note {
+  color: var(--ink-2);
+  font-size: 0.92rem;
+  border-left: 3px solid var(--blue-neg);
+  padding: 0.4rem 0.75rem;
+  margin: 0 0 1rem;
+}
+
+/* --- bar charts ---------------------------------------------------------- */
+
+.chart { margin: 0.5rem 0; }
+
+.chart-h { height: 290px; }
+.chart-h-tall { height: 560px; }
+
+.bar-row {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  width: 42px;
+  height: 100%;
+  vertical-align: bottom;
+  position: relative;
+}
+
+.bar-row::after {  /* the baseline every data-end anchors to */
+  content: "";
+  position: absolute;
+  bottom: 46px;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bar-end {
+  width: 24px;
+  border-radius: 4px 4px 0 0;
+  background: var(--blue-1);
+}
+.bar-end.none { height: 0; background: transparent; }
+.bar-end { min-height: 2px; }
+
+.bval {
+  font-size: 0.78rem;
+  color: var(--ink-2);
+  line-height: 1.25;
+  margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.bcat {
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.25;
+  text-align: center;
+  max-width: 120px;
+}
+.bseries {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* --- no-data placeholders ------------------------------------------------- */
+
+.nodata {
+  color: var(--nodata);
+  font-style: italic;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 0.5rem 0;
+  max-width: 70ch;
+}
+
+/* --- lineage page --------------------------------------------------------- */
+
+.lineage { margin-top: 2rem; font-size: 0.95rem; }
+pre {
+  background: #fafafa;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+section { margin: 1.4rem 0; }
+.op, .call { margin: 0.9rem 0; }
+.meta { color: var(--muted); font-size: 0.8rem; }
+
+/* --- data notes (verbatim corpus) ----------------------------------------- */
+
+.notes { max-width: 78ch; }
+.notes h1 { font-family: var(--serif); font-size: 1.6rem; }
+.notes h2 { font-family: var(--serif); font-size: 1.25rem; margin: 1.6rem 0 0.5rem; }
+.notes p { margin: 0.75rem 0; }
+.notes ul { padding-left: 1.25rem; }
+.notes em { font-style: italic; }
+
+/* --- filters + how-to ------------------------------------------------------ */
+
+.filters {
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  padding: 0.6rem 1rem;
+  margin: 1rem 0 1.5rem;
+}
+h2 { font-family: var(--serif); font-size: 1.3rem; margin: 1.5rem 0 0.5rem; }
+ul { padding-left: 1.25rem; }
+
+/* --- footer ---------------------------------------------------------------- */
+
+.sitefoot {
+  background: #1c1c1c;
+  color: #e8e8e6;
+  padding: 1.75rem 2rem;
+  font-size: 0.85rem;
+}
+.sitefoot .country { margin-bottom: 0.4rem; }
+.sitefoot .stack { color: #b9b9b4; }
+.sitefoot a { color: #cfe0ff; }
+.sitefoot a:visited { color: #d9c9ff; }
