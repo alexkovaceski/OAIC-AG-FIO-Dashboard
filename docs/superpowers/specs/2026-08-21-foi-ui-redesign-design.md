@@ -138,10 +138,20 @@ data. This is the "interactive portal" upgrade that matches the reference.
 
 Filter implementation: a small JS module (`foi-charts.js`) that (a) initia-
 lises the ECharts instances from embedded `window.__pageData` (the pre-computed
-figures + the long-form facts needed for filtering), and (b) wires the filter
-dropdowns to re-render the charts from the filtered data client-side. The
-filtering reuses the same measure/basis logic; it never computes a number the
-platform didn't already derive.
+figures + the long-form canonical facts needed for filtering), and (b) wires the
+filter dropdowns to re-render the charts from the filtered data client-side.
+
+**The "never invent a number" contract is preserved under filtering.** The
+client-side filter may only **select and re-group facts the platform already
+derived** (the canonical `facts` carry their values; filtering by FY/agency/type/
+quarter just chooses a subset). It may **not** compute a new aggregate the
+platform didn't derive — for example, re-summing a filtered slice into a total
+that was never platform-computed is off-limits. Where a filter would need a new
+aggregation (a slice the platform didn't pre-derive), the page either (a) shows
+the underlying facts unchanged, or (b) the platform pre-derives that slice and
+ships it in `__pageData`. Chart types (donut shares, % within) are computed from
+facts the platform already derived, and the basis label is carried through every
+filter state.
 
 ## 5. Files touched
 
