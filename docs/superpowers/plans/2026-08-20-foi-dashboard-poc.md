@@ -1252,6 +1252,12 @@ from __future__ import annotations
 import asyncio
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+# NOTE: CPython 3.13 freezes the stdlib `site` module, so `src/site` cannot be
+# imported as `site.*` directly. Call site_shim.install() BEFORE any
+# `from site.pages import ...` / `from site.templates import ...` import. This
+# must also precede `import server.app` in scripts/serve.py.
+import site_shim
+site_shim.install()
 from pydantic import BaseModel
 from ingest.normalise import normalise_all
 from storage.frame import Frame
@@ -1318,6 +1324,8 @@ async def _complete_fn(messages):
 """Run the FOI Insights POC: python scripts/serve.py (uvicorn on :8095 or :FOI_PORT)."""
 import sys, os
 sys.path.insert(0, "src")
+import site_shim
+site_shim.install()  # must precede importing server.app (which imports site.*)
 import uvicorn
 from server.app import create_app
 
