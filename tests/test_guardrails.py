@@ -13,7 +13,9 @@ def test_out_of_scope_refused():
     for bad in ["US healthcare agencies", "immigration visa policy",
                 "crypto trading strategy", "who is the prime minister of france",
                 "named individual conduct", "tax advice for my return",
-                "defence operations planning", "stock market tip"]:
+                "defence operations planning", "stock market tip",
+                "u.s. federal agencies FOI", "US FOI requests",  # other country's FOI
+                "US congress records"]:
         try:
             check_request(bad)
             assert False, f"should refuse {bad}"
@@ -25,7 +27,9 @@ def test_in_scope_allowed():
     for good in ["top agencies by FOI requests received Q1 2025-26",
                  "compare refusal rates FY23 vs FY24",
                  "trend in timeliness of decision-making",
-                 "requests received by agency over five years"]:
+                 "requests received by agency over five years",
+                 "show us the trend of requests received",  # pronoun "us" is not the US country code
+                 "FOI requests received by healthcare agencies"]:
         check_request(good)  # must not raise
 
 

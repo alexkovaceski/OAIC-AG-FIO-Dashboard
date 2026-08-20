@@ -90,7 +90,9 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
         "Panels may be: bar, hbar, line, area, pie, table, kpi.\n"
         "Figure sources (enum): " + ", ".join(FIG_KEYS) + "\n"
         "Stat keys (enum): " + ", ".join(STAT_KEYS) + "\n"
-        "RULE: never write a digit. Cite stats as {c:job.turn.call.field} pointers. "
+        "RULE: never write a digit. Cite stats as {c:job.turn.call.field} pointers "
+        "where job=0 and turn is the tool call's 1-based order across the WHOLE "
+        "build (call is always 0, field walks the result, e.g. {c:0.1.0.top[0].agency}). "
         "Use tools to get real data. Every measure carries a basis (single_quarter|"
         "cumulative|fy).\n"
         "TOOLS: query_dataset(op, params) ops: list_agencies, filter_agencies, "
@@ -104,6 +106,12 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
         {"role": "user", "content": f"Build a dashboard that answers: {text}"},
     ]
     spec = None
+    # seq is a GLOBAL monotonic tool-call index across the whole build. The Task 5
+    # resolver (stats.dsl.resolve_citations) matches {c:0.<turn>.<call>.<field>}
+    # against the recorded transcript by the tool call's seq (parts[1]); a per-turn
+    # counter that resets would make turn 2's first call collide with turn 1's and
+    # silently resolve citations against the wrong result.
+    call_seq = 0
     for turn in range(max_turns):
         if inspect.iscoroutinefunction(complete_fn):
             raw = await complete_fn(messages)
@@ -119,7 +127,8 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
             continue
         messages.append({"role": "assistant", "content": raw})
         results = []
-        for seq, call in enumerate(calls, 1):
+        for call in calls:
+            call_seq += 1
             tool = call.get("tool")
             fn = TOOLS.get(tool)
             if not fn:
@@ -127,7 +136,7 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
                 continue
             if tool == "query_dataset":
                 res = fn(frame, call.get("op", ""), call.get("params", {}))
-                ledger.append({"event": "tool_call", "tool": tool, "seq": seq,
+                ledger.append({"event": "tool_call", "tool": tool, "seq": call_seq,
                                "op": call.get("op"), "args": call.get("params"),
                                "result": res})
                 # Task 4 carry-forward: create the artifact row FIRST (real id),
@@ -143,13 +152,13 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
                             artifact_key=(text or "")[:40], user_id=None,
                             dataset_id=_dataset_id(frame), request_text=text,
                             spec_json={}, model="fartkraft", status="building")
-                    lineage.record_tool_call(conn, artifact_id=artifact_id, seq=seq,
+                    lineage.record_tool_call(conn, artifact_id=artifact_id, seq=call_seq,
                                              tool=tool, op=call.get("op"),
                                              input_json=call.get("params"),
                                              output_json=res)
             elif tool == "compute":
                 res = fn(call.get("expr", ""), {})  # env populated in real impl
-                ledger.append({"event": "tool_call", "tool": tool,
+                ledger.append({"event": "tool_call", "tool": tool, "seq": call_seq,
                                "expr": call.get("expr"), "result": res})
             results.append({"tool": tool, "result": res})
         messages.append({"role": "user",

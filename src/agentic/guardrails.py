@@ -26,11 +26,13 @@ _OUT_OF_SCOPE_RE = re.compile(
 )
 # the two-letter country code "US" (the plan's \busa\b misses it) — a separate
 # context-gated alternation so the English pronoun "us" ("show us the trend")
-# is NOT caught. "USA"/"United States" are already covered above.
+# is NOT caught. Case-sensitive on purpose: the country code is written "US",
+# "U.S." or "u.s." — the lowercase pronoun "us" must never trigger a refusal.
+# "USA"/"United States" are already covered above. \s+ (not a trailing \b) after
+# the dotted forms, because there is no word boundary between a dot and a space.
 _US_COUNTRY_RE = re.compile(
-    r"u\.?s\.? (government|federal|state|health|healthcare|defen|military|agenc|"
-    r"congress|president|citizenship|visa|state department)",
-    re.I,
+    r"\b(?:US|U\.S\.|u\.s\.)\s+(?i:government|federal|state|health|healthcare|defen|"
+    r"military|agenc|congress|president|citizenship|visa|state department|foi|freedom)",
 )
 # Layer 2: prompt-injection / jailbreak patterns (mirrors dash_builder._JAILBREAK_RE)
 _JAILBREAK_RE = re.compile(

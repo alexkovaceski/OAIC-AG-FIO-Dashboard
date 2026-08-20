@@ -186,6 +186,43 @@ def test_out_of_scope_build_refused_before_any_lineage():
     assert lines == []
 
 
+def _two_turn_driver(messages):
+    """Two query_dataset turns, then a spec citing the SECOND turn's result."""
+    n = sum(1 for m in messages if m["role"] == "user" and "Tool results:" in m.get("content", ""))
+    if n == 0:
+        return ('[{"tool":"query_dataset","op":"filter_agencies",'
+                '"params":{"measure":"received","top_n":1}}]')
+    if n == 1:
+        return ('[{"tool":"query_dataset","op":"filter_agencies",'
+                '"params":{"measure":"finalised","top_n":1}}]')
+    return ('{"title":"Multi","panels":[{"figure":"bar",'
+            '"title":"{c:0.2.0.top[0].value}"}]}')
+
+
+def test_multi_turn_citation_resolves_to_the_right_call():
+    # Reviewer finding: the tool-call seq is a GLOBAL monotonic index across the
+    # build. Turn 1 records seq=1, turn 2 records seq=2 — a citation {c:0.2.0...}
+    # must resolve to turn 2's result, never silently to turn 1's.
+    from agentic.render import resolve_citations as rc
+    from stats.dsl import query_dataset
+    frame = Frame(normalise_all())
+    led = Ledger(ledger_path=tempfile.mktemp(suffix=".jsonl"))
+    asyncio.run(build_spec(
+        "requests by agency", frame, _two_turn_driver, led, None))
+    tc = [e for e in _reads(led) if e.get("event") == "tool_call"]
+    assert [e["seq"] for e in tc] == [1, 2]
+    assert tc[0]["op"] == "filter_agencies" and tc[1]["op"] == "filter_agencies"
+    spec = {"title": "Multi", "panels": [{"figure": "bar",
+                                          "title": "{c:0.2.0.top[0].value}"}]}
+    resolved = rc(spec, tc)
+    exp_finalised = query_dataset(frame, "filter_agencies",
+                                  {"measure": "finalised", "top_n": 1})["top"][0]["value"]
+    exp_received = query_dataset(frame, "filter_agencies",
+                                 {"measure": "received", "top_n": 1})["top"][0]["value"]
+    assert resolved["panels"][0]["title"] == str(exp_finalised)
+    assert exp_finalised != exp_received  # the two turns genuinely differ
+
+
 def test_pre_created_artifact_id_is_used():
     # a caller (the Task 8 server) may pre-create the artifact and pass its real
     # id in — the builder must use it, not create a second row
