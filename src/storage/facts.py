@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import psycopg2
+
 from storage.db import get_conn
 
 # Fact dict keys that make up the canonical row (from normalise._fact).
@@ -50,8 +52,9 @@ def ingest_facts(facts: list[dict], *, conn=None,
                  source_files: list[str] | None = None) -> int | None:
     """Persist facts as a new foi_datasets + foi_facts batch. Idempotent on
     canonical_hash: a re-run with the same facts returns the existing
-    dataset_id without inserting rows. Returns None on any DB failure (best
-    effort — never raises for the caller)."""
+    dataset_id without inserting rows. Returns None only on a transient DB
+    error (best effort, fail-open); a schema or programming error raises so it
+    is not silently hidden."""
     conn = conn or get_conn()
     h = canonical_hash(facts)
     try:
@@ -81,23 +84,30 @@ def ingest_facts(facts: list[dict], *, conn=None,
                      hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()))
         conn.commit()
         return dataset_id
-    except Exception:
+    except psycopg2.OperationalError:
         try:
             conn.rollback()
         except Exception:
             pass
         return None
+    except psycopg2.Error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 
 def load_facts(dataset_id: int, *, conn=None) -> list[dict] | None:
-    """Reload the long-form facts for a dataset as canonical dicts. None on any
-    DB failure (best effort)."""
+    """Reload the long-form facts for a dataset as canonical dicts. Returns
+    None only on a transient DB error (best effort); a schema or programming
+    error raises so it is not silently hidden."""
     conn = conn or get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT agency_key, agency_name, fy, quarter, measure_group, "
-                "measure, bucket, value, derived, portfolio "
+                "measure, bucket, value, derived "
                 "FROM horizon.foi_facts WHERE dataset_id = %s "
                 "ORDER BY agency_key, fy, quarter, measure_group, measure, bucket",
                 (dataset_id,))
@@ -105,9 +115,10 @@ def load_facts(dataset_id: int, *, conn=None) -> list[dict] | None:
         return [
             {"agency_key": r[0], "agency_name": r[1], "fy": r[2], "quarter": r[3],
              "measure_group": r[4], "measure": r[5], "bucket": r[6],
-             "value": float(r[7]), "derived": bool(r[8]),
-             "portfolio": r[9] if len(r) > 9 else ""}
+             "value": float(r[7]), "derived": bool(r[8]), "portfolio": ""}
             for r in rows
         ]
-    except Exception:
+    except psycopg2.OperationalError:
         return None
+    except psycopg2.Error:
+        raise

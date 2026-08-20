@@ -19,3 +19,10 @@ def test_golden_check_aborts_on_mismatch():
         assert False, "should have raised"
     except SystemExit:
         pass  # abort loudly on mismatch
+
+def test_summarize_empty_filter_returns_zero():
+    facts = normalise_all()
+    f = Frame(facts)
+    # an empty filtered list must not fall back to the whole frame
+    assert f.summarize(f.filter(fy="2099")) == 0
+    assert f.summarize(f.filter(fy="2025-26", quarter=99)) == 0

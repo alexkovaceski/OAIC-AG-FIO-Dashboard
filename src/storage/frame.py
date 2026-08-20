@@ -15,7 +15,10 @@ class Frame:
         return out
 
     def summarize(self, facts=None, measure="received", bucket="total"):
-        facts = facts or self.facts
+        # `facts or self.facts` would silently fall back to the whole frame on
+        # an empty filtered list — a wrong number produced without an error.
+        if facts is None:
+            facts = self.facts
         return round(sum(f["value"] for f in facts if f["measure"] == measure and f["bucket"] == bucket), 0)
 
     def golden_check(self):
