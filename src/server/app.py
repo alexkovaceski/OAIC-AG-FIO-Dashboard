@@ -32,10 +32,15 @@ from __future__ import annotations
 import site_shim  # noqa: E402
 site_shim.install()  # noqa: E402
 
+import logging  # noqa: E402
 import os  # noqa: E402
 
 import httpx  # noqa: E402
 import psycopg2  # noqa: E402
+
+logging.basicConfig(level=logging.WARNING,
+                    format="%(levelname)s %(name)s %(message)s")
+_LOGGER = logging.getLogger("foi-insights.server")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
@@ -196,14 +201,22 @@ def create_app():
     return app
 
 
+# The deterministic canned spec is the LOAD-BEARING fallback: on ANY failure —
+# endpoint down, timeout, non-2xx, malformed body, or null/empty content — the
+# demo must still return a valid spec, so /ask never dies.
+_FALLBACK_SPEC = ('{"title": "FOI request summary", '
+                  '"description": "FOI Insights demo — deterministic completion '
+                  '(live model unavailable).", "panels": []}')
+
+
 async def _complete_fn(messages):
     """Call the local model endpoint (idc-1, or FOI_LLM_URL) with the messages.
 
     The identity stovepipe lives in build_spec (Task 6); this function only
-    forwards the assembled messages and returns the model's raw text. The
-    deterministic canned spec is the LOAD-BEARING fallback: on ANY failure —
-    endpoint down, timeout, non-2xx, malformed body, missing content field —
-    the demo must still return a valid spec, so /ask never dies.
+    forwards the assembled messages and returns the model's raw text. On ANY
+    failure — including a model that answers with content=null (a tool-call
+    payload or empty content, which raises no exception) — it returns
+    _FALLBACK_SPEC so build_spec never receives a None it would crash on.
     """
     url = os.environ.get("FOI_LLM_URL", "http://idc-1:8012/v1/chat/completions")
     try:
@@ -212,9 +225,18 @@ async def _complete_fn(messages):
         async with httpx.AsyncClient(timeout=60) as c:
             r = await c.post(url, json=payload)
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            text = r.json()["choices"][0]["message"]["content"]
+        if not text or not isinstance(text, str):
+            # content=null (tool-call turn), "" or a malformed non-string is not
+            # a usable spec — same failure class as an unreachable endpoint.
+            # Guarded explicitly so it cannot slip past the fallback and crash
+            # build_spec on None (or a non-string re.sub).
+            _LOGGER.warning("_complete_fn: model returned empty/non-string "
+                            "content (%r); using deterministic fallback", text)
+            return _FALLBACK_SPEC
+        return text
     except Exception:
         # deterministic fallback — the demo always returns a valid spec
-        return ('{"title": "FOI request summary", '
-                '"description": "FOI Insights demo — deterministic completion '
-                '(live model unavailable).", "panels": []}')
+        _LOGGER.warning("_complete_fn: LLM call failed; using deterministic "
+                        "fallback", exc_info=True)
+        return _FALLBACK_SPEC

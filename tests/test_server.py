@@ -121,6 +121,25 @@ def test_complete_fn_falls_back_when_llm_unreachable(monkeypatch):
     assert "panels" in spec
 
 
+@pytest.mark.parametrize("bad_content", [None, "", {"nested": "not-a-string"}])
+def test_complete_fn_returns_fallback_on_bad_content(monkeypatch, bad_content):
+    # IMPORTANT reviewer finding: a model answering with a tool-call payload or
+    # empty content returns content=null (NO exception), so the raw access does
+    # not trip the except path. That null must NOT escape _complete_fn —
+    # build_spec would call _parse_tool_calls(None) and crash with AttributeError.
+    async def fake_post(self, url, json=None):
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": bad_content}}]},
+            request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    out = asyncio.run(app_mod._complete_fn([{"role": "user", "content": "x"}]))
+    spec = json.loads(out)
+    assert spec["title"] == "FOI request summary"
+    assert "panels" in spec
+
+
 def test_complete_fn_passes_through_model_text(monkeypatch):
     # when the endpoint answers, _complete_fn returns the raw model text; the
     # messages it received are forwarded verbatim in the payload
