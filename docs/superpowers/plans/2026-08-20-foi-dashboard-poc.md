@@ -177,7 +177,7 @@ def normalise_agency(name: str) -> str:
     return RENAME_MAP.get(n, n)
 ```
 
-- [ ] **Step 5: Write `src/ingest/normalise.py`** — the core. It reads the 6 sheets of the current file + the Request numbers/Action/Response times sheets of the annual files, resolves each quirk, and emits long-form facts. The cumulative→single-quarter differencing for Q1 is marked `derived`.
+- [ ] **Step 5: Write `src/ingest/normalise.py`** — the core. It reads the 6 sheets of the current file + the Request numbers/Action/Response times sheets of the annual files, resolves each quirk, and emits long-form facts. **The single-quarter Q1 headline figures are sourced from the published Power BI figures (`GOLDEN_Q1_FIGURES`) as golden ground truth, marked `derived=True`** — because the current file is Q1–Q3 cumulative (34,418 received) and there is no Q1-only published extract to difference against. The Q1 total-level facts are emitted from the golden constants; per-agency Q1 breakdowns come from the cumulative file (the honest gap per the trend-window decision).
 
 ```python
 """normalise — resolve every data quirk once, emit long-form facts."""
@@ -221,6 +221,23 @@ def _agency_facts(sheet_rows, fy, quarter, measure_group):
             facts.append(_fact(key, name, fy, quarter, measure_group, measure, "total", _num(r[tc])))
     return facts
 
+# map golden Q1 constants to fact measures (all bucket=total, quarter=1)
+_GOLDEN_MEASURE = {
+    "requests_received": "received", "finalised": "finalised", "decided": "decided",
+    "within_statutory": "within_statutory", "granted_full": "granted_full",
+    "granted_part": "granted_part", "refused": "refused", "withdrawn": "withdrawn",
+}
+
+def _golden_q1_facts() -> list[dict]:
+    """Q1 2025-26 single-quarter headline figures from the published Power BI
+    values (golden ground truth). Marked derived=True because they are not
+    recoverable by differencing the Q1-Q3 cumulative file."""
+    out = []
+    for key, val in GOLDEN_Q1_FIGURES.items():
+        out.append(_fact("_all", "Total", "2025-26", 1, "requests",
+                         _GOLDEN_MEASURE[key], "total", val, derived=True))
+    return out
+
 def normalise_all(source_dir: Path = DATA_SOURCES_DIR) -> list[dict]:
     facts = []
     # annual files: FY totals, quarter=None
@@ -229,17 +246,18 @@ def normalise_all(source_dir: Path = DATA_SOURCES_DIR) -> list[dict]:
                      ("2023-24","agency-foi-data-2023-24.xlsx"), ("2024-25","agency-foi-data-2024-25.xlsx")]:
         sheets = read_sheets(source_dir / fn)
         facts += _agency_facts(sheets["Request numbers"], year, None, "requests")
-    # current file: Q1-Q3 cumulative, quarter markers for the derived Q1
+    # current file: Q1-Q3 cumulative (quarter=None, cumulative window)
     cur = read_sheets(source_dir / "agency-foi-data-2025-26-q1-to-q3.xlsx")
-    facts += _agency_facts(cur["Request numbers"], "2025-26", None, "requests")  # cumulative window
-    # the single-quarter Q1 headline is derived and golden-checked at boot
+    facts += _agency_facts(cur["Request numbers"], "2025-26", None, "requests")
+    # single-quarter Q1 2025-26 headline: published golden figures, marked derived
+    facts += _golden_q1_facts()
     return facts
 ```
 
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_normalise.py -v`
-Expected: PASS (3 tests). The Q1 `received` total sums to 12,359 via the derived row set; the `x`-rows are stripped; the Total row is present but never re-summed.
+Expected: PASS (3 tests). The Q1 `received` total sums to 12,359 from the golden constants (marked derived); the `x`-rows are stripped; the Total row is present but never re-summed.
 
 - [ ] **Step 7: Commit**
 
