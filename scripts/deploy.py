@@ -110,10 +110,15 @@ def main() -> int:
             dry_run=args.dry_run, description=f"push {item}")
 
     # 2. Install/refresh the venv (idempotent; first deploy creates it).
+    # axoquant-llm is installed from the LOCAL clone on idc-1
+    # (/home/algolotl/axoquant-llm, pinned to 235ce71) — the git+https line in
+    # requirements.txt fails because the repo is private. Install it first, then
+    # the rest of requirements (pip resolves the already-present dist).
     run(["ssh", ssh_target(),
          f"cd {REMOTE} && python3 -m venv .venv && "
+         f".venv/bin/pip install -q -e /home/algolotl/axoquant-llm && "
          f".venv/bin/pip install -r requirements.txt"],
-        dry_run=args.dry_run, description="install python deps")
+        dry_run=args.dry_run, description="install python deps (axoquant-llm local)")
 
     if args.no_restart:
         print(f"\n--no-restart: files pushed + deps installed; {UNIT} untouched.")

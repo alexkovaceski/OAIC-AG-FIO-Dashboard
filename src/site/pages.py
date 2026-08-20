@@ -383,6 +383,56 @@ def _page_how_to_use() -> str:
     return chrome("How to use", "Freedom of information", body)
 
 
+def _page_api() -> str:
+    body = """
+    <h1>API access</h1>
+    <p class="intro">Every figure and fact behind these visualisations is
+    available as a read-only JSON API. The endpoints expose the <em>same
+    platform-computed numbers the pages render</em> — nothing a model generated,
+    only the canonical data sourced from data.gov.au (OAIC FOI statistics) plus
+    the deterministic figures computed from it.</p>
+    <h2>Endpoints</h2>
+    <table class="apitable">
+      <tr><th>Endpoint</th><th>What it returns</th></tr>
+      <tr><td><code>GET /api/</code></td><td>Dataset info: snapshot, window
+      modes, measures, figure/stat keys, source link, disclaimer.</td></tr>
+      <tr><td><code>GET /api/figures</code></td><td>Every computed figure/stat
+      with its <code>basis</code> label — the numbers behind the charts.</td></tr>
+      <tr><td><code>GET /api/facts</code></td><td>The long-form canonical facts
+      (agency × measure × bucket), filterable by <code>fy</code>,
+      <code>measure</code>, <code>bucket</code>, <code>agency</code>,
+      <code>quarter</code>, paged by <code>limit</code>/<code>offset</code>.</td></tr>
+      <tr><td><code>GET /api/measures</code></td><td>The measure groups and the
+      measures within each.</td></tr>
+    </table>
+    <h2>Examples</h2>
+    <pre><code># all figures (with basis)
+curl https://foi.fartkraft.ai/api/figures
+
+# facts for a single measure
+curl "https://foi.fartkraft.ai/api/facts?measure=received&fy=2024-25&bucket=total"
+
+# dataset info
+curl https://foi.fartkraft.ai/api/</code></pre>
+    <h2>Throttling</h2>
+    <p>The API is rate-limited per client IP (a fixed window) so a public,
+    unauthenticated demo isn't overloaded. A <code>429</code> response carries a
+    <code>Retry-After</code> header telling you when to try again. The limits
+    are modest and tuned for demo traffic — this is not a production data
+    service.</p>
+    <h2>Source</h2>
+    <p>The underlying data is the <a href="https://data.gov.au/data/dataset/freedom-of-information-statistics">
+    OAIC FOI statistics dataset</a> on data.gov.au (dataset
+    <code>b0771c28-09cc-4c4e-9e61-9a96f6e3d040</code>). See the
+    <a href="/data-notes.html">Data notes and disclaimer</a> for how agencies,
+    renames and personal information are handled.</p>
+    <p class="lineage">Want to know where any figure came from? Every dashboard
+    and report has a <a href="/lineage/local-1">lineage page</a> — the
+    explainability trail is part of the demo.</p>
+    """
+    return chrome("API access", "Freedom of information", body)
+
+
 def _md(text: str) -> str:
     """Minimal markdown → HTML: escape, then wrap blank-line-separated
     paragraphs; keep headings, "- " bullet lists and *emphasis* readable.
@@ -454,5 +504,6 @@ def render_all_pages(frame) -> dict[str, str]:
         "change-timeliness": _page_change_timeliness(frame),
         "data-notes": _page_data_notes(),
         "how-to-use": _page_how_to_use(),
+        "api": _page_api(),
     }
     return pages

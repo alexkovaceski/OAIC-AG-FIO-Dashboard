@@ -5,4 +5,6 @@ psycopg2-binary
 httpx
 pytest
 pytest-asyncio
-axoquant-llm @ git+https://github.com/axoquant/llm.git@235ce71
+# axoquant-llm is installed from the LOCAL clone on idc-1 (/home/algolotl/axoquant-llm,
+# pinned 235ce71) because the GitHub repo is private. deploy.py does this first.
+# axoquant-llm @ git+https://github.com/axoquant/llm.git@235ce71
