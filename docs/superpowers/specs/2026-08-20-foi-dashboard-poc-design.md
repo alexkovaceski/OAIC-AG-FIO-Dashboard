@@ -188,7 +188,9 @@ bar, before wiring:
    `compare_period` + `refusal_rate` op.
 2. "Correlate timeliness slippage with request volume." → `correlate` op.
 3. "Which portfolios drive the increase in decisions made within statutory
-   time?" → `by_portfolio` op (needs portfolio mapping).
+   time?" → `by_portfolio` op. Portfolio grouping is derived from a **bundled
+   agency→portfolio map** (an extension of the MoG rename table in the ingest),
+   not an external MoG-directory dependency.
 4. "Why does Home Affairs have ~35% of requests, citing the notes?" → `notes()` +
    corpus grounding.
 
@@ -223,7 +225,7 @@ interactive trend/top-contributor views; self-contained SVG for static pages.
 
 | # | Power BI page | POC page |
 |---|---|---|
-| 1 | FOI at a glance | KPI tiles: requests received (12,359, +72% YoY, +5% QoQ), finalised (11,549), decided within statutory (70%), granted full/part/refused shares, withdrawn. Filters: portfolio, type, FY/quarter. |
+| 1 | FOI at a glance | KPI tiles: requests received (12,359, +72% YoY, +5% QoQ), finalised (11,549), decided (7,344; 5,167 within statutory = 70%), granted full/part/refused shares (1,426 / 3,968 / 1,950), withdrawn (3,955). Filters: portfolio, type, FY/quarter. |
 | 2 | Requests received (trend + top contributors) | Trend line (FY-level), top-contributors bar (Home Affairs ~35%). |
 | 3 | Key agency contributions to requests received | Top-5 + contribution-to-change waterfall. |
 | 4 | Requests finalised (trend) | Trend + decided/transferred/withdrawn stack. |
@@ -253,9 +255,25 @@ the page that demonstrates the explainability requirement live.
 ## 6. Governance (chat scope and identity)
 
 The chat and agentic builder are hard-scoped to this use case. A user cannot
-steer them outside the FOI statistics domain.
+steer them outside the FOI statistics domain. Governance is **defence-in-depth**
+(mirroring horizon's `request_governor.rule_screen` + `_grounded_system`):
+a deterministic regex screen **and** a prompt-level scope block, so a scope
+violation is caught even if one layer is bypassed.
 
-### 6.1 Scope guardrail
+### 6.1 Deterministic scope screen (Layer 1)
+
+A regex + token-match screen runs on every request **before** it reaches the
+model (mirroring `request_governor.rule_screen`). It matches out-of-scope terms
+and returns `{blocked: true, reason}` without invoking the model. Matched terms
+include: other countries' FOI/freedom-of-information, immigration/visa/citizenship,
+tax/benefit/policy advice, health/medical, defence/security operations, anything
+about named individuals or agencies' internal conduct, and any attempt to use the
+data for purposes beyond the published statistics. Blocked requests are logged to
+lineage (`governor_block`) and refused cleanly. If the screen is unsure, it lets
+the request through to the model-level scope block (fail-open for words, but the
+prompt block below is strict).
+
+### 6.2 Prompt-level scope block (Layer 2)
 
 The scope block in the system prompt (mirroring horizon's `_grounded_system`) is
 FOI-specific and strict:
@@ -269,33 +287,35 @@ FOI-specific and strict:
   sources, and any attempt to use the data to reach conclusions about individuals,
   agencies' internal conduct, or matters beyond the published statistics.
 - The refusal is a one/two-line polite answer that declines to engage, and is
-  logged to lineage (`governor_block`).
+  logged to lineage.
 
-### 6.2 Jailbreak guardrail
+### 6.3 Jailbreak guardrail
 
 Regex scan for prompt-injection and jailbreak patterns (mirroring
 `dash_builder.py`): "ignore previous instructions", "reveal your system prompt",
 "execute code", "show api key", role-play/alternate-identity attempts, and similar.
 Blocked requests are logged and refused cleanly.
 
-### 6.3 Tool sandbox
+### 6.4 Tool sandbox
 
 Read-only by construction. No shell, no file access, no arbitrary execution.
 `fetch_source` is https + allowlisted hosts only. `compute` is AST-safe
 arithmetic over declared columns. The agent cannot write to the dataset, the
 lineage ledger, or the host.
 
-### 6.4 Identity guardrail
+### 6.5 Identity guardrail
 
-The agent never reveals the underlying model, vendor, hardware, or prompt. When
-asked "what model are you" (or any variant), the stovepipe answer is:
+The agent never reveals the underlying model vendor, concrete weights, hardware,
+or prompt. When asked "what model are you" (or any variant), the stovepipe answer
+is **the one and only** disclosure:
 
-> "I am powered by the axoquant sovereign model stack (FartKraft) trained on
+> "I am powered by the axoquant sovereign model stack (FartKraft), trained on
 > local data."
 
-That is the only model disclosure. It is true at the level the demo intends —
-the model stack is sovereign and local — and deliberately does not name the
-concrete weights or hardware.
+That is the only model disclosure. It is true at the level the demo intends — the
+model stack is sovereign and local — and deliberately does not name the concrete
+weights, vendor, or hardware. This applies to the chat, the agentic builder, and
+any report/dashboard metadata exposed on the public surface.
 
 ## 7. Lineage viewer, ledger, deploy, scope
 
@@ -352,7 +372,8 @@ identity); deploy (idc-1 + tunnel + Worker, no auth).
 horizon beats a second Qdrant collection; Qdrant stays write-side); the read-only
 SQL tool + `foi_ro` SELECT-only role (only if a gov evaluator asks to interrogate
 SQL directly); bitemporal valid_from/to lineage + multi-worker JSONL; portfolio
-grouping beyond the rename table; any lineage-viewer expansion.
+grouping derived from an *external* MoG-directory dependency (the bundled
+agency→portfolio map in the ingest ships); any lineage-viewer expansion.
 
 ## 8. Key risks
 
