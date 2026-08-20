@@ -136,11 +136,18 @@ def record_tool_call(conn, *, artifact_id, seq, tool, op, input_json, output_jso
 
 
 def _replay_default_compute(op_row):
-    """Default recompute for replay_verify: Task 5's foi_stats, imported lazily
-    so this module works before the catalog exists. Raises if stats.catalog is
-    not built; replay_verify catches that and fails open (returns False)."""
+    """Default recompute for replay_verify: Task 5's foi_stats over the facts
+    for the dataset_id. Lazy imports keep this module working before the catalog
+    exists. Raises if the catalog is not built or the facts cannot be loaded;
+    replay_verify catches that and fails open (returns False)."""
     from stats.catalog import foi_stats  # lazy — Task 5 builds stats.catalog
-    result = foi_stats(op_row["dataset_id"], op_row["op"], op_row.get("params", {}))
+    from storage.facts import load_facts
+    from storage.frame import Frame
+    dataset_id = op_row["dataset_id"]
+    facts = load_facts(dataset_id)
+    if not facts:
+        raise RuntimeError(f"no facts to replay for dataset {dataset_id}")
+    result = foi_stats(Frame(facts), op_row["op"])
     return result.get("value"), result.get("rows_hash")
 
 

@@ -251,11 +251,37 @@ def test_replay_verify_detects_corruption():
 
 
 def test_replay_verify_default_is_lazy_and_fails_open():
-    # no compute passed: the default lazily imports Task 5's foi_stats, which is
-    # not built yet — replay must return False (fail-open), never raise.
+    # no compute passed: the default lazily imports Task 5's foi_stats and loads
+    # facts for the dataset_id — no live Postgres here, so load_facts fails and
+    # replay must return False (fail-open), never raise.
     row = {"dataset_id": 1, "op": "requests_received_q1", "params": {},
            "result_value": 12359, "rows_hash": "x"}
     assert lineage_mod.replay_verify(None, row) is False
+
+
+def test_replay_default_produces_real_hash_for_figure_key():
+    # carry-forward reconciliation: the replay default must not be a silent
+    # no-op for figure keys — it recomputes foi_stats over the loaded facts and
+    # yields the exact source-row hash, so a correctly-recorded op passes.
+    import storage.facts
+    from ingest.normalise import normalise_all
+    from stats.catalog import hash_rows
+
+    facts = normalise_all()
+    real_hash = hash_rows([f for f in facts if f["fy"] == "2025-26" and f["quarter"] == 1
+                           and f["measure"] == "received" and f["bucket"] == "total"])
+
+    # patch the module the default compute imports load_facts from (at call
+    # time), so no live Postgres is needed.
+    storage.facts.load_facts = lambda dataset_id, *, conn=None: facts
+
+    row = {"dataset_id": 99, "op": "requests_received_q1", "params": {},
+           "result_value": 12359, "rows_hash": real_hash}
+    assert lineage_mod.replay_verify(None, row) is True
+
+    # a corrupted stored hash no longer passes — the default computes a real one
+    bad = dict(row, rows_hash="deadbeef")
+    assert lineage_mod.replay_verify(None, bad) is False
 
 
 def test_replay_verify_fails_open_on_non_dict_row():
