@@ -37,6 +37,7 @@ class Ledger:
             return
         try:
             self._f.write(json.dumps(event, default=str) + "\n")
+            self._f.flush()
         except Exception:
             pass  # never raise
 

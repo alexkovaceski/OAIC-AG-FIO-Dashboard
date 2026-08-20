@@ -32,6 +32,9 @@ from __future__ import annotations
 import site_shim  # noqa: E402
 site_shim.install()  # noqa: E402
 
+import os  # noqa: E402
+
+import httpx  # noqa: E402
 import psycopg2  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
@@ -194,11 +197,24 @@ def create_app():
 
 
 async def _complete_fn(messages):
-    """Deterministic completion for the POC demo (Task 9 wires the real LLM).
+    """Call the local model endpoint (idc-1, or FOI_LLM_URL) with the messages.
 
-    Returns a canned spec immediately, so /ask works end-to-end without a live
-    model. Kept async because build_spec awaits it (inspect.iscoroutinefunction).
+    The identity stovepipe lives in build_spec (Task 6); this function only
+    forwards the assembled messages and returns the model's raw text. The
+    deterministic canned spec is the LOAD-BEARING fallback: on ANY failure —
+    endpoint down, timeout, non-2xx, malformed body, missing content field —
+    the demo must still return a valid spec, so /ask never dies.
     """
-    return ('{"title": "FOI request summary", '
-            '"description": "Deterministic POC completion — Task 9 wires the '
-            'live model.", "panels": []}')
+    url = os.environ.get("FOI_LLM_URL", "http://idc-1:8012/v1/chat/completions")
+    try:
+        payload = {"model": os.environ.get("FOI_LLM_MODEL", "qwen3next-80b"),
+                   "messages": messages, "temperature": 0.2}
+        async with httpx.AsyncClient(timeout=60) as c:
+            r = await c.post(url, json=payload)
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+    except Exception:
+        # deterministic fallback — the demo always returns a valid spec
+        return ('{"title": "FOI request summary", '
+                '"description": "FOI Insights demo — deterministic completion '
+                '(live model unavailable).", "panels": []}')

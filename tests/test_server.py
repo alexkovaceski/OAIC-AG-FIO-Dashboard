@@ -6,14 +6,23 @@ artifact id when the DB is unreachable (lineage must never fail a build), and
 runs on create_app() — any test failing here means the data/normaliser
 integrity gate is wrong.
 """
+import asyncio
+import json
 import sys
 
+import httpx
 import pytest
 
 sys.path.insert(0, "src")
 from fastapi.testclient import TestClient
 from server.app import create_app
 import server.app as app_mod
+
+
+async def _fake_complete(messages):
+    # hermetic replacement for the real _complete_fn: no network, immediate spec
+    return ('{"title": "FOI request summary", '
+            '"description": "test", "panels": []}')
 
 
 def test_health():
@@ -32,9 +41,10 @@ def test_static_pages_render():
         assert "fartkraft" in r.text.lower()
 
 
-def test_ask_returns_artifact_and_urls():
-    # the deterministic _complete_fn returns a canned spec, so /ask works
-    # end-to-end without a live model or a live DB (fail-open to a synthetic id)
+def test_ask_returns_artifact_and_urls(monkeypatch):
+    # hermetic end-to-end /ask: the fake complete_fn returns the canned spec, so
+    # the route works without a live model or a live DB (fail-open to a synthetic id)
+    monkeypatch.setattr(app_mod, "_complete_fn", _fake_complete)
     c = TestClient(create_app())
     r = c.post("/ask", json={"request": "show me requests received by agency"})
     assert r.status_code == 200
@@ -97,6 +107,43 @@ def test_ask_scope_refusal_rejected_before_artifact(monkeypatch):
     assert body["error"]
     assert body["artifact_id"] is None
     assert calls == []  # no artifact row was created for a refusal
+
+
+def test_complete_fn_falls_back_when_llm_unreachable(monkeypatch):
+    # Task 9 load-bearing requirement: on ANY failure (endpoint down, timeout,
+    # non-2xx, bad body) _complete_fn returns the deterministic canned spec so
+    # the demo never dies. Point FOI_LLM_URL at an unreachable port and assert
+    # the fallback — no network is actually required (connect is refused).
+    monkeypatch.setenv("FOI_LLM_URL", "http://127.0.0.1:1/v1/chat/completions")
+    out = asyncio.run(app_mod._complete_fn([{"role": "user", "content": "x"}]))
+    spec = json.loads(out)
+    assert spec["title"] == "FOI request summary"
+    assert "panels" in spec
+
+
+def test_complete_fn_passes_through_model_text(monkeypatch):
+    # when the endpoint answers, _complete_fn returns the raw model text; the
+    # messages it received are forwarded verbatim in the payload
+    captured = {}
+
+    async def fake_post(self, url, json=None):
+        # AsyncClient.post is a coroutine — the fake must be awaitable too, and
+        # raise_for_status() needs the request set on the response
+        captured["url"] = url
+        captured["payload"] = json
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "hello"}}]},
+            request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    msgs = [{"role": "user", "content": "build a dashboard"}]
+    out = asyncio.run(app_mod._complete_fn(msgs))
+    assert out == "hello"
+    assert captured["payload"]["messages"] == msgs
+    assert captured["payload"]["model"] == "qwen3next-80b"
+    assert captured["payload"]["temperature"] == 0.2
+    assert captured["url"] == "http://idc-1:8012/v1/chat/completions"
 
 
 def test_golden_gate_aborts_on_bad_data(monkeypatch):
