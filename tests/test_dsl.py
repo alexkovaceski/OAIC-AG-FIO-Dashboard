@@ -33,12 +33,12 @@ def test_compare_period_received_real_change():
 
 def test_acceptance_q2_correlate_timeliness_volume():
     f = Frame(normalise_all())
-    # within_statutory only exists as single-quarter Q1 facts — no FY series, so
-    # the honest correlation is None, never a fabricated coefficient.
+    # within_statutory only exists as single-quarter Q1 facts — no annual-FY
+    # rows, so the trend returns an EMPTY series, never a flat zero line; the
+    # honest correlation is None, never a fabricated coefficient.
     within = query_dataset(f, "trend", {"measure": "within_statutory"})["values"]
     recv = query_dataset(f, "trend", {"measure": "received"})["values"]
-    assert len(within) == len(recv) >= 6          # the FY windows line up
-    assert all(v == 0 for v in within)            # honest zero line (no FY facts)
+    assert within == []                           # no fabricated zero line
     assert recv and any(v > 0 for v in recv)      # received is a real series
     assert foi_stats(f, "timeliness_slippage_corr")["value"] is None  # no fabrication
 
@@ -63,6 +63,35 @@ def test_no_phantom_total_agency():
     assert all(a["agency"] != "Total" for a in r["top"])
     s = query_dataset(f, "summarize_agencies", {"measure": "received"})
     assert "count" in s and "total" in s
+
+
+def test_trend_no_fabrication_and_no_golden_total():
+    f = Frame(normalise_all())
+    # a measure with no annual-FY facts returns an EMPTY series, not zeros
+    empty = query_dataset(f, "trend", {"measure": "within_statutory"})
+    assert empty["values"] == [] and empty["years"] == []
+    # received is a real series; the 2025-26 point is the per-agency cumulative
+    # total (34,418), NOT 46,777 — the golden "Total" grand total must not leak in
+    received = query_dataset(f, "trend", {"measure": "received"})["values"]
+    assert received[-1] == 34418
+
+
+def test_compare_period_excludes_total():
+    f = Frame(normalise_all())
+    r = query_dataset(f, "compare_period", {"measure": "received", "fy_a": "2024-25", "fy_b": "2025-26"})
+    # 2025-26 value_b is the per-agency cumulative total (34,418), not the
+    # double-counted 46,777 that would include the golden grand total
+    assert r["value_a"] == 42759 and r["value_b"] == 34418
+    assert r["change"] == -8341 and r["change_pct"] == -20
+
+
+def test_by_portfolio_excludes_total():
+    f = Frame(normalise_all())
+    r = query_dataset(f, "by_portfolio", {"measure": "received", "fy": "2025-26", "bucket": "total"})
+    # the only portfolio is "Unmapped" (PORTFOLIO_MAP is empty); its value is the
+    # per-agency cumulative total (34,418), not 46,777 with the golden grand total
+    assert [p["portfolio"] for p in r["portfolios"]] == ["Unmapped"]
+    assert sum(p["value"] for p in r["portfolios"]) == 34418
 
 
 def test_kpis_op_carries_basis():

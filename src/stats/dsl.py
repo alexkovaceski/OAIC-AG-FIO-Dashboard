@@ -89,20 +89,30 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
         return {"basis": basis, "count": len(rows), "total": round(sum(f["value"] for f in rows))}
     if op == "trend":
-        # 5-year FY trend
-        cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
-        rows = [f for f in frame.facts if f["quarter"] is None and f["measure"] == params.get("measure", "received") and f["bucket"] == "total"]
+        # 5-year FY trend from the annual files (quarter is None). A measure
+        # with no annual-FY rows (e.g. within_statutory, which only exists as
+        # single-quarter Q1 facts) returns an EMPTY series, never a fabricated
+        # flat zero line. The golden "Total" pseudo-agency is excluded.
+        rows = [f for f in frame.facts if f["quarter"] is None
+                and f["measure"] == params.get("measure", "received")
+                and f["bucket"] == "total" and f["agency_name"].lower() != "total"]
+        if not rows:
+            return {"basis": "fy", "years": [], "values": []}
         by = {}
         for f in rows:
             by.setdefault(f["fy"], 0.0)
             by[f["fy"]] += f["value"]
-        return {"basis": "fy", "years": cats, "values": [round(by.get(y, 0)) for y in cats]}
+        cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
+        return {"basis": "fy", "years": cats,
+                "values": [round(by[y]) if y in by else None for y in cats]}
     if op == "compare_period":
         # same-period-previous-year change in a measure
         m = params.get("measure", "received")
         a, b = params.get("fy_a"), params.get("fy_b")
         def tot(fy):
-            return sum(f["value"] for f in frame.facts if f["fy"] == fy and f["measure"] == m and f["bucket"] == "total")
+            return sum(f["value"] for f in frame.facts
+                       if f["fy"] == fy and f["measure"] == m and f["bucket"] == "total"
+                       and f["agency_name"].lower() != "total")  # no golden grand totals
         va, vb = tot(a), tot(b)
         return {"basis": "fy", "fy_a": a, "fy_b": b, "value_a": round(va), "value_b": round(vb),
                 "change": round(vb - va),
@@ -110,7 +120,8 @@ def query_dataset(frame, op: str, params: dict) -> dict:
     if op == "top_contributors":
         return query_dataset(frame, "filter_agencies", params)
     if op == "by_portfolio":
-        rows = frame.facts
+        # the golden "Total" pseudo-agency is a total-level fact, not an agency
+        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
         if params.get("fy"): rows = [f for f in rows if f["fy"] == params["fy"]]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
