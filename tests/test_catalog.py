@@ -49,3 +49,20 @@ def test_rows_hash_is_deterministic_sha256():
     assert r1["rows_hash"] == hash_rows(rows)
     assert r1["source_rows"] == len(rows) == 1
     assert r1["basis"] == "single_quarter"
+
+
+def test_uncomputable_figures_are_empty_not_zero():
+    # measures the annual files don't publish must NOT fabricate flat zero
+    # lines — the figure returns an empty series, and the honest correlation
+    # is None, never a number.
+    f = Frame(normalise_all())
+    for k in ["requests_decided_trend", "decision_outcomes_trend", "timeliness_trend",
+              "refused_pct_trend", "granted_full_part_change", "timeliness_change",
+              "decided_top20"]:
+        fig = foi_stats(f, k)["value"]
+        for s in fig["series"]:
+            assert s["values"] == [], f"{k}: expected empty series, got {s['values']}"
+    # timeliness_trend must not invent an after_statutory series
+    tt = foi_stats(f, "timeliness_trend")["value"]
+    assert all(s["name"] != "after_statutory" for s in tt["series"])
+    assert foi_stats(f, "timeliness_slippage_corr")["value"] is None

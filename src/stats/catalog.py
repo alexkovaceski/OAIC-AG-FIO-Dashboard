@@ -79,15 +79,22 @@ def _fy_series(frame, measure):
 
     NOTE: Frame.filter(quarter=None) means "no quarter constraint" (it only
     filters when quarter is not None), so the annual-FY rows are selected by the
-    explicit `f["quarter"] is None` test, not by frame.filter."""
+    explicit `f["quarter"] is None` test, not by frame.filter.
+
+    Returns [] when the measure has no annual-FY rows at all — the annual files
+    only publish received/finalised, so measures like decided/refused return an
+    EMPTY series, never a fabricated flat zero line. Years missing within a
+    present measure are None, not 0."""
     rows = [f for f in frame.facts if f["quarter"] is None
             and f["measure"] == measure and f["bucket"] == "total"]
+    if not rows:
+        return []
     by = {}
     for f in rows:
         by.setdefault(f["fy"], 0.0)
         by[f["fy"]] += f["value"]
     cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
-    return [round(by.get(y, 0)) for y in cats]
+    return [round(by[y]) if y in by else None for y in cats]
 
 
 def _pearson(a, b):
@@ -164,24 +171,29 @@ def _figure(frame, key):
             {"name": "refused", "values": _fy_series(frame, "refused")},
             {"name": "withdrawn", "values": _fy_series(frame, "withdrawn")}]}
     if key == "timeliness_trend":
-        return {"categories": cats, "series": [
-            {"name": "within_statutory", "values": _fy_series(frame, "within_statutory")},
-            {"name": "after_statutory", "values": []}]}  # after-statutory is not a published measure
+        # only within_statutory is published; an invented "after_statutory"
+        # series would be a fabricated number, so it is omitted
+        return {"categories": cats, "series": [{"name": "within_statutory",
+                "values": _fy_series(frame, "within_statutory")}]}
     if key == "refused_pct_trend":
         refused = _fy_series(frame, "refused")
         decided = _fy_series(frame, "decided")
         return {"categories": cats, "series": [{"name": "refused_pct",
-                "values": [round(100 * r / d, 1) if d else None for r, d in zip(refused, decided)]}]}
+                "values": [round(100 * r / d, 1) if r is not None and d else None
+                           for r, d in zip(refused, decided)]}]}
     if key == "granted_full_part_change":
         gf, gp = _fy_series(frame, "granted_full"), _fy_series(frame, "granted_part")
         decided = _fy_series(frame, "decided")
         return {"categories": cats, "series": [{"name": "granted_full_or_part_pct",
-                "values": [round(100 * (a + b) / d, 1) if d else None for a, b, d in zip(gf, gp, decided)]}]}
+                "values": [round(100 * (a + b) / d, 1)
+                           if a is not None and b is not None and d else None
+                           for a, b, d in zip(gf, gp, decided)]}]}
     if key == "timeliness_change":
         within = _fy_series(frame, "within_statutory")
         decided = _fy_series(frame, "decided")
         return {"categories": cats, "series": [{"name": "within_statutory_pct",
-                "values": [round(100 * w / d, 1) if d else None for w, d in zip(within, decided)]}]}
+                "values": [round(100 * w / d, 1) if w is not None and d else None
+                           for w, d in zip(within, decided)]}]}
     if key == "received_top20":
         rows = frame.filter(measure="received", bucket="total", fy="2024-25")
         aggs = {}

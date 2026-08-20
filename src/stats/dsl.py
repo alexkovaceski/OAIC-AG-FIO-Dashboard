@@ -6,15 +6,17 @@ recorded tool-call results via {c:job.turn.call.field} pointers.
 """
 from __future__ import annotations
 import ast
-import json
 import operator as _op
 import re
 
 from stats.catalog import foi_stats, STAT_KEYS
 
 # citation pointer {c:<job>.<turn>.<call>.<field>} -> a value recorded in the
-# transcript of a query_dataset call (see resolve_citations).
-CITATION_PATTERN = re.compile(r"\{c:([\w.]+)\}")
+# transcript of a query_dataset call (see resolve_citations). The field path
+# supports bracket indices, e.g. top[0].agency.
+CITATION_PATTERN = re.compile(r"\{c:([\w.\[\]]+)\}")
+# tokenises a field-path segment like "top[0]" into keys ("top") and indices (0)
+_FIELD_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
 def _safe_math(expr: str, env: dict) -> float:
@@ -35,6 +37,8 @@ def _safe_math(expr: str, env: dict) -> float:
         if isinstance(n, ast.BinOp):
             ops = {ast.Add: _op.add, ast.Sub: _op.sub, ast.Mult: _op.mul,
                    ast.Div: _op.truediv, ast.Pow: _op.pow}
+            if type(n.op) not in ops:
+                raise ValueError(f"unsupported operator {type(n.op).__name__}")
             a, b = node_eval(n.left), node_eval(n.right)
             if isinstance(n.op, ast.Div) and b == 0:
                 raise ValueError("division by zero — cannot mint a wrong rate")
@@ -50,9 +54,12 @@ def _safe_math(expr: str, env: dict) -> float:
 
 
 def compute_safe(expr: str, env: dict) -> dict:
+    # Exception (not just ValueError): an unsupported operator (KeyError), an
+    # overflowing power (OverflowError) or a bad operand must all surface as an
+    # error dict — compute never raises, never mints a wrong number.
     try:
         return {"expression": expr, "value": round(_safe_math(expr, env), 2)}
-    except ValueError as exc:
+    except Exception as exc:
         return {"expression": expr, "error": str(exc)}
 
 
@@ -61,10 +68,12 @@ def query_dataset(frame, op: str, params: dict) -> dict:
     op = (op or "").strip().lower()
     basis = params.get("window_mode", "fy")
     if op == "list_agencies":
-        return {"basis": basis, "agencies": sorted({f["agency_name"] for f in frame.facts if not f["agency_name"].startswith("x")})}
+        return {"basis": basis, "agencies": sorted({f["agency_name"] for f in frame.facts
+                if not f["agency_name"].startswith("x") and f["agency_name"].lower() != "total"})}
     if op == "filter_agencies":
-        # {fy?, measure?, bucket?, top_n?}
-        rows = frame.facts
+        # {fy?, measure?, bucket?, top_n?} — the golden "Total" pseudo-agency is
+        # a total-level fact, not an agency, so it is excluded from per-agency ops
+        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
         if params.get("fy"): rows = [f for f in rows if f["fy"] == params["fy"]]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
@@ -75,7 +84,7 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         top = sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)[:int(params.get("top_n", 20))]
         return {"basis": basis, "count": len(aggs), "top": [{"agency": a, "value": round(v)} for a, v in top]}
     if op == "summarize_agencies":
-        rows = frame.facts
+        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
         return {"basis": basis, "count": len(rows), "total": round(sum(f["value"] for f in rows))}
@@ -96,7 +105,8 @@ def query_dataset(frame, op: str, params: dict) -> dict:
             return sum(f["value"] for f in frame.facts if f["fy"] == fy and f["measure"] == m and f["bucket"] == "total")
         va, vb = tot(a), tot(b)
         return {"basis": "fy", "fy_a": a, "fy_b": b, "value_a": round(va), "value_b": round(vb),
-                "change": round(vb - va), "change_pct": round(100 * (vb - va) / va) if va else 0}
+                "change": round(vb - va),
+                "change_pct": round(100 * (vb - va) / va) if va else None}
     if op == "top_contributors":
         return query_dataset(frame, "filter_agencies", params)
     if op == "by_portfolio":
@@ -111,7 +121,9 @@ def query_dataset(frame, op: str, params: dict) -> dict:
             aggs[p] += f["value"]
         return {"basis": params.get("window_mode", "fy"), "portfolios": [{"portfolio": p, "value": round(v)} for p, v in sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)]}
     if op == "kpis":
-        return {k: foi_stats(frame, k)["value"] for k in STAT_KEYS}
+        # every KPI tile carries its basis — basis is a field of the output
+        return {k: {"value": foi_stats(frame, k)["value"],
+                    "basis": foi_stats(frame, k)["basis"]} for k in STAT_KEYS}
     if op == "gaps":
         return {"error": "gaps op not applicable to FOI stats — use trend/compare_period/top_contributors"}
     if op == "classes":
@@ -123,34 +135,61 @@ def resolve_citations(spec: dict, transcript: list[dict]) -> dict:
     """Replace {c:job.turn.call.field} pointers with recorded tool-call values.
 
     transcript entries carry the query_dataset result under 'result'; the
-    pointer walks .result.<field-path>. An unknown pointer FAILS LOUD (SystemExit)
-    — never a guessed number.
+    pointer matches by turn (parts[1]) and walks the field path (parts[3:])
+    over that result, supporting bracket indices (top[0].agency). An unknown or
+    malformed pointer FAILS LOUD (SystemExit) — never a guessed number.
     """
     def _lookup(path: str):
         parts = path.split(".")
-        if len(parts) < 2:
-            raise KeyError(f"citation {path}: malformed pointer")
-        seq = int(parts[1])
+        if len(parts) < 4:
+            raise KeyError(f"citation {path}: malformed pointer (need job.turn.call.field)")
+        try:
+            seq = int(parts[1])
+        except ValueError:
+            raise KeyError(f"citation {path}: turn is not a number") from None
         for ev in transcript:
             if ev.get("seq") == seq and ev.get("tool") == "query_dataset":
                 cur = ev.get("result")
-                for p in parts[2:]:
+                if not isinstance(cur, (dict, list)):
+                    raise KeyError(f"citation {path}: no recorded result")
+                # skip the call number (parts[2]); walk the field path parts[3:]
+                # over the recorded result, tokenising bracket indices
+                for p in parts[3:]:
                     if p.isdigit():
-                        cur = cur[int(p)]
-                    else:
-                        if not isinstance(cur, dict) or p not in cur:
-                            raise KeyError(f"citation {path}: unknown field {p}")
-                        cur = cur[p]
+                        idx = int(p)
+                        if not isinstance(cur, list) or idx >= len(cur):
+                            raise KeyError(f"citation {path}: index {idx} out of range")
+                        cur = cur[idx]
+                        continue
+                    for tok in _FIELD_TOKEN.finditer(p):
+                        if tok.group(1) is not None:
+                            key = tok.group(1)
+                            if not isinstance(cur, dict) or key not in cur:
+                                raise KeyError(f"citation {path}: unknown field {key}")
+                            cur = cur[key]
+                        else:
+                            idx = int(tok.group(2))
+                            if not isinstance(cur, list) or idx >= len(cur):
+                                raise KeyError(f"citation {path}: index {idx} out of range")
+                            cur = cur[idx]
                 return cur
         raise KeyError(f"citation {path}: unknown transcript entry")
 
-    text = json.dumps(spec)
-
     def _sub(m):
-        return json.dumps(_lookup(m.group(1)))
+        # str(), not json.dumps(): the substitution happens INSIDE a JSON string
+        # literal, so a bare scalar is correct (json.dumps would double-quote).
+        return str(_lookup(m.group(1)))
 
-    try:
-        text = CITATION_PATTERN.sub(_sub, text)
-    except KeyError as e:
-        raise SystemExit(f"FAIL LOUD: {e} — a figure could not be resolved") from e
-    return json.loads(text)
+    def _walk(node):
+        if isinstance(node, dict):
+            return {k: _walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_walk(v) for v in node]
+        if isinstance(node, str):
+            try:
+                return CITATION_PATTERN.sub(_sub, node)
+            except KeyError as e:
+                raise SystemExit(f"FAIL LOUD: {e} — a figure could not be resolved") from e
+        return node
+
+    return _walk(spec)
