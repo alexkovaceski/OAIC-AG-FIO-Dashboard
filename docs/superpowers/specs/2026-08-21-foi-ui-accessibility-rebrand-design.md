@@ -37,16 +37,19 @@ site-authored prose, navigation, footer, and chrome is OAIC-free.
 
 - Replace `src/site/assets/echarts.min.js` (full bundle, 1,034,102 bytes) with
   **`echarts.common.min.js`** — ECharts' prebuilt "common" dist (bar + line + pie
-  + grid + tooltip + legend + aria + canvas renderer).
+  + grid + tooltip + legend + aria + canvas renderer; 664,311 bytes).
 - The chart system only ever renders **line** (`*_trend`, `*_change` keys) and
   **bar** (top-N / breakdown keys) — see `foi-charts.js figureOption()`. The
   common bundle covers both with no build step; no `dataZoom` or other full-bundle
   feature is used.
-- **Source:** `https://cdn.jsdelivr.net/npm/echarts@5.6.1/dist/echarts.common.min.js`
-  (pin `5.6.1` to match the current vendored version). Verify after download: the
-  file is a JS file, is substantially smaller (~370KB), and a known symbol like
-  `BarChart` is present.
-- Size before / after: **1.03MB → ~370KB raw**, ~110KB when gzip-transferred.
+- **Source:** `https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.common.min.js`
+  (pin `5.6.0` — the newest published 5.x; 5.6.1 does not exist on npm). Same
+  5.x line as the vendored bundle.
+- **Measured (2026-08-21):** common dist = **664,311 bytes raw**, **219,469
+  gzip**; current full bundle = 1,034,102 raw / 335,351 gzip. Raw -36%, transferred
+  -35%. Verify after download: contains the chart-type registration strings
+  `"bar"`, `"line"`, `"pie"`.
+- Size before / after: **1.03MB → 664KB raw**, **335KB → 219KB** gzip-transferred.
 
 ### 3.2 Compress responses
 
@@ -184,7 +187,7 @@ site-authored prose, navigation, footer, and chrome is OAIC-free.
 - New a11y tests: every page has a skip link targeting `#main`; `<main id="main">`
   present; the two navs carry distinct `aria-label`s.
 - New load tests: the loaded echarts asset is `echarts.common.min.js` and its size
-  is < 500KB (guards a regression to the 1MB bundle).
+  is < 750KB (guards a regression toward the 1MB full bundle).
 - New server tests: a page and an asset respond `Content-Encoding: gzip` when
   requested with `Accept-Encoding: gzip`; `/assets` responses carry a
   `cache-control` header.
