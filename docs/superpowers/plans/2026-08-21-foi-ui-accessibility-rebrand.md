@@ -214,6 +214,7 @@ def test_top_nav_has_primary_aria_label():
 
 def test_muted_token_passes_aa_on_white():
     # --muted must reach 4.5:1 on white for the small labels that use it.
+    from pathlib import Path
     css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
     m = re.search(r"--muted:\s*(#[0-9a-fA-F]{6})", css)
     assert m, "no --muted token"
