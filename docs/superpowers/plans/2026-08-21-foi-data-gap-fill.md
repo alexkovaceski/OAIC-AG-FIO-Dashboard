@@ -172,19 +172,42 @@ decided comes from the sheet's Total determined column, never summed."
 **Interfaces:**
 - Consumes: `normalise_all()` (Task 1), `stats.catalog.foi_stats`, `storage.frame.Frame`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the tests**
+
+These are regression guards — Task 1 has already landed, so they pass immediately. They
+lock in the honest invariants.
 
 ```python
 def test_decided_consistent_across_sheets_per_fy():
-    # The source publishes 'Total determined' on BOTH the "Action on requests"
-    # and "Response times" sheets; they must agree (same decided headline).
+    # The source publishes the decided headline on BOTH the "Action on requests"
+    # ("Total determined") and "Response times" ("Requests determined") sheets;
+    # they must agree per FY. We ingest decided from "Action on requests" ONLY
+    # (ingesting both would double-count). This test cross-checks the ingested
+    # value against the OTHER sheet's published Total row, read directly from
+    # the workbook. Verified across all 7 files (e.g. 2024-25: 25211 == 25211).
     # NOTE: Total determined is NOT the sum of outcome components (granted+part+
-    # refused+withdrawn+transferred != decided) — the sheet's outcome breakdown
-    # covers a different scope. So the invariant is cross-sheet agreement, not
-    # sum-of-components.
+    # refused+withdrawn+transferred != decided) — the outcome breakdown covers a
+    # different scope, so no sum-of-components equality is asserted.
+    from openpyxl import load_workbook
     facts = normalise_all()
-    action = [f for f in facts if f["measure"] == "decided" and f["bucket"] == "total"]
-    assert action, "no decided facts ingested from Action on requests"
+    fy_files = [("2019-20", "agency-foi-data-2019-20.xlsx"), ("2020-21", "agency-foi-data-2020-21.xlsx"),
+                ("2021-22", "agency-foi-data-2021-22.xlsx"), ("2022-23", "agency-foi-data-2022-23.xlsx"),
+                ("2023-24", "agency-foi-data-2023-24.xlsx"), ("2024-25", "agency-foi-data-2024-25.xlsx"),
+                ("2025-26", "agency-foi-data-2025-26-q1-to-q3.xlsx")]
+    for fy, fn in fy_files:
+        got = round(sum(f["value"] for f in facts if f["fy"] == fy and f["measure"] == "decided"
+                        and f["bucket"] == "total" and not f["derived"]))
+        wb = load_workbook(DATA_SOURCES_DIR / fn, data_only=True, read_only=True)
+        rows = list(wb["Response times"].iter_rows(values_only=True))
+        hdr = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
+        first = [i for i, h in enumerate(hdr) if h.startswith("requests determined")][0]
+        want = None
+        for r in rows[3:]:
+            if str(r[0] or "").strip().lower() == "total":
+                want = float(r[first + 2]); break
+        wb.close()
+        assert want is not None and got == want, \
+            f"{fy}: decided (Action)={got} != Requests determined (Response times)={want}"
 
 
 def test_six_figures_no_longer_empty():
@@ -199,15 +222,15 @@ def test_six_figures_no_longer_empty():
         assert any(v is not None for s in fig["series"] for v in s["values"]), f"{key} all None"
 ```
 
-- [ ] **Step 2: Run to verify fail**
+- [ ] **Step 2: Run to verify they pass**
 
-Run: `.venv\Scripts\python.exe -m pytest tests/test_normalise.py -v`
-Expected: `test_decided_consistent_across_sheets_per_fy` FAILS — no `decided` facts yet (Task 1 not wired). After Task 1 it passes (decided present). `test_six_figures_no_longer_empty` FAILS until Task 1 fills the facts. The cross-sheet "decided consistent" test does NOT assert sum-of-components — the empirical 2024-25 check showed `sum(granted+part+refused+withdrawn+transferred)=39390` vs `total_determined=25211` (and golden Q1 `decided=7344` vs `sum(components)=11299`), so the outcome breakdown and Total determined cover different scopes and must NOT be equated. If the ingest surfaces a per-FY inconsistency in the decided headline between the two sheets, that is a real finding to report, not force-fit.
+Run: `.venv\Scripts\python.exe -m pytest tests/test_normalise.py::test_decided_consistent_across_sheets_per_fy tests/test_normalise.py::test_six_figures_no_longer_empty -v -p no:cacheprovider --color=no -o addopts=`
+Expected: both PASS (Task 1 already wired the facts). If the cross-sheet check FAILS for a FY, that is a real finding to report — do not force-fit. The empirical baseline (all 7 files): 2019-20 29358, 2020-21 26680, 2021-22 25303, 2022-23 21228, 2023-24 21347, 2024-25 25211, 2025-26 22573.
 
 - [ ] **Step 3: Run the full suite**
 
 Run: `.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --color=no -o addopts=`
-Expected: green.
+Expected: green (123 + 2 new = 125).
 
 - [ ] **Step 4: Commit**
 
@@ -215,6 +238,7 @@ Expected: green.
 git add tests/test_normalise.py
 git commit -m "test(ingest): cross-sheet integrity + six figures render data"
 ```
+Commit footer: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (prepend `\n\n` to the body).
 
 ---
 
