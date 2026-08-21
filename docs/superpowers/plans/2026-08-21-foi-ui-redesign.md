@@ -317,7 +317,7 @@ def test_echarts_asset_present():
 
 **Mechanics:**
 - Tailwind v4 (CSS-first), compiled offline with `npx @tailwindcss/cli` (Node 22 present) into a **committed** static asset `src/site/assets/tailwind.css`. No runtime CDN, no deployment build step.
-- Input source `src/site/assets/tailwind-input.css`: `@import "tailwindcss"` + an `@theme` block mapping the OAIC tokens (navy `#002a3a`, teal `#00567d`, blue `#26547b`, dark `#003347`, ink `#0c3c60`, paper `#f7f7f7`, white `#ffffff`, gold `#ffcc00`, hair `#e6e6e6`) to Tailwind color tokens, so utilities like `bg-navy`, `text-ink`, `border-gold` exist.
+- Input source `tailwind/input.css`: `@import "tailwindcss"` + an `@theme` block mapping the OAIC tokens (navy `#002a3a`, teal `#00567d`, blue `#26547b`, dark `#003347`, ink `#0c3c60`, paper `#f7f7f7`, white `#ffffff`, gold `#ffcc00`, hair `#e6e6e6`) to Tailwind color tokens, so utilities like `bg-navy`, `text-ink`, `border-gold` exist.
 - Content scan targets `src/site/**/*.py` (the renderers' f-strings) + `src/site/assets/foi-charts.js`. Utility class names in the Python renderers are **static strings** — never constructed from runtime values — so the scan sees them.
 - `chrome()` links `/assets/tailwind.css` after `/assets/site.css`; tests updated to assert both.
 - The compiled `tailwind.css` and the `tailwind-input.css` source + a `package.json` pinning `@tailwindcss/cli` are committed.

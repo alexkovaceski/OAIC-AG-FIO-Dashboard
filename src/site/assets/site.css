@@ -267,6 +267,10 @@ section { margin: 1.4rem 0; }
 /* --- data notes (verbatim corpus) ------------------------------------------ */
 
 .notes { max-width: 78ch; }
+
+/* Tailwind preflight zeroes all element margins; bare paragraphs/pre blocks
+   on the prose pages (how-to-use, api) get their vertical rhythm back. */
+main p, main pre { margin: 0.75rem 0; }
 .notes h1 { font-family: var(--serif); font-size: 1.6rem; }
 .notes h2 { font-family: var(--serif); font-size: 1.25rem; margin: 1.6rem 0 0.5rem; }
 .notes p { margin: 0.75rem 0; }
