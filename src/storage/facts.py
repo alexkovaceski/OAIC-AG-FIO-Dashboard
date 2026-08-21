@@ -19,7 +19,7 @@ _CANONICAL_KEYS = (
     "bucket", "value", "derived", "portfolio",
 )
 
-NORMALISER_VER = "2026-08-20-task2"
+NORMALISER_VER = "2026-08-21-data-gap-fill"
 
 
 def canonical_hash(facts: list[dict]) -> str:
