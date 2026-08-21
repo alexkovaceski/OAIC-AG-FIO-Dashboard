@@ -100,10 +100,9 @@ def test_pagedata_ships_facts_for_live_filters():
 
 
 def test_filters_bar_present():
-    # Task 4: the 4 data pages (their figures ARE computed from the facts) get
-    # a live filter bar with three selects (agency / type / fy); the no-data
-    # pages keep only the honest placeholder — a filter bar over an empty chart
-    # would promise figures the source files don't publish.
+    # Task 4: the filter bar (agency / type / fy selects) is deliberately scoped
+    # to the 4 data pages in _FILTER_PAGES; the other chart pages render without
+    # one (they now carry real FY series, but the live-filter scope is those 4).
     pages = _pages()
     data_pages = ["at-a-glance", "requests-received",
                   "key-agency-contributions-received", "requests-finalised"]
@@ -117,14 +116,14 @@ def test_filters_bar_present():
         for dim in ["agency", "type", "fy"]:
             assert f'data-filter="{dim}"' in html, \
                 f"{key}: missing a data-filter=\"{dim}\" select"
-    no_data_pages = ["requests-decided", "key-agency-contributions-decided",
-                     "decision-outcomes", "change-decision-outcomes",
-                     "timeliness", "change-timeliness"]
-    for key in no_data_pages:
+    pages_without_filters = ["requests-decided", "key-agency-contributions-decided",
+                             "decision-outcomes", "change-decision-outcomes",
+                             "timeliness", "change-timeliness"]
+    for key in pages_without_filters:
         assert '<div class="filters' not in pages[key], \
-            f"{key}: a no-data page must not render a filter bar"
+            f"{key}: a page outside the filter scope must not render a filter bar"
         assert "data-filter=" not in pages[key], \
-            f"{key}: no-data page must not render filter selects"
+            f"{key}: a page outside the filter scope must not render filter selects"
     # the old static placeholder is gone — no page carries it anymore
     for key, html in pages.items():
         assert "Filters: portfolio" not in html, \

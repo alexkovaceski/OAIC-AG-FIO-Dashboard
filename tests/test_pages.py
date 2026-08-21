@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, "src")
 from ingest.normalise import normalise_all
 from storage.frame import Frame
-from site.pages import _bar, _md, render_all_pages
+from site.pages import _bar, _md, _figure_has_data, _chart_container, render_all_pages
 from site.lineage_viewer import render_lineage_page
 
 PAGE_KEYS = [
@@ -62,21 +62,34 @@ def test_every_kpi_carries_a_basis_label():
         assert "basis: " in _pages()[name], name
 
 
-def test_uncomputable_figures_show_nodata_not_zero():
-    # the annual files do not publish decided/outcome/timeliness FY series, so
-    # those pages must show an honest placeholder — never "0 every year"
-    for name in ["requests-decided", "decision-outcomes", "change-decision-outcomes",
+def test_published_figures_render_real_data_not_nodata():
+    # the six data-gap measures now render real published series — the chartbox
+    # carries the chart (data-figure), never the no-data placeholder
+    for name in ["requests-decided", "key-agency-contributions-decided",
+                 "decision-outcomes", "change-decision-outcomes",
                  "timeliness", "change-timeliness"]:
-        assert "No published data" in _pages()[name], \
-            f"{name}: expected honest no-data placeholder"
+        html = _pages()[name]
+        assert 'data-figure=' in html, f"{name}: expected a live chartbox"
+        assert 'class="nodata"' not in html, f"{name}: stale no-data placeholder"
 
 
-def test_nodata_pages_never_render_a_zero_value_label():
+def test_live_pages_never_render_a_zero_value_label():
     # a fabricated flat zero would render as a "0" value label on a bar — the
-    # no-data pages must not contain any rendered zero
+    # live data pages must not contain any rendered zero
     for name in ["requests-decided", "decision-outcomes", "timeliness"]:
         html = _pages()[name]
         assert ">0<" not in html.replace(" ", ""), name
+
+
+def test_empty_figure_keeps_the_honest_nodata_placeholder():
+    # a figure with genuinely no series still renders the honest placeholder —
+    # the no-data path is preserved for measures the source files do not report
+    assert _figure_has_data({"series": []}) is False
+    assert _figure_has_data({"series": [{"name": "x", "values": [1, 2]}]}) is True
+    box = _chart_container("empty_fig", {"categories": [], "series": []})
+    assert 'class="nodata"' in box
+    assert "No published data for this measure" in box
+    assert 'data-figure="empty_fig"' in box
 
 
 def test_data_notes_renders_verbatim():

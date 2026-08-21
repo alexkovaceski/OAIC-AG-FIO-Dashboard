@@ -4,11 +4,11 @@ Every number on a page is a platform-computed figure: render_all_pages computes
 from the Frame via stats.catalog.foi_stats — no hardcoded figures, no model
 numbers, no LLM, no DB. It is PURE frame → HTML.
 
-Data honesty: a figure that cannot be computed (e.g. the decided/outcome/
-timeliness FY series, which the annual files do not publish) renders an honest
-"No published data for this measure" placeholder — never a fabricated flat-zero
-line. A figure's missing year renders as '—', never '0'. The basis label
-(single_quarter | cumulative | fy) rides beside every figure.
+Data honesty: a figure that cannot be computed (a measure the source files do
+not publish) renders an honest "No published data for this measure" placeholder
+— never a fabricated flat-zero line. A figure's missing year renders as '—',
+never '0'. The basis label (single_quarter | cumulative | fy) rides beside every
+figure.
 """
 from __future__ import annotations
 import html
@@ -119,12 +119,12 @@ def _filters_blob(frame) -> dict:
     }
 
 
-# pages whose figures ARE computed from the facts (so a live filter can re-select
-# them). The other chart pages (requests-decided / key-agency-contributions-decided
-# / decision-outcomes / change-decision-outcomes / timeliness / change-timeliness)
-# ship no FY series — the annual files do not publish them — so a filter bar over
-# an empty chart would promise data the source files don't have. Those pages keep
-# only the honest no-data placeholder, never a filter bar.
+# pages that carry a live filter bar. The four data pages all compute their
+# figures from the facts, so a live filter can re-select them. The other chart
+# pages (requests-decided / key-agency-contributions-decided / decision-outcomes
+# / change-decision-outcomes / timeliness / change-timeliness) now render real
+# FY series too, but the filter bar is deliberately scoped to these four pages —
+# the rest render without one.
 _FILTER_PAGES = frozenset({
     "at-a-glance",
     "requests-received",
@@ -137,8 +137,8 @@ def _filters_bar(frame, page_key) -> str:
     """The live-filter dropdowns (Agency / Type / FY) for the data pages. The
     selects carry data-filter="agency|type|fy" so foi-charts.js can read them;
     class names are static literals so Tailwind's content scan compiles them.
-    Returns "" for pages with no chartable data — a filter bar over an empty
-    chart would promise figures the source files don't publish."""
+    Returns "" for pages outside _FILTER_PAGES — the filter bar is scoped to
+    those four pages."""
     if page_key not in _FILTER_PAGES:
         return ""
     f = _filters_blob(frame)
@@ -250,14 +250,18 @@ def _top20_section(title, fig, chart_key) -> str:
 
 
 def _notes_section(title, fig, chart_key) -> str:
-    """A dedicated note under a chart when the figure's series are empty (the
-    annual files do not publish the measure) — states WHY there is no data,
-    so the empty chart reads as honest, not broken."""
+    """The figure card for a chart page. A note is emitted only when the
+    figure's series are empty — the source files do not report the measure —
+    so the empty chart reads as honest, not broken. A figure with data carries
+    the chart itself, so no note is needed."""
+    note = ""
+    if not _figure_has_data(fig):
+        note = ('<p class="note">No published data for this measure. '
+                'The source files do not report this breakdown for the '
+                'financial years covered.</p>')
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="note">No published data for this measure. The annual '
-            f'FOI files report only requests received and finalised per '
-            f'financial year; this breakdown is not published on a yearly '
-            f'basis.</p>{_chart_container(chart_key, fig)}</section>')
+            f'<p class="basis">{_basis_label({"basis": "fy"})}</p>'
+            f'{note}{_chart_container(chart_key, fig)}</section>')
 
 
 def _lineage_panel(artifact) -> str:
@@ -367,8 +371,7 @@ def _page_requests_decided(frame) -> str:
     body = f"""
     <h1>Requests decided</h1>
     <p class="intro">FOI requests decided by Australian Government agencies and
-    ministers. The annual files do not publish decisions by financial year, so
-    this page reports the latest published quarter.</p>
+    ministers, by financial year, alongside the latest published quarter.</p>
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend")}
@@ -382,9 +385,8 @@ def _page_key_agency_contributions_decided(frame) -> str:
     fig = _stat(frame, "decided_top20")["value"]
     body = f"""
     <h1>Key agency contributions — requests decided</h1>
-    <p class="intro">Top 20 agencies by FOI requests decided in FY2024-25.
-    Decisions by financial year are not published in the annual files, so this
-    figure is empty until the source data reports them.</p>
+    <p class="intro">Top 20 agencies by FOI requests decided in the latest
+    complete financial year in the annual files.</p>
     {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20")}
     {_lineage_panel("key-agency-contributions-decided")}
     {_page_data_script(frame, "key-agency-contributions-decided")}"""
@@ -399,9 +401,7 @@ def _page_decision_outcomes(frame) -> str:
     body = f"""
     <h1>Decision outcomes</h1>
     <p class="intro">Outcomes of decisions on FOI requests: granted in full,
-    granted in part, refused, and withdrawn. The annual files report only
-    requests received and finalised by financial year, so outcome series are
-    not published on a yearly basis.</p>
+    granted in part, refused, and withdrawn, by financial year.</p>
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
@@ -430,9 +430,10 @@ def _page_timeliness(frame) -> str:
     fig = _stat(frame, "timeliness_trend")["value"]
     body = f"""
     <h1>Timeliness</h1>
-    <p class="intro">Timeliness of decisions on FOI requests: within or after
-    the statutory time period. Only the within-statutory measure is published,
-    and not on a financial-year basis in the annual files.</p>
+    <p class="intro">Timeliness of decisions on FOI requests: the share of
+    decisions made within the statutory time period, by financial year. Only
+    the within-statutory measure is published in the source files; the
+    after-statutory buckets are not ingested.</p>
     {_kpis(frame, ["within_statutory_pct_q1"])}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend")}
     {_lineage_panel("timeliness")}
@@ -485,8 +486,9 @@ def _page_how_to_use() -> str:
       financial year (July-June).</li>
     </ul>
     <h2>Missing data is shown, not invented</h2>
-    <p>Where the source files do not publish a measure (for example, decisions
-    or decision outcomes by financial year), the page shows
+    <p>Where the source files do not publish a measure (for example, the
+    after-statutory timeliness buckets, or the transferred measures, which the
+    dashboard does not render), the page shows
     <em>No published data for this measure</em> — a flat zero line would be a
     fabricated number. A year without a figure in a series renders as "—".</p>
     <h2>Filters</h2>
