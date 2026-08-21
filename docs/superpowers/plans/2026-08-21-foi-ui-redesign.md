@@ -306,3 +306,26 @@ def test_echarts_asset_present():
 - The `chrome` signature change (adding `page_key` + `scripts`) must thread through `pages.py`, `lineage_viewer.py`, and the lineage/dashboard routes in `server/app.py` (which call `chrome` or the page renderers). Task 1 must update every `chrome(...)` call site, not just templates.py.
 - The ECharts option for a no-data figure must show the honest placeholder, never an empty chart that reads as zeros.
 - `window.__pageData` carries facts client-side — it must not include anything beyond the platform-computed figures + canonical facts (no raw model text, no lineage internals that shouldn't be public).
+
+---
+
+## Amendment 2026-08-21 (mid-execution): Tailwind CSS adoption
+
+**Decision (Alex, authorized 2026-08-21):** use Tailwind CSS to write and manage the UI instead of hand-rolled layout CSS. Reviewed mid-execution at Task 3 (Tasks 1-3 already committed). Adopted as a **hybrid**: Tailwind v4 utilities own layout / typography / spacing / the filter bar; `site.css` keeps only the bespoke component layer (chartbox sizing, sidenav, nodata placeholder, tables, notes prose, focus / reduced-motion).
+
+**Why hybrid:** the compiled-vendored approach keeps the zero-build-step static deployment (the compiled `tailwind.css` ships with `src/` exactly like `echarts.min.js`); the bespoke component styles aren't naturally expressible as utilities and are already reviewed + tested.
+
+**Mechanics:**
+- Tailwind v4 (CSS-first), compiled offline with `npx @tailwindcss/cli` (Node 22 present) into a **committed** static asset `src/site/assets/tailwind.css`. No runtime CDN, no deployment build step.
+- Input source `src/site/assets/tailwind-input.css`: `@import "tailwindcss"` + an `@theme` block mapping the OAIC tokens (navy `#002a3a`, teal `#00567d`, blue `#26547b`, dark `#003347`, ink `#0c3c60`, paper `#f7f7f7`, white `#ffffff`, gold `#ffcc00`, hair `#e6e6e6`) to Tailwind color tokens, so utilities like `bg-navy`, `text-ink`, `border-gold` exist.
+- Content scan targets `src/site/**/*.py` (the renderers' f-strings) + `src/site/assets/foi-charts.js`. Utility class names in the Python renderers are **static strings** — never constructed from runtime values — so the scan sees them.
+- `chrome()` links `/assets/tailwind.css` after `/assets/site.css`; tests updated to assert both.
+- The compiled `tailwind.css` and the `tailwind-input.css` source + a `package.json` pinning `@tailwindcss/cli` are committed.
+
+**Amended tasks:**
+- **Task 4a (NEW): Tailwind adoption** — setup the v4 build, compile `tailwind.css`, link it in `chrome()`, convert the chrome (header / layout / footer) to Tailwind utilities, shrink `site.css` to the bespoke layer, update the stylesheet test. Commit.
+- **Task 4 (live-filter wiring):** build the filter bar with Tailwind utilities (selects / labels / spacing), wire `wireFilters` in `foi-charts.js`. Commit.
+- **Task 5 (lineage chrome):** unchanged — inherits the chrome + Tailwind.
+- **Task 6 (verify + deploy):** verify both stylesheets render + the compiled `tailwind.css` ships with `src/`; deploy unchanged (`scripts/deploy.py` already pushes `src/`).
+
+**Global constraints unchanged:** never-invent-a-number, no fabricated data, all tests green, stovepipe footer, responsive + a11y floor.
