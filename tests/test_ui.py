@@ -99,6 +99,38 @@ def test_pagedata_ships_facts_for_live_filters():
             f"{key}: a fact row must carry fy/quarter/measure/bucket/value")
 
 
+def test_filters_bar_present():
+    # Task 4: the 4 data pages (their figures ARE computed from the facts) get
+    # a live filter bar with three selects (agency / type / fy); the no-data
+    # pages keep only the honest placeholder — a filter bar over an empty chart
+    # would promise figures the source files don't publish.
+    pages = _pages()
+    data_pages = ["at-a-glance", "requests-received",
+                  "key-agency-contributions-received", "requests-finalised"]
+    for key in data_pages:
+        html = pages[key]
+        assert '<div class="filters' in html, \
+            f"{key}: expected a filter bar on a data page"
+        assert html.count("<select") >= 3, \
+            f"{key}: expected agency/type/fy selects"
+        # every select carries a data-filter dimension the JS reads
+        for dim in ["agency", "type", "fy"]:
+            assert f'data-filter="{dim}"' in html, \
+                f"{key}: missing a data-filter=\"{dim}\" select"
+    no_data_pages = ["requests-decided", "key-agency-contributions-decided",
+                     "decision-outcomes", "change-decision-outcomes",
+                     "timeliness", "change-timeliness"]
+    for key in no_data_pages:
+        assert '<div class="filters' not in pages[key], \
+            f"{key}: a no-data page must not render a filter bar"
+        assert "data-filter=" not in pages[key], \
+            f"{key}: no-data page must not render filter selects"
+    # the old static placeholder is gone — no page carries it anymore
+    for key, html in pages.items():
+        assert "Filters: portfolio" not in html, \
+            f"{key}: stray static filter placeholder remains"
+
+
 def test_foi_charts_js_smoke():
     # static smoke test on the JS module (no browser): the file must declare
     # FoiCharts.init + FoiCharts.wireFilters, and must skip chartboxes that
@@ -113,3 +145,7 @@ def test_foi_charts_js_smoke():
     assert re.search(r"querySelectorAll\(\"\.chartbox\"\)", js), \
         "init must mount every .chartbox"
     assert ".nodata" in js, "renderChart must skip server-rendered .nodata placeholders"
+    # Task 4: wireFilters must read the selects and re-filter the facts — the
+    # change binding and the honest no-derive fallback must be present
+    assert "addEventListener(\"change\"" in js, "wireFilters must bind change handlers"
+    assert "__pageData.facts" in js, "wireFilters must filter the canonical facts"

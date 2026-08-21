@@ -119,6 +119,51 @@ def _filters_blob(frame) -> dict:
     }
 
 
+# pages whose figures ARE computed from the facts (so a live filter can re-select
+# them). The other chart pages (requests-decided / key-agency-contributions-decided
+# / decision-outcomes / change-decision-outcomes / timeliness / change-timeliness)
+# ship no FY series — the annual files do not publish them — so a filter bar over
+# an empty chart would promise data the source files don't have. Those pages keep
+# only the honest no-data placeholder, never a filter bar.
+_FILTER_PAGES = frozenset({
+    "at-a-glance",
+    "requests-received",
+    "key-agency-contributions-received",
+    "requests-finalised",
+})
+
+
+def _filters_bar(frame, page_key) -> str:
+    """The live-filter dropdowns (Agency / Type / FY) for the data pages. The
+    selects carry data-filter="agency|type|fy" so foi-charts.js can read them;
+    class names are static literals so Tailwind's content scan compiles them.
+    Returns "" for pages with no chartable data — a filter bar over an empty
+    chart would promise figures the source files don't publish."""
+    if page_key not in _FILTER_PAGES:
+        return ""
+    f = _filters_blob(frame)
+    types = set(f["types"])
+
+    def _select(label, filter_name, options, all_label):
+        opts = [f'<option value="">{html.escape(all_label)}</option>']
+        opts += [f'<option value="{html.escape(str(v))}">{html.escape(str(v))}</option>'
+                 for v in options]
+        return (f'<label class="flex items-center gap-2 text-sm text-muted" '
+                f'for="filter-{filter_name}">{html.escape(label)}'
+                f'<select data-filter="{filter_name}" id="filter-{filter_name}" '
+                f'class="border border-hair rounded bg-white px-2 py-1 text-sm '
+                f'text-ink">{chr(10).join(opts)}</select></label>')
+
+    agency = _select("Agency", "agency", f["agencies"], "All agencies")
+    # the type options are the platform's own buckets; "total" is a valid
+    # selection — it is the bucket every figure is derived from
+    type_opts = [t for t in ("personal", "other", "total") if t in types]
+    typ = _select("Type", "type", type_opts, "All types")
+    fy = _select("FY", "fy", f["fys"], "All FYs")
+    return (f'<div class="filters flex flex-wrap items-center gap-3" '
+            f'role="group" aria-label="Filter the charts">{agency}{typ}{fy}</div>')
+
+
 def _page_data_script(frame, page_key) -> str:
     """The window.__pageData blob for one page: the foi_stats results for the
     page's figure keys, the canonical long-form facts (frame.facts, verbatim),
@@ -259,7 +304,7 @@ def _page_at_a_glance(frame) -> str:
     Government agencies and ministers — latest published quarter (Q1
     2025-26). All figures are computed from the source data.</p>
     {kpis}
-    <div class="filters">Filters: portfolio / agency · type (personal/other) · FY or quarter</div>
+    {_filters_bar(frame, "at-a-glance")}
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
                     "requests_received_trend")}
@@ -275,6 +320,7 @@ def _page_requests_received(frame) -> str:
     <h1>Requests received</h1>
     <p class="intro">FOI requests received by Australian Government agencies and
     ministers, by financial year.</p>
+    {_filters_bar(frame, "requests-received")}
     {_kpis(frame, ["requests_received_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
                     "requests_received_trend")}
@@ -290,6 +336,7 @@ def _page_key_agency_contributions_received(frame) -> str:
     <h1>Key agency contributions — requests received</h1>
     <p class="intro">Top 20 agencies by FOI requests received in FY2024-25
     (the latest complete financial year in the annual files).</p>
+    {_filters_bar(frame, "key-agency-contributions-received")}
     {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20")}
     {_lineage_panel("key-agency-contributions-received")}
     {_page_data_script(frame, "key-agency-contributions-received")}"""
@@ -305,6 +352,7 @@ def _page_requests_finalised(frame) -> str:
     <h1>Requests finalised</h1>
     <p class="intro">FOI requests finalised by Australian Government agencies
     and ministers, by financial year.</p>
+    {_filters_bar(frame, "requests-finalised")}
     {_kpis(frame, ["requests_finalised_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
                     "requests_finalised_trend")}
