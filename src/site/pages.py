@@ -23,7 +23,7 @@ _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
 _DATA_NOTES = _CORPUS / "data-notes.md"
 
 # script tags every chart page loads, rendered before </body> by chrome()
-_CHART_SCRIPTS = ('<script src="/assets/echarts.min.js"></script>\n'
+_CHART_SCRIPTS = ('<script src="/assets/echarts.common.min.js"></script>\n'
                   '<script src="/assets/foi-charts.js"></script>')
 
 # page_key -> the figure keys that page's chartboxes reference (the keys the

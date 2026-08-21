@@ -32,7 +32,7 @@ def test_pages_emit_echarts_containers_and_pagedata():
         html = pages[key]
         assert 'class="chartbox"' in html          # ECharts container
         assert "window.__pageData" in html          # data blob for the charts
-        assert "/assets/echarts.min.js" in html     # ECharts loaded
+        assert "/assets/echarts.common.min.js" in html  # ECharts loaded
         assert "/assets/foi-charts.js" in html      # init + filters
 
 
@@ -51,8 +51,23 @@ def test_no_fabricated_figures_in_pagedata():
 
 def test_echarts_asset_present():
     from pathlib import Path
-    assert Path("src/site/assets/echarts.min.js").exists()
+    assert Path("src/site/assets/echarts.common.min.js").exists()
     assert Path("src/site/assets/foi-charts.js").exists()
+
+
+def test_echarts_uses_common_dist_not_full_bundle():
+    # the full echarts bundle is ~1MB; the prebuilt common dist (bar/line/pie)
+    # is all the chart system renders, at ~36% smaller. Guards a regression
+    # back to the heavyweight bundle.
+    from pathlib import Path
+    common = Path("src/site/assets/echarts.common.min.js")
+    assert common.exists(), "common dist not vendored"
+    assert common.stat().st_size < 750_000, "common dist suspiciously large"
+    assert not Path("src/site/assets/echarts.min.js").exists(), \
+        "full bundle should have been removed"
+    for key in ["at-a-glance", "requests-received", "decision-outcomes",
+                "timeliness"]:
+        assert "/assets/echarts.common.min.js" in _pages()[key]
 
 
 def test_pagedata_blob_escapes_script_close():
