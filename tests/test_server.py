@@ -417,3 +417,18 @@ def test_golden_gate_aborts_on_bad_data(monkeypatch):
             app_mod.create_app()
     finally:
         app_mod._FRAME, app_mod._PAGES = saved_frame, saved_pages
+
+
+def test_gzip_compresses_pages_and_assets():
+    c = TestClient(create_app())
+    for path in ["/at-a-glance.html", "/assets/site.css"]:
+        r = c.get(path, headers={"Accept-Encoding": "gzip"})
+        assert r.status_code == 200
+        assert r.headers.get("content-encoding") == "gzip"
+
+
+def test_assets_carry_revalidation_cache_header():
+    c = TestClient(create_app())
+    r = c.get("/assets/site.css")
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "public, no-cache"

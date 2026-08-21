@@ -51,6 +51,7 @@ from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 
 import api  # noqa: E402
 from config import STATIC_DIR  # noqa: E402
@@ -269,10 +270,21 @@ def create_app():
     frame, pages = _boot()
 
     app = FastAPI(title="FOI Insights")
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.state.frame = frame
     app.state.pages = pages
 
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="assets")
+
+    # Starlette 1.6.0's StaticFiles takes no headers= kwarg, so the revalidation
+    # cache header is applied here: every /assets/* response gets
+    # Cache-Control: public, no-cache (never overwriting one that exists).
+    @app.middleware("http")
+    async def _asset_cache(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/assets/"):
+            response.headers.setdefault("Cache-Control", "public, no-cache")
+        return response
 
     @app.get("/health")
     def health():
