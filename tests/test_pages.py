@@ -32,7 +32,8 @@ def test_all_12_pages_render():
     for name, html in pages.items():
         assert "<!doctype html>" in html.lower()
         assert "fartkraft" in html.lower()        # identity stovepipe on every page
-        assert "/assets/site.css" in html         # OAIC chrome stylesheet linked
+        assert "/assets/site.css" in html         # bespoke component stylesheet linked
+        assert "/assets/tailwind.css" in html     # Tailwind utility stylesheet linked
         assert "Traditional Custodians" in html   # Acknowledgement of Country footer
 
 

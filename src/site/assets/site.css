@@ -1,35 +1,41 @@
 /* site.css — OAIC-style chrome + the FOI Insights chart system.
 
-The chrome mirrors the OAIC site: white background, blue links, a clean
-government layout with a masthead, top-level nav, breadcrumb and a footer that
-carries the Acknowledgement of Country and the identity stovepipe.
+The chrome adopts the OAIC identity: a dark navy masthead with white text and a
+Commonwealth-gold active underline, a top-level nav linking OUT to the live
+OAIC site, a two-column layout (sidenav + main), and a footer carrying the
+Acknowledgement of Country, © Commonwealth of Australia, legal links and the
+identity stovepipe.
 
 The chart system follows the dataviz method: series colours are a validated
-categorical palette (slots 1-4), thin bars anchored to a baseline with the
-value printed on every data-end (an empty-series page is never mistaken for a
-zero line), and text always wears ink rather than a series colour. A missing
-year renders as "—"; a genuinely absent measure renders an explicit no-data
-placeholder.
+categorical palette, thin bars anchored to a baseline with the value printed on
+every data-end (an empty-series page is never mistaken for a zero line), and
+text always wears ink rather than a series colour. A missing year renders as
+"—"; a genuinely absent measure renders an explicit no-data placeholder.
 */
 
 :root {
-  /* gov chrome — white surface, blue links */
-  --surface:      #ffffff;
-  --page:         #f7f7f6;
-  --ink:          #0b0b0b;
-  --ink-2:        #52514e;
-  --muted:        #6b6a66;
-  --hairline:     #e5e5e0;
+  /* OAIC identity tokens */
+  --navy: #002a3a;   /* header band */
+  --teal: #00567d;   /* primary accent */
+  --blue: #26547b;   /* secondary */
+  --dark: #003347;   /* depth */
+  --ink:  #0c3c60;   /* body text */
+  --paper:#f7f7f7;   /* page bg */
+  --white:#ffffff;
+  --gold: #ffcc00;   /* Commonwealth gold */
+  --hair: #e6e6e6;
+  /* chart series */
+  --c1: #00567d; --c2: #26547b; --c3: #ffcc00;
+  --c4: #eb6834; --c5: #1baf7a;
+  --neg: #eb6834; --pos: #1baf7a;
+
+  /* derived surfaces */
+  --ink-2:        #4a5a66;
+  --muted:        #6b7a86;
   --rule:         #c9c9c2;
-  --link:         #1f5fbf;
-  --link-visited: #5a4a96;
-  --accent:       #0b4b99;
-  --blue-1:       #2a78d6;   /* categorical slot 1 */
-  --blue-2:       #eb6834;   /* categorical slot 2 */
-  --blue-3:       #1baf7a;   /* categorical slot 3 */
-  --blue-4:       #eda100;   /* categorical slot 4 */
-  --blue-neg:     #b4552d;   /* signed-change negative hue */
-  --nodata:       #6b6a66;
+  --link:         #00567d;
+  --link-visited: #4a4a9a;
+  --nodata:       #6b7a86;
   --serif:        Georgia, 'Times New Roman', serif;
 }
 
@@ -38,59 +44,63 @@ placeholder.
 html, body { margin: 0; padding: 0; }
 
 body {
-  background: var(--page);
+  background: var(--paper);
   color: var(--ink);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 16px;
   line-height: 1.5;
 }
 
-/* --- masthead + nav ------------------------------------------------------ */
+/* --- site header (dark navy masthead) ----------------------------------------
+   The masthead layout + colour is now Tailwind utilities on the elements
+   (bg-navy / text-white / flex / px-8 py-3 ...). The bespoke nav-link
+   hover/active states stay here. */
 
-.masthead {
-  background: var(--surface);
-  border-bottom: 3px solid var(--accent);
-  padding: 0.8rem 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.logo { font-size: 1.35rem; font-weight: 700; letter-spacing: 0.01em; }
-.logo a { color: var(--ink); text-decoration: none; }
-.logo-rule { color: var(--accent); padding: 0 0.15em; }
-
-.topnav { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; }
 .topnav .nav-link {
-  color: var(--ink-2);
+  color: #dbe6ec;
   text-decoration: none;
   font-size: 0.92rem;
   padding: 0.35rem 0.5rem;
   border-radius: 4px;
 }
-.topnav .nav-link:hover { color: var(--link); background: #eef3fa; }
-.topnav .nav-link.active { color: var(--accent); font-weight: 600; }
-
-/* --- breadcrumb ---------------------------------------------------------- */
-
-.breadcrumb {
-  background: var(--page);
-  border-bottom: 1px solid var(--hairline);
-  color: var(--muted);
-  font-size: 0.85rem;
-  padding: 0.5rem 2rem;
+.topnav .nav-link:hover { color: var(--white); background: rgba(255, 255, 255, 0.12); }
+.topnav .nav-link.active {
+  color: var(--white);
+  font-weight: 600;
+  border-bottom: 3px solid var(--gold);   /* Commonwealth gold active accent */
 }
 
-/* --- main ---------------------------------------------------------------- */
+/* --- two-column layout: sidenav + main ---------------------------------------
+   The flex layout, fixed sidenav width, sticky behaviour and main column are
+   now Tailwind utilities on the elements (layout flex items-start ... /
+   sidenav shrink-0 w-sidenav sticky ... / main flex-1 max-w-main ...). The
+   inner .group / .navbtn styling stays here. */
 
-main {
-  background: var(--surface);
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 2rem;
-  min-height: 70vh;
+.sidenav .group {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 1.1rem 0 0.3rem;
+}
+.sidenav .group:first-child { margin-top: 0; }
+
+.sidenav .navbtn {
+  display: block;
+  color: var(--link);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 0.32rem 0.6rem;
+  border-left: 3px solid transparent;
+  border-radius: 0 4px 4px 0;
+}
+.sidenav .navbtn:hover { background: #eef3f7; }
+.sidenav .navbtn.active {
+  background: #e7f0f5;
+  border-left-color: var(--teal);
+  color: var(--dark);
+  font-weight: 600;
 }
 
 h1 {
@@ -106,7 +116,7 @@ h1 {
 a { color: var(--link); }
 a:visited { color: var(--link-visited); }
 
-/* --- KPI tiles ----------------------------------------------------------- */
+/* --- KPI tiles ------------------------------------------------------------- */
 
 .kpis {
   display: grid;
@@ -116,9 +126,9 @@ a:visited { color: var(--link-visited); }
 }
 
 .kpi {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-top: 3px solid var(--blue-1);
+  background: var(--white);
+  border: 1px solid var(--hair);
+  border-top: 3px solid var(--teal);
   border-radius: 6px;
   padding: 0.9rem 1rem;
   display: flex;
@@ -130,10 +140,10 @@ a:visited { color: var(--link-visited); }
 .kpi .value { font-size: 1.9rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .kpi .basis { font-size: 0.72rem; color: var(--muted); border-top: 1px dashed var(--rule); padding-top: 0.3rem; margin-top: 0.3rem; }
 
-/* --- figure cards -------------------------------------------------------- */
+/* --- figure cards ---------------------------------------------------------- */
 
 .figure-card {
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hair);
   border-radius: 6px;
   padding: 1.25rem 1.5rem 1.5rem;
   margin: 1.5rem 0;
@@ -149,12 +159,12 @@ a:visited { color: var(--link-visited); }
 .note {
   color: var(--ink-2);
   font-size: 0.92rem;
-  border-left: 3px solid var(--blue-neg);
+  border-left: 3px solid var(--neg);
   padding: 0.4rem 0.75rem;
   margin: 0 0 1rem;
 }
 
-/* --- bar charts ---------------------------------------------------------- */
+/* --- bar charts ------------------------------------------------------------ */
 
 .chart { margin: 0.5rem 0; }
 
@@ -184,7 +194,7 @@ a:visited { color: var(--link-visited); }
 .bar-end {
   width: 24px;
   border-radius: 4px 4px 0 0;
-  background: var(--blue-1);
+  background: var(--teal);
 }
 .bar-end.none { height: 0; background: transparent; }
 .bar-end { min-height: 2px; }
@@ -209,7 +219,11 @@ a:visited { color: var(--link-visited); }
   font-style: italic;
 }
 
-/* --- no-data placeholders ------------------------------------------------- */
+/* --- ECharts containers (interactive build) -------------------------------- */
+
+.chartbox { min-height: 320px; }
+
+/* --- no-data placeholders -------------------------------------------------- */
 
 .nodata {
   color: var(--nodata);
@@ -221,12 +235,12 @@ a:visited { color: var(--link-visited); }
   max-width: 70ch;
 }
 
-/* --- lineage page --------------------------------------------------------- */
+/* --- lineage page ---------------------------------------------------------- */
 
 .lineage { margin-top: 2rem; font-size: 0.95rem; }
 pre {
   background: #fafafa;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hair);
   border-radius: 6px;
   padding: 0.85rem 1rem;
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
@@ -241,22 +255,26 @@ section { margin: 1.4rem 0; }
 .meta { color: var(--muted); font-size: 0.8rem; }
 .apitable { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 .apitable th, .apitable td {
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hair);
   padding: 0.55rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
-.apitable th { background: #f7f7f7; font-weight: 600; }
+.apitable th { background: var(--paper); font-weight: 600; }
 .apitable code { background: #fafafa; padding: 0.1rem 0.3rem; border-radius: 3px;
   font-size: 0.85em; }
 
-/* --- data notes (verbatim corpus) ----------------------------------------- */
+/* --- data notes (verbatim corpus) ------------------------------------------ */
 
 .notes { max-width: 78ch; }
+
+/* Tailwind preflight zeroes all element margins; bare paragraphs/pre blocks
+   on the prose pages (how-to-use, api) get their vertical rhythm back. */
+main p, main pre { margin: 0.75rem 0; }
 .notes h1 { font-family: var(--serif); font-size: 1.6rem; }
 .notes h2 { font-family: var(--serif); font-size: 1.25rem; margin: 1.6rem 0 0.5rem; }
 .notes p { margin: 0.75rem 0; }
-.notes ul { padding-left: 1.25rem; }
+.notes ul { list-style: disc; padding-left: 1.25rem; }
 .notes em { font-style: italic; }
 
 /* --- filters + how-to ------------------------------------------------------ */
@@ -270,17 +288,70 @@ section { margin: 1.4rem 0; }
   margin: 1rem 0 1.5rem;
 }
 h2 { font-family: var(--serif); font-size: 1.3rem; margin: 1.5rem 0 0.5rem; }
-ul { padding-left: 1.25rem; }
+/* Tailwind's preflight resets ul/ol to list-style:none; the prose lists
+   (how-to-use, data-notes) render with bullets again here. */
+ul { list-style: disc; padding-left: 1.25rem; }
 
-/* --- footer ---------------------------------------------------------------- */
+/* --- footer ----------------------------------------------------------------
+   The band bg, text colour and padding are Tailwind utilities on the footer
+   (bg-navy / text-neutral-200 / px-8 py-7). The inner link + separator colours
+   are bespoke (utilities can't express the :visited palette) and stay here. */
 
-.sitefoot {
-  background: #1c1c1c;
-  color: #e8e8e6;
-  padding: 1.75rem 2rem;
-  font-size: 0.85rem;
-}
 .sitefoot .country { margin-bottom: 0.4rem; }
+.sitefoot .legal { margin-bottom: 0.4rem; color: #b9b9b4; }
+.sitefoot .legal a { color: #cfe0ff; }
+.sitefoot .legal a:visited { color: #d9c9ff; }
+.sitefoot .legal .sep { color: #6b7a86; padding: 0 0.3em; }
 .sitefoot .stack { color: #b9b9b4; }
 .sitefoot a { color: #cfe0ff; }
 .sitefoot a:visited { color: #d9c9ff; }
+
+/* --- focus states ---------------------------------------------------------- */
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* --- responsive collapse under 900px --------------------------------------- */
+
+/* The < 900px collapse restyles the chrome the way Tailwind utilities own it
+   (layout / sidenav / main / header / breadcrumb), so those selectors carry
+   !important to beat the utility layer. `.sidenav .group` / `.sidenav .navbtn`
+   are bespoke-only (utilities never touch them) and need no override. */
+
+@media (max-width: 900px) {
+  .layout { flex-direction: column !important; }
+  .sidenav {
+    flex: none !important;
+    width: 100% !important;
+    position: static !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    padding: 1rem 1.5rem !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.25rem 0.5rem !important;
+    border-bottom: 1px solid var(--hair);
+  }
+  .sidenav .group {
+    flex: 0 0 100%;
+    margin: 0.5rem 0 0.1rem;
+  }
+  .sidenav .navbtn {
+    display: inline-block;
+    border-left: none;
+    border-radius: 4px;
+    padding: 0.3rem 0.55rem;
+  }
+  main { padding: 1.5rem !important; }
+  .site-header { padding: 0.7rem 1.25rem !important; }
+  .breadcrumb { padding: 0.5rem 1.25rem !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

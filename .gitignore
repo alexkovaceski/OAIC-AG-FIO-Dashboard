@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .idea/
+node_modules/
 background/jpg/
 
 # ignore xlsx/csv everywhere except the pinned data snapshot

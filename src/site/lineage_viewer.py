@@ -221,4 +221,5 @@ def render_lineage_page(artifact_id, conn=None, *, data=None) -> str:
     {_section("Computed figures", transcript,
               "No computed figures recorded.")}
     <p><a href="/">← back to dashboard</a></p>"""
-    return chrome(f"Lineage — {artifact_id}", "Freedom of information", body)
+    return chrome(f"Lineage — {artifact_id}", "Freedom of information", body,
+                  page_key="lineage")
