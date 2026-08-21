@@ -45,3 +45,47 @@ def test_new_measures_extracted_per_fy():
             assert rows, f"no {measure} rows for {fy}"
             got = round(sum(f["value"] for f in rows))
             assert got == want, f"{fy} {measure}: sum(agency total)={got} != published total {want}"
+
+
+def test_decided_consistent_across_sheets_per_fy():
+    # The source publishes the decided headline on BOTH the "Action on requests"
+    # ("Total determined") and "Response times" ("Requests determined") sheets;
+    # they must agree per FY. We ingest decided from "Action on requests" ONLY
+    # (ingesting both would double-count). This test cross-checks the ingested
+    # value against the OTHER sheet's published Total row, read directly from
+    # the workbook. Verified across all 7 files (e.g. 2024-25: 25211 == 25211).
+    # NOTE: Total determined is NOT the sum of outcome components (granted+part+
+    # refused+withdrawn+transferred != decided) — the outcome breakdown covers a
+    # different scope, so no sum-of-components equality is asserted.
+    from openpyxl import load_workbook
+    facts = normalise_all()
+    fy_files = [("2019-20", "agency-foi-data-2019-20.xlsx"), ("2020-21", "agency-foi-data-2020-21.xlsx"),
+                ("2021-22", "agency-foi-data-2021-22.xlsx"), ("2022-23", "agency-foi-data-2022-23.xlsx"),
+                ("2023-24", "agency-foi-data-2023-24.xlsx"), ("2024-25", "agency-foi-data-2024-25.xlsx"),
+                ("2025-26", "agency-foi-data-2025-26-q1-to-q3.xlsx")]
+    for fy, fn in fy_files:
+        got = round(sum(f["value"] for f in facts if f["fy"] == fy and f["measure"] == "decided"
+                        and f["bucket"] == "total" and not f["derived"]))
+        wb = load_workbook(DATA_SOURCES_DIR / fn, data_only=True, read_only=True)
+        rows = list(wb["Response times"].iter_rows(values_only=True))
+        hdr = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
+        first = [i for i, h in enumerate(hdr) if h.startswith("requests determined")][0]
+        want = None
+        for r in rows[3:]:
+            if str(r[0] or "").strip().lower() == "total":
+                want = float(r[first + 2]); break
+        wb.close()
+        assert want is not None and got == want, \
+            f"{fy}: decided (Action)={got} != Requests determined (Response times)={want}"
+
+
+def test_six_figures_no_longer_empty():
+    from src.stats.catalog import foi_stats
+    from src.storage.frame import Frame
+    facts = normalise_all()
+    frame = Frame(facts)
+    for key in ("requests_decided_trend", "decided_top20", "decision_outcomes_trend",
+                "granted_full_part_change", "timeliness_trend", "timeliness_change"):
+        fig = foi_stats(frame, key)["value"]
+        assert fig["series"], f"{key} series empty"
+        assert any(v is not None for s in fig["series"] for v in s["values"]), f"{key} all None"
