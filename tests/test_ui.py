@@ -26,6 +26,17 @@ def _pages():
     return render_all_pages(Frame(normalise_all()))
 
 
+def _relative_luminance(hex6):
+    """WCAG relative luminance of a #rrggbb (or rrggbb) colour on the sRGB curve."""
+    import math
+    hex6 = hex6.lstrip("#")
+    vals = []
+    for i in (0, 2, 4):
+        c = int(hex6[i:i + 2], 16) / 255
+        vals.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * vals[0] + 0.7152 * vals[1] + 0.0722 * vals[2]
+
+
 def test_pages_emit_echarts_containers_and_pagedata():
     pages = _pages()
     for key in ["at-a-glance", "requests-received", "decision-outcomes", "timeliness"]:
@@ -163,3 +174,27 @@ def test_foi_charts_js_smoke():
     # change binding and the honest no-derive fallback must be present
     assert "addEventListener(\"change\"" in js, "wireFilters must bind change handlers"
     assert "__pageData.facts" in js, "wireFilters must filter the canonical facts"
+
+
+def test_every_page_has_skip_link_and_main_landmark():
+    # Task 3: a keyboard user can jump straight past the masthead + sidenav.
+    for html in _pages().values():
+        assert '<a class="skip-link" href="#main"' in html, "skip link missing"
+        assert '<main id="main"' in html, "main landmark missing"
+
+
+def test_top_nav_has_primary_aria_label():
+    # Task 3: the top-level OAIC nav is the page's primary navigation landmark.
+    for html in _pages().values():
+        assert 'aria-label="Primary"' in html
+
+
+def test_muted_token_passes_aa_on_white():
+    # --muted must reach 4.5:1 on white for the small labels that use it.
+    from pathlib import Path
+    css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
+    m = re.search(r"--muted:\s*(#[0-9a-fA-F]{6})", css)
+    assert m, "no --muted token"
+    lum = _relative_luminance(m.group(1))
+    ratio = (1.05) / (lum + 0.05)
+    assert ratio >= 4.5, f"--muted {m.group(1)} is {ratio:.2f}:1 (needs >= 4.5:1)"

@@ -113,14 +113,15 @@ def chrome(title: str, active_nav: str | None = None, body_html: str = "",
 <link rel="stylesheet" href="/assets/tailwind.css">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header bg-navy text-white border-b-3 border-teal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
   <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">OAIC <span class="logo-rule text-gold px-0.5">·</span> FOI Insights</a></div>
-  <nav class="topnav flex flex-wrap gap-1">{nav_html(active_nav)}</nav>
+  <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active_nav)}</nav>
 </header>
 <div class="breadcrumb bg-paper border-b border-hair text-muted text-sm px-8 py-2">{BREADCRUMB}</div>
 <div class="layout flex items-start max-w-layout mx-auto">
   {sidenav_html(page_key)}
-  <main class="flex-1 max-w-main mx-auto bg-white px-8 py-8 min-h-main">{body_html}</main>
+  <main id="main" class="flex-1 max-w-main mx-auto bg-white px-8 py-8 min-h-main">{body_html}</main>
 </div>
 <footer class="sitefoot bg-navy text-neutral-200 text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
