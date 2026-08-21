@@ -200,6 +200,31 @@ def test_muted_token_passes_aa_on_white():
     assert ratio >= 4.5, f"--muted {m.group(1)} is {ratio:.2f}:1 (needs >= 4.5:1)"
 
 
+def test_nodata_token_passes_aa_on_white():
+    # --nodata is used for the "No published data" placeholder text on white;
+    # it must clear the same 4.5:1 AA bar as --muted.
+    from pathlib import Path
+    css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
+    m = re.search(r"--nodata:\s*(#[0-9a-fA-F]{6})", css)
+    assert m, "no --nodata token"
+    lum = _relative_luminance(m.group(1))
+    ratio = (1.05) / (lum + 0.05)
+    assert ratio >= 4.5, f"--nodata {m.group(1)} is {ratio:.2f}:1 (needs >= 4.5:1)"
+
+
+def test_tailwind_muted_token_passes_aa_on_white():
+    # tailwind.css is loaded on every page; its .text-muted utility carries the
+    # breadcrumb and filter-label text on the near-white --paper background.
+    # It must clear the same 4.5:1 AA bar as site.css's --muted.
+    from pathlib import Path
+    css = Path("src/site/assets/tailwind.css").read_text(encoding="utf-8")
+    m = re.search(r"--color-muted:\s*(#[0-9a-fA-F]{6})", css)
+    assert m, "no --color-muted token in tailwind.css"
+    lum = _relative_luminance(m.group(1))
+    ratio = (1.05) / (lum + 0.05)
+    assert ratio >= 4.5, f"--color-muted {m.group(1)} is {ratio:.2f}:1 (needs >= 4.5:1)"
+
+
 def test_no_outbound_oaic_links_or_branding():
     for key, html in _pages().items():
         assert "oaic.gov.au" not in html, f"{key}: outbound OAIC link remains"

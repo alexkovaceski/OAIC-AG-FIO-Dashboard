@@ -1,14 +1,14 @@
 /* site.css — FOI Insights chrome + the FOI Insights chart system.
 
 The chrome: a dark navy masthead with white text and a Commonwealth-gold
-active underline, a top-level nav linking OUT to the live OAIC site, a
-two-column layout (sidenav + main), and a footer carrying the Acknowledgement
-of Country, © Commonwealth of Australia, legal links and the identity
-stovepipe.
+active underline, a top-level nav of five internal FOI sections, a two-column
+layout (sidenav + main), and a footer carrying the Acknowledgement of Country,
+in-site legal links and the identity stovepipe.
 
-Accessibility choices: contrast is WCAG AA. The --muted token is #54626f
-(≈ 6.3:1 on white) for the small labels that use it, and :focus-visible draws a
-2px currentColor outline so the focus ring adapts to the background it sits on.
+Accessibility choices: contrast is WCAG AA. The --muted and --nodata tokens are
+#54626f (≈ 6.3:1 on white) for the small labels that use them, and
+:focus-visible draws a 2px currentColor outline so the focus ring adapts to the
+background it sits on.
 
 The chart system follows the dataviz method: series colours are a validated
 categorical palette, every figure renders into an ECharts .chartbox mount, and
@@ -38,7 +38,7 @@ text always wears ink rather than a series colour. A missing year renders as
   --rule:         #c9c9c2;
   --link:         #00567d;
   --link-visited: #4a4a9a;
-  --nodata:       #6b7a86;
+  --nodata:       #54626f;
   --serif:        Georgia, 'Times New Roman', serif;
 }
 
