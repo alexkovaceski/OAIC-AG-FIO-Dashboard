@@ -41,7 +41,8 @@ SIDENAV_GROUPS = [
                     ("change-timeliness", "Change in timeliness")]),
     ("Reference", [("data-notes", "Data notes"),
                    ("how-to-use", "How to use"),
-                   ("api", "API access")]),
+                   ("api", "API access"),
+                   ("lineage", "Lineage")]),
 ]
 
 # every page points back to the FOI section; the POC pages live under it
