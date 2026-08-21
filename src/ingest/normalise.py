@@ -25,6 +25,40 @@ def _fact(agency_key, agency_name, fy, quarter, group, measure, bucket, value, d
             "bucket": bucket, "value": _num(value), "derived": derived,
             "portfolio": PORTFOLIO_MAP.get(agency_name, "")}
 
+# header-driven P/O/T sheet parser: measures found by header substring in row 0;
+# P/O/T read by position at first-match offset of each measure group
+_ACTION_MEASURES = {
+    "granted in full": "granted_full", "granted in part": "granted_part",
+    "access refused": "refused", "withdrawn": "withdrawn",
+    "total determined": "decided",
+}
+_RESPONSE_MEASURES = {"response time within": "within_statutory"}
+
+def _parse_pot_sheet(rows, measures, fy, quarter, group):
+    """rows: sheet rows (list of lists). measures: {header_substr: measure}.
+    Returns per-agency facts reading P/O/T at the first-match offset of each
+    measure group. Skips banner/Total rows. `fy`/`quarter`/`group` flow into
+    `_fact` (same shape as received/finalised)."""
+    facts = []
+    hdr = [str(c) if c is not None else "" for c in rows[0]]
+    offsets = {}
+    for i, h in enumerate(hdr):
+        hl = h.lower()
+        for substr, measure in measures.items():
+            if hl.startswith(substr) and measure not in offsets:
+                offsets[measure] = (i, i + 1, i + 2)
+    for r in rows[3:]:
+        if not r[0]: continue
+        name = str(r[0]).strip()
+        if name.startswith("x") or name.startswith("xx"): continue
+        if name.lower() == "total": continue  # Total row is a trusted value, not a fact
+        key = normalise_agency(name)
+        for measure, (pc, oc, tc) in offsets.items():
+            facts.append(_fact(key, name, fy, quarter, group, measure, "personal", _num(r[pc])))
+            facts.append(_fact(key, name, fy, quarter, group, measure, "other", _num(r[oc])))
+            facts.append(_fact(key, name, fy, quarter, group, measure, "total", _num(r[tc])))
+    return facts
+
 def _agency_facts(sheet_rows, fy, quarter, measure_group):
     facts = []
     for r in sheet_rows[3:]:  # skip header + repeated-name rows
@@ -64,9 +98,13 @@ def normalise_all(source_dir: Path = DATA_SOURCES_DIR) -> list[dict]:
                      ("2023-24","agency-foi-data-2023-24.xlsx"), ("2024-25","agency-foi-data-2024-25.xlsx")]:
         sheets = read_sheets(source_dir / fn)
         facts += _agency_facts(sheets["Request numbers"], year, None, "requests")
+        facts += _parse_pot_sheet(sheets["Action on requests"], _ACTION_MEASURES, year, None, "requests")
+        facts += _parse_pot_sheet(sheets["Response times"], _RESPONSE_MEASURES, year, None, "requests")
     # current file: Q1-Q3 cumulative (quarter=None, cumulative window)
     cur = read_sheets(source_dir / "agency-foi-data-2025-26-q1-to-q3.xlsx")
     facts += _agency_facts(cur["Request numbers"], "2025-26", None, "requests")
+    facts += _parse_pot_sheet(cur["Action on requests"], _ACTION_MEASURES, "2025-26", None, "requests")
+    facts += _parse_pot_sheet(cur["Response times"], _RESPONSE_MEASURES, "2025-26", None, "requests")
     # single-quarter Q1 2025-26 headline: published golden figures, marked derived
     facts += _golden_q1_facts()
     return facts
