@@ -21,7 +21,7 @@
 (function () {
   "use strict";
 
-  // OAIC brand palette (validated categorical slots — see site.css tokens).
+  // Brand palette (validated categorical slots — see site.css tokens).
   var PAL = {
     teal: "#00567d", blue: "#26547b", gold: "#ffcc00",
     orange: "#eb6834", green: "#1baf7a", ink: "#0c3c60",

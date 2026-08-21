@@ -464,6 +464,8 @@ def _page_data_notes() -> str:
         notes = ("# Data notes and disclaimer\n\n"
                  "The data notes document is missing from the corpus.")
     body = ("<h1>Data notes and disclaimer</h1>"
+            '<p class="intro">These notes are reproduced verbatim from the '
+            "source dataset (FOI statistics) on data.gov.au.</p>"
             f'<div class="notes">{_md(notes)}</div>')
     return chrome("Data notes and disclaimer", body,
                   page_key="data-notes")
@@ -473,7 +475,7 @@ def _page_how_to_use() -> str:
     body = """
     <h1>How to use</h1>
     <p class="intro">The 12 FOI Insights pages are built from the source data
-    published on data.gov.au (OAIC FOI statistics). Every figure is computed
+    published on data.gov.au (FOI statistics). Every figure is computed
     from that data by the platform — no figure is typed in by hand — and every
     figure carries a basis label so you can tell what window it covers.</p>
     <h2>Reading the basis labels</h2>
@@ -497,7 +499,7 @@ def _page_how_to_use() -> str:
     the full dataset; the filters become live in the interactive build.</p>
     <h2>Data notes</h2>
     <p>The <a href="/data-notes.html">Data notes and disclaimer</a> page carries
-    the OAIC's definitional notes verbatim.</p>
+    the publisher's definitional notes verbatim.</p>
     """
     return chrome("How to use", body,
                   page_key="how-to-use")
@@ -509,7 +511,7 @@ def _page_api() -> str:
     <p class="intro">Every figure and fact behind these visualisations is
     available as a read-only JSON API. The endpoints expose the <em>same
     platform-computed numbers the pages render</em> — nothing a model generated,
-    only the canonical data sourced from data.gov.au (OAIC FOI statistics) plus
+    only the canonical data sourced from data.gov.au (FOI statistics) plus
     the deterministic figures computed from it.</p>
     <h2>Endpoints</h2>
     <table class="apitable">
@@ -542,7 +544,7 @@ curl https://foi.axoquant.com/api/</code></pre>
     service.</p>
     <h2>Source</h2>
     <p>The underlying data is the <a href="https://data.gov.au/data/dataset/freedom-of-information-statistics">
-    OAIC FOI statistics dataset</a> on data.gov.au (dataset
+    FOI statistics dataset</a> on data.gov.au (dataset
     <code>b0771c28-09cc-4c4e-9e61-9a96f6e3d040</code>). See the
     <a href="/data-notes.html">Data notes and disclaimer</a> for how agencies,
     renames and personal information are handled.</p>

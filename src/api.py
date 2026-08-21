@@ -61,7 +61,7 @@ def dataset_info(frame) -> dict:
     measure_groups = sorted({f["measure_group"] for f in frame.facts})
     fy = sorted({f["fy"] for f in frame.facts})
     return {
-        "dataset": "data.gov.au OAIC FOI statistics",
+        "dataset": "data.gov.au FOI statistics",
         "dataset_id": "b0771c28-09cc-4c4e-9e61-9a96f6e3d040",
         "window_modes": ["single_quarter", "cumulative", "fy"],
         "measures": measures,

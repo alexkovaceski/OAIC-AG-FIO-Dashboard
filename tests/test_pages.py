@@ -184,3 +184,12 @@ def test_data_notes_renders_bullets_and_emphasis():
     assert "*Freedom of Information Act 1982*" not in html
     assert "<ul>" in html
     assert "- the number of Freedom" not in html
+
+
+def test_data_notes_carries_verbatim_framing_line():
+    # Task 5: the notes corpus is reproduced verbatim from the source — the page
+    # carries a framing line above the .notes block, and the corpus keeps the
+    # publisher's name (OAIC) inside the verbatim text.
+    html = _pages()["data-notes"]
+    assert "reproduced verbatim from the source" in html.lower()
+    assert "OAIC" in html  # the corpus itself keeps the publisher's name
