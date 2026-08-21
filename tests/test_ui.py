@@ -198,3 +198,32 @@ def test_muted_token_passes_aa_on_white():
     lum = _relative_luminance(m.group(1))
     ratio = (1.05) / (lum + 0.05)
     assert ratio >= 4.5, f"--muted {m.group(1)} is {ratio:.2f}:1 (needs >= 4.5:1)"
+
+
+def test_no_outbound_oaic_links_or_branding():
+    for key, html in _pages().items():
+        assert "oaic.gov.au" not in html, f"{key}: outbound OAIC link remains"
+        if key == "data-notes":
+            assert "OAIC" in html  # verbatim corpus keeps the publisher's name
+        else:
+            assert "OAIC" not in html, f"{key}: OAIC name remains outside corpus"
+        assert "© Commonwealth of Australia" not in html, f"{key}: AG copyright"
+
+
+def test_masthead_is_foi_insights():
+    for html in _pages().values():
+        assert ">FOI Insights</a>" in html, "masthead missing FOI Insights"
+
+
+def test_top_nav_links_are_all_internal():
+    for html in _pages().values():
+        nav = re.search(r'<nav[^>]*aria-label="Primary"[^>]*>(.*?)</nav>', html, re.S)
+        assert nav, "primary nav not found"
+        for href in re.findall(r'href="([^"]+)"', nav.group(1)):
+            assert href.startswith("/"), f"external top-nav link: {href}"
+
+
+def test_footer_has_in_site_links():
+    html = _pages()["at-a-glance"]
+    for link in ["/data-notes.html", "/how-to-use.html", "/api.html"]:
+        assert link in html, f"footer missing in-site link {link}"

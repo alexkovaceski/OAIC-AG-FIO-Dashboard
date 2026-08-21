@@ -314,7 +314,7 @@ def _page_at_a_glance(frame) -> str:
                     "requests_received_trend")}
     {_lineage_panel("at-a-glance")}
     {_page_data_script(frame, "at-a-glance")}"""
-    return chrome("FOI at a glance", "Freedom of information", body,
+    return chrome("FOI at a glance", body,
                   page_key="at-a-glance", scripts=_CHART_SCRIPTS)
 
 
@@ -330,7 +330,7 @@ def _page_requests_received(frame) -> str:
                     "requests_received_trend")}
     {_lineage_panel("requests-received")}
     {_page_data_script(frame, "requests-received")}"""
-    return chrome("Requests received", "Freedom of information", body,
+    return chrome("Requests received", body,
                   page_key="requests-received", scripts=_CHART_SCRIPTS)
 
 
@@ -345,7 +345,7 @@ def _page_key_agency_contributions_received(frame) -> str:
     {_lineage_panel("key-agency-contributions-received")}
     {_page_data_script(frame, "key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
-                  "Freedom of information", body,
+                  body,
                   page_key="key-agency-contributions-received",
                   scripts=_CHART_SCRIPTS)
 
@@ -362,7 +362,7 @@ def _page_requests_finalised(frame) -> str:
                     "requests_finalised_trend")}
     {_lineage_panel("requests-finalised")}
     {_page_data_script(frame, "requests-finalised")}"""
-    return chrome("Requests finalised", "Freedom of information", body,
+    return chrome("Requests finalised", body,
                   page_key="requests-finalised", scripts=_CHART_SCRIPTS)
 
 
@@ -377,7 +377,7 @@ def _page_requests_decided(frame) -> str:
                     "requests_decided_trend")}
     {_lineage_panel("requests-decided")}
     {_page_data_script(frame, "requests-decided")}"""
-    return chrome("Requests decided", "Freedom of information", body,
+    return chrome("Requests decided", body,
                   page_key="requests-decided", scripts=_CHART_SCRIPTS)
 
 
@@ -391,7 +391,7 @@ def _page_key_agency_contributions_decided(frame) -> str:
     {_lineage_panel("key-agency-contributions-decided")}
     {_page_data_script(frame, "key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",
-                  "Freedom of information", body,
+                  body,
                   page_key="key-agency-contributions-decided",
                   scripts=_CHART_SCRIPTS)
 
@@ -408,7 +408,7 @@ def _page_decision_outcomes(frame) -> str:
                     "decision_outcomes_trend")}
     {_lineage_panel("decision-outcomes")}
     {_page_data_script(frame, "decision-outcomes")}"""
-    return chrome("Decision outcomes", "Freedom of information", body,
+    return chrome("Decision outcomes", body,
                   page_key="decision-outcomes", scripts=_CHART_SCRIPTS)
 
 
@@ -422,7 +422,7 @@ def _page_change_decision_outcomes(frame) -> str:
                     "granted_full_part_change")}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
-    return chrome("Change in decision outcomes", "Freedom of information", body,
+    return chrome("Change in decision outcomes", body,
                   page_key="change-decision-outcomes", scripts=_CHART_SCRIPTS)
 
 
@@ -438,7 +438,7 @@ def _page_timeliness(frame) -> str:
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend")}
     {_lineage_panel("timeliness")}
     {_page_data_script(frame, "timeliness")}"""
-    return chrome("Timeliness", "Freedom of information", body,
+    return chrome("Timeliness", body,
                   page_key="timeliness", scripts=_CHART_SCRIPTS)
 
 
@@ -451,7 +451,7 @@ def _page_change_timeliness(frame) -> str:
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change")}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""
-    return chrome("Change in timeliness", "Freedom of information", body,
+    return chrome("Change in timeliness", body,
                   page_key="change-timeliness", scripts=_CHART_SCRIPTS)
 
 
@@ -465,7 +465,7 @@ def _page_data_notes() -> str:
                  "The data notes document is missing from the corpus.")
     body = ("<h1>Data notes and disclaimer</h1>"
             f'<div class="notes">{_md(notes)}</div>')
-    return chrome("Data notes and disclaimer", "Freedom of information", body,
+    return chrome("Data notes and disclaimer", body,
                   page_key="data-notes")
 
 
@@ -499,7 +499,7 @@ def _page_how_to_use() -> str:
     <p>The <a href="/data-notes.html">Data notes and disclaimer</a> page carries
     the OAIC's definitional notes verbatim.</p>
     """
-    return chrome("How to use", "Freedom of information", body,
+    return chrome("How to use", body,
                   page_key="how-to-use")
 
 
@@ -550,7 +550,7 @@ curl https://foi.axoquant.com/api/</code></pre>
     and report has a <a href="/lineage/local-1">lineage page</a> — the
     explainability trail is part of the demo.</p>
     """
-    return chrome("API access", "Freedom of information", body,
+    return chrome("API access", body,
                   page_key="api")
 
 

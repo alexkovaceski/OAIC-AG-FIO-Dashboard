@@ -257,7 +257,7 @@ def _degraded_dashboard_page(artifact_id) -> str:
         f"{html.escape(str(artifact_id))} — the Postgres lineage store is "
         f"unreachable or the artifact has no recorded spec.</p>"
         f'<p><a href="/">← back to at-a-glance</a></p>')
-    return chrome(f"Dashboard — {artifact_id}", "Freedom of information", body)
+    return chrome(f"Dashboard — {artifact_id}", body)
 
 
 class AskRequest(BaseModel):
