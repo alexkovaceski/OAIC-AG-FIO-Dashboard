@@ -76,3 +76,40 @@ def test_each_page_marks_exactly_its_own_sidenav_entry_active():
         assert active == [f"/{key}.html"], (
             f"{key}: expected exactly one active sidenav link to /{key}.html, "
             f"got {active}")
+
+
+def test_pagedata_ships_facts_for_live_filters():
+    # Task 3: the live-filter contract selects/re-groups window.__pageData.facts
+    # (the canonical long-form rows) — never a new aggregate. The blob must ship
+    # them verbatim alongside figures + filters.
+    import json
+    pages = _pages()
+    for key in ["at-a-glance", "requests-received", "decision-outcomes",
+                "timeliness"]:
+        html = pages[key]
+        m = re.search(r"<script>window\.__pageData\s*=\s*(\{.*?\});</script>",
+                      html, re.S)
+        assert m, f"{key}: expected a well-formed __pageData script"
+        data = json.loads(m.group(1))
+        assert "facts" in data, f"{key}: __pageData must ship the canonical facts"
+        assert isinstance(data["facts"], list) and data["facts"], (
+            f"{key}: facts must be a non-empty list")
+        row = data["facts"][0]
+        assert {"fy", "quarter", "measure", "bucket", "value"} <= row.keys(), (
+            f"{key}: a fact row must carry fy/quarter/measure/bucket/value")
+
+
+def test_foi_charts_js_smoke():
+    # static smoke test on the JS module (no browser): the file must declare
+    # FoiCharts.init + FoiCharts.wireFilters, and must skip chartboxes that
+    # already hold a server-rendered .nodata placeholder rather than init an
+    # empty chart over them.
+    from pathlib import Path
+    js = Path("src/site/assets/foi-charts.js").read_text(encoding="utf-8")
+    assert "FoiCharts" in js and "init" in js, "FoiCharts.init missing"
+    assert re.search(r"FoiCharts\s*=\s*\{\s*init\s*:\s*init\s*,\s*wireFilters\s*:\s*wireFilters\s*\}", js), \
+        "FoiCharts must expose init and wireFilters"
+    assert "wireFilters" in js, "FoiCharts.wireFilters missing"
+    assert re.search(r"querySelectorAll\(\"\.chartbox\"\)", js), \
+        "init must mount every .chartbox"
+    assert ".nodata" in js, "renderChart must skip server-rendered .nodata placeholders"

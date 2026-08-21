@@ -121,15 +121,21 @@ def _filters_blob(frame) -> dict:
 
 def _page_data_script(frame, page_key) -> str:
     """The window.__pageData blob for one page: the foi_stats results for the
-    page's figure keys plus the platform-derived filter options. PURE frame ->
-    JSON — no fabricated figures, no new aggregates.
+    page's figure keys, the canonical long-form facts (frame.facts, verbatim),
+    and the platform-derived filter options. PURE frame -> JSON — no fabricated
+    figures, no new aggregates. The live filters select/re-group
+    window.__pageData.facts only; they never sum into a total the platform did
+    not derive.
 
-    SECURITY: the JSON is escaped so a source value containing "</script>"
-    cannot break out of its <script> tag (json.dumps's default ensures a str
-    "</" never occurs in output, so the .replace is a belt-and-braces guard)."""
+    SECURITY: the JSON is escaped so a source value cannot break out of its
+    <script> tag. json.dumps does NOT escape "</" (it serialises it verbatim),
+    so the .replace("</", "<\\/") below is the ONLY guard against script-tag
+    breakout. "--" is also escaped to \\u002d\\u002d so a source value cannot
+    form an HTML comment boundary (<!-- / -->) inside the blob."""
     figures = {k: _stat(frame, k) for k in PAGE_FIGURE_KEYS.get(page_key, [])}
-    blob = {"figures": figures, "filters": _filters_blob(frame)}
-    safe = json.dumps(blob).replace("</", "<\\/")
+    blob = {"figures": figures, "facts": frame.facts, "filters": _filters_blob(frame)}
+    safe = (json.dumps(blob).replace("</", "<\\/")
+            .replace("--", "\\u002d\\u002d"))
     return f"<script>window.__pageData = {safe};</script>"
 
 
