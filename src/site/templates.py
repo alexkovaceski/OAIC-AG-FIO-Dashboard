@@ -68,7 +68,14 @@ def nav_html(active_nav: str | None = None) -> str:
 
 
 def sidenav_html(page_key: str) -> str:
-    out = ['<nav class="sidenav" aria-label="FOI statistics">']
+    # layout is Tailwind utilities (fixed 216px column, sticky); the inner
+    # .group/.navbtn styling stays in site.css. Class names are static literals
+    # so Tailwind's content scan compiles them. The 216px width is the
+    # w-sidenav theme token (see tailwind/input.css) — Tailwind's arbitrary
+    # values are flaky under the v4 content scan, named tokens are not.
+    out = ['<nav class="sidenav shrink-0 w-sidenav sticky top-0 self-start '
+           'max-h-screen overflow-y-auto pt-6 pr-4 pb-8 pl-8" '
+           'aria-label="FOI statistics">']
     for group, items in SIDENAV_GROUPS:
         out.append(f'<div class="group">{html.escape(group)}</div>')
         for key, label in items:
@@ -103,18 +110,19 @@ def chrome(title: str, active_nav: str | None = None, body_html: str = "",
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/tailwind.css">
 </head>
 <body>
-<header class="site-header">
-  <div class="logo"><a href="/">OAIC <span class="logo-rule">·</span> FOI Insights</a></div>
-  <nav class="topnav">{nav_html(active_nav)}</nav>
+<header class="site-header bg-navy text-white border-b-3 border-teal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
+  <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">OAIC <span class="logo-rule text-gold px-0.5">·</span> FOI Insights</a></div>
+  <nav class="topnav flex flex-wrap gap-1">{nav_html(active_nav)}</nav>
 </header>
-<div class="breadcrumb">{BREADCRUMB}</div>
-<div class="layout">
+<div class="breadcrumb bg-paper border-b border-hair text-muted text-sm px-8 py-2">{BREADCRUMB}</div>
+<div class="layout flex items-start max-w-layout mx-auto">
   {sidenav_html(page_key)}
-  <main>{body_html}</main>
+  <main class="flex-1 max-w-main mx-auto bg-white px-8 py-8 min-h-main">{body_html}</main>
 </div>
-<footer class="sitefoot">
+<footer class="sitefoot bg-navy text-neutral-200 text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
   <div class="legal">© Commonwealth of Australia <span class="sep">·</span> <a href="https://www.oaic.gov.au/privacy">Privacy</a> <span class="sep">·</span> <a href="https://www.oaic.gov.au/freedom-of-information">FOI</a></div>
   <div class="stack">FOI Insights — fartkraft sovereign stack · data from data.gov.au (OAIC FOI statistics)</div>

@@ -1,0 +1,11 @@
+{
+  "name": "foi-insights-tailwind",
+  "private": true,
+  "description": "Tailwind v4 build for the FOI Insights POC UI. The compiled output (src/site/assets/tailwind.css) is committed and ships with src/ — this is a build-time-only toolchain.",
+  "scripts": {
+    "build:css": "tailwindcss -i tailwind/input.css -o src/site/assets/tailwind.css --content \"./src/site/**/*.py,./src/site/assets/foi-charts.js\""
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3"
+  }
+}

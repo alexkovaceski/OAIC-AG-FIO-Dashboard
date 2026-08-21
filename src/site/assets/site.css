@@ -51,25 +51,11 @@ body {
   line-height: 1.5;
 }
 
-/* --- site header (dark navy masthead) -------------------------------------- */
+/* --- site header (dark navy masthead) ----------------------------------------
+   The masthead layout + colour is now Tailwind utilities on the elements
+   (bg-navy / text-white / flex / px-8 py-3 ...). The bespoke nav-link
+   hover/active states stay here. */
 
-.site-header {
-  background: var(--navy);
-  color: var(--white);
-  border-bottom: 3px solid var(--teal);
-  padding: 0.8rem 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.logo { font-size: 1.35rem; font-weight: 700; letter-spacing: 0.01em; }
-.logo a { color: var(--white); text-decoration: none; }
-.logo-rule { color: var(--gold); padding: 0 0.15em; }
-
-.topnav { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; }
 .topnav .nav-link {
   color: #dbe6ec;
   text-decoration: none;
@@ -84,34 +70,11 @@ body {
   border-bottom: 3px solid var(--gold);   /* Commonwealth gold active accent */
 }
 
-/* --- breadcrumb ------------------------------------------------------------ */
-
-.breadcrumb {
-  background: var(--paper);
-  border-bottom: 1px solid var(--hair);
-  color: var(--muted);
-  font-size: 0.85rem;
-  padding: 0.5rem 2rem;
-}
-
-/* --- two-column layout: sidenav + main ------------------------------------- */
-
-.layout {
-  display: flex;
-  align-items: flex-start;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.sidenav {
-  flex: 0 0 216px;
-  padding: 1.5rem 1rem 2rem 2rem;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  max-height: 100vh;
-  overflow-y: auto;
-}
+/* --- two-column layout: sidenav + main ---------------------------------------
+   The flex layout, fixed sidenav width, sticky behaviour and main column are
+   now Tailwind utilities on the elements (layout flex items-start ... /
+   sidenav shrink-0 w-sidenav sticky ... / main flex-1 max-w-main ...). The
+   inner .group / .navbtn styling stays here. */
 
 .sidenav .group {
   font-size: 0.72rem;
@@ -138,15 +101,6 @@ body {
   border-left-color: var(--teal);
   color: var(--dark);
   font-weight: 600;
-}
-
-main {
-  flex: 1;
-  max-width: 1100px;
-  background: var(--white);
-  margin: 0 auto;
-  padding: 2rem;
-  min-height: 70vh;
 }
 
 h1 {
@@ -316,7 +270,7 @@ section { margin: 1.4rem 0; }
 .notes h1 { font-family: var(--serif); font-size: 1.6rem; }
 .notes h2 { font-family: var(--serif); font-size: 1.25rem; margin: 1.6rem 0 0.5rem; }
 .notes p { margin: 0.75rem 0; }
-.notes ul { padding-left: 1.25rem; }
+.notes ul { list-style: disc; padding-left: 1.25rem; }
 .notes em { font-style: italic; }
 
 /* --- filters + how-to ------------------------------------------------------ */
@@ -330,16 +284,15 @@ section { margin: 1.4rem 0; }
   margin: 1rem 0 1.5rem;
 }
 h2 { font-family: var(--serif); font-size: 1.3rem; margin: 1.5rem 0 0.5rem; }
-ul { padding-left: 1.25rem; }
+/* Tailwind's preflight resets ul/ol to list-style:none; the prose lists
+   (how-to-use, data-notes) render with bullets again here. */
+ul { list-style: disc; padding-left: 1.25rem; }
 
-/* --- footer ---------------------------------------------------------------- */
+/* --- footer ----------------------------------------------------------------
+   The band bg, text colour and padding are Tailwind utilities on the footer
+   (bg-navy / text-neutral-200 / px-8 py-7). The inner link + separator colours
+   are bespoke (utilities can't express the :visited palette) and stay here. */
 
-.sitefoot {
-  background: var(--navy);
-  color: #e8e8e6;
-  padding: 1.75rem 2rem;
-  font-size: 0.85rem;
-}
 .sitefoot .country { margin-bottom: 0.4rem; }
 .sitefoot .legal { margin-bottom: 0.4rem; color: #b9b9b4; }
 .sitefoot .legal a { color: #cfe0ff; }
@@ -358,18 +311,23 @@ ul { padding-left: 1.25rem; }
 
 /* --- responsive collapse under 900px --------------------------------------- */
 
+/* The < 900px collapse restyles the chrome the way Tailwind utilities own it
+   (layout / sidenav / main / header / breadcrumb), so those selectors carry
+   !important to beat the utility layer. `.sidenav .group` / `.sidenav .navbtn`
+   are bespoke-only (utilities never touch them) and need no override. */
+
 @media (max-width: 900px) {
-  .layout { flex-direction: column; }
+  .layout { flex-direction: column !important; }
   .sidenav {
-    flex: none;
-    width: 100%;
-    position: static;
-    max-height: none;
-    overflow-y: visible;
-    padding: 1rem 1.5rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 0.5rem;
+    flex: none !important;
+    width: 100% !important;
+    position: static !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    padding: 1rem 1.5rem !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.25rem 0.5rem !important;
     border-bottom: 1px solid var(--hair);
   }
   .sidenav .group {
@@ -382,9 +340,9 @@ ul { padding-left: 1.25rem; }
     border-radius: 4px;
     padding: 0.3rem 0.55rem;
   }
-  main { padding: 1.5rem; }
-  .site-header { padding: 0.7rem 1.25rem; }
-  .breadcrumb { padding: 0.5rem 1.25rem; }
+  main { padding: 1.5rem !important; }
+  .site-header { padding: 0.7rem 1.25rem !important; }
+  .breadcrumb { padding: 0.5rem 1.25rem !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

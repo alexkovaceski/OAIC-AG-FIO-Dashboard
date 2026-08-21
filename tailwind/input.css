@@ -1,0 +1,36 @@
+/* Tailwind v4 input for the FOI Insights POC.
+   Compile: npm run build:css  (output lands in src/site/assets/tailwind.css, committed).
+   The OAIC identity tokens are mapped to Tailwind color tokens so utilities like
+   bg-navy / text-ink / border-gold exist. site.css keeps the bespoke component
+   layer (chartbox, sidenav, nodata, tables) and its own :root tokens. */
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #002a3a;   /* OAIC header band */
+  --color-teal: #00567d;   /* primary accent */
+  --color-blue: #26547b;   /* secondary blue */
+  --color-dark: #003347;   /* darker navy for depth/footers */
+  --color-ink: #0c3c60;    /* body text */
+  --color-paper: #f7f7f7;  /* page background */
+  --color-white: #ffffff;  /* cards, surfaces */
+  --color-gold: #ffcc00;   /* Commonwealth gold accent */
+  --color-hair: #e6e6e6;   /* grid hairlines */
+  --color-muted: #6b7a86;  /* secondary body text */
+  --color-pos: #1baf7a;    /* positive / within-statutory */
+  --color-neg: #eb6834;    /* negative / refused */
+  --color-c1: #00567d;
+  --color-c2: #26547b;
+  --color-c3: #ffcc00;
+  --color-c4: #eb6834;
+  --color-c5: #1baf7a;
+
+  /* layout dimensions. Named utilities (w-sidenav / max-w-main / ...) instead
+     of arbitrary values: Tailwind v4's content scan is flaky at picking up
+     arbitrary-value classes out of a .py source when several sit together, so
+     the exact pixel values live here as theme tokens and compile reliably. */
+  --width-sidenav: 216px;
+  --max-width-layout: 1400px;
+  --max-width-main: 1100px;
+  --min-height-main: 70vh;
+  --border-width-3: 3px;   /* OAIC masthead gold/teal rule */
+}
