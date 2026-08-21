@@ -110,8 +110,11 @@ def main() -> int:
             dry_run=args.dry_run, description=f"push {item}")
 
     # 2. Install/refresh the venv (idempotent; first deploy creates it).
+    #    axoquant-llm comes from the remote local clone (see requirements.txt)
+    #    because idc-1 cannot auth to GitHub for the private repo.
     run(["ssh", ssh_target(),
          f"cd {REMOTE} && python3 -m venv .venv && "
+         f".venv/bin/pip install -e /home/algolotl/axoquant-llm && "
          f".venv/bin/pip install -r requirements.txt"],
         dry_run=args.dry_run, description="install python deps")
 

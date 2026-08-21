@@ -5,4 +5,8 @@ psycopg2-binary
 httpx
 pytest
 pytest-asyncio
-axoquant-llm @ git+https://github.com/axoquant/llm.git@235ce71
+# axoquant-llm is installed from a local clone, not from git+github: the repo is
+# private and idc-1 has no GitHub auth, so the URL form fails every pip run
+# there. Locally: pip install -e <path-to-your-axoquant-llm-clone>. On deploy,
+# scripts/deploy.py installs it editable from /home/algolotl/axoquant-llm (the
+# remote clone, kept at the pinned commit 235ce71).
