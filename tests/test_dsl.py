@@ -17,10 +17,10 @@ def test_acceptance_q1_refusal_movers():
     f = Frame(normalise_all())
     r = query_dataset(f, "compare_period", {"measure": "refused", "fy_a": "2022-23", "fy_b": "2023-24"})
     assert "change" in r and "value_a" in r
-    # refused has no FY facts, so the base is 0 — change_pct must be None,
-    # never a fabricated "no change" of 0
-    assert r["value_a"] == 0 and r["value_b"] == 0
-    assert r["change_pct"] is None
+    # refused now has annual-FY facts read from the published Total row; the
+    # change is real published data, never a fabricated rate off a zero base
+    assert r["value_a"] == 4797 and r["value_b"] == 5223
+    assert r["change"] == 426 and r["change_pct"] == 9
 
 
 def test_compare_period_received_real_change():
@@ -33,14 +33,14 @@ def test_compare_period_received_real_change():
 
 def test_acceptance_q2_correlate_timeliness_volume():
     f = Frame(normalise_all())
-    # within_statutory only exists as single-quarter Q1 facts — no annual-FY
-    # rows, so the trend returns an EMPTY series, never a flat zero line; the
-    # honest correlation is None, never a fabricated coefficient.
+    # within_statutory now has annual-FY facts, so the trend is a real published
+    # series; the correlation is a real coefficient over that series, never a
+    # fabricated number and never a forced None.
     within = query_dataset(f, "trend", {"measure": "within_statutory"})["values"]
     recv = query_dataset(f, "trend", {"measure": "received"})["values"]
-    assert within == []                           # no fabricated zero line
+    assert within and any(v > 0 for v in within)  # real published series
     assert recv and any(v > 0 for v in recv)      # received is a real series
-    assert foi_stats(f, "timeliness_slippage_corr")["value"] is None  # no fabrication
+    assert foi_stats(f, "timeliness_slippage_corr")["value"] is not None  # real correlation
 
 
 def test_acceptance_q3_portfolio():
@@ -67,9 +67,11 @@ def test_no_phantom_total_agency():
 
 def test_trend_no_fabrication_and_no_golden_total():
     f = Frame(normalise_all())
-    # a measure with no annual-FY facts returns an EMPTY series, not zeros
-    empty = query_dataset(f, "trend", {"measure": "within_statutory"})
-    assert empty["values"] == [] and empty["years"] == []
+    # within_statutory now has annual-FY facts; the series is the published
+    # Total-row values, never zeros and never the golden grand total
+    within = query_dataset(f, "trend", {"measure": "within_statutory"})
+    assert within["values"] == [23085, 20663, 17798, 15723, 15754, 18296, 16047]
+    assert within["years"] == ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
     # received is a real series; the 2025-26 point is the per-agency cumulative
     # total (34,418), NOT 46,777 — the golden "Total" grand total must not leak in
     received = query_dataset(f, "trend", {"measure": "received"})["values"]
