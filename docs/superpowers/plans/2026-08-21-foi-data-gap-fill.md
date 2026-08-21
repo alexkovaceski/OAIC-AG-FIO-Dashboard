@@ -55,7 +55,9 @@ def test_new_measures_extracted_per_fy():
     facts = normalise_all()
     for fy, expected in PUBLISHED_TOTALS.items():
         for measure, want in expected.items():
-            rows = [f for f in facts if f["fy"] == fy and f["measure"] == measure and f["bucket"] == "total"]
+            # golden Q1 facts share fy=2025-26/measure/bucket=total but are single-
+            # quarter headlines (derived=True, agency "Total"), not agency totals
+            rows = [f for f in facts if f["fy"] == fy and f["measure"] == measure and f["bucket"] == "total" and not f["derived"]]
             assert rows, f"no {measure} rows for {fy}"
             got = round(sum(f["value"] for f in rows))
             assert got == want, f"{fy} {measure}: sum(agency total)={got} != published total {want}"
@@ -143,7 +145,9 @@ Expected: PASS.
 - [ ] **Step 6: Run the full suite**
 
 Run: `.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --color=no -o addopts=`
-Expected: 122 + new = green. If `test_ui.py` no-fabricated-figures now sees the 6 pages with real data, that test passes (values are real, non-zero).
+Expected: 122 + new = green. Two follow-on effects are expected and owned here:
+- `test_ui.py` no-fabricated-figures now sees the 6 pages with real data — passes (values are real, non-zero).
+- A few regressions in `tests/test_catalog.py` / `tests/test_dsl.py` asserted the PRE-FIX state (empty series / None correlation / zero base for measures "the annual files don't publish"). Those tests now fail and must be updated in the same task to assert the real published series — preserving each test's anti-fabrication intent (no invented after-statutory series, no golden "Total" leak, correlations over real data). Use a separate clearly-scoped commit (`test(stats): update catalog/dsl regressions now measures are published`).
 
 - [ ] **Step 7: Commit**
 
