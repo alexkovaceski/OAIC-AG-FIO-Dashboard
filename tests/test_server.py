@@ -468,6 +468,9 @@ def test_login_sets_session_cookie(monkeypatch):
     import server.app as app_mod
     monkeypatch.setattr(app_mod, "_authenticate",
                         lambda u, p: {"id": 1, "username": "alice"})
+    # a real secret is required to mint a session: with the forgeable default in
+    # place the route now refuses (503) instead of signing a cookie
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
     c = TestClient(create_app())
     r = c.post("/login", data={"username": "alice", "password": "x"},
                follow_redirects=False)
@@ -478,10 +481,26 @@ def test_login_sets_session_cookie(monkeypatch):
 def test_login_wrong_password_rejected(monkeypatch):
     import server.app as app_mod
     monkeypatch.setattr(app_mod, "_authenticate", lambda u, p: None)
+    # a real secret so the request reaches the credential check (not the 503 guard)
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
     c = TestClient(create_app())
     r = c.post("/login", data={"username": "alice", "password": "bad"},
                follow_redirects=False)
     assert r.status_code == 401
+
+def test_login_refused_when_session_secret_is_default(monkeypatch):
+    # Reviewer (Important): with the public default secret in place, POST /login
+    # must refuse to mint a session (503) — the default is forgeable by anyone
+    # who has read this repo, so it must never sign a valid cookie.
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "_authenticate",
+                        lambda u, p: {"id": 1, "username": "alice"})
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "dev-insecure-secret")
+    c = TestClient(create_app())
+    r = c.post("/login", data={"username": "alice", "password": "x"},
+               follow_redirects=False)
+    assert r.status_code == 503
+    assert "foi_session" not in r.cookies
 
 def test_logout_clears_session():
     from storage import auth

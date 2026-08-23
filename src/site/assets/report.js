@@ -42,7 +42,7 @@
       var series = data.series[0] || { name: "", values: [] };
       var rows2 = data.categories.map(function (c, i) {
         var v = series.values[i];
-        return "<tr><td>" + esc(c) + "</td><td>" + (v === null ? "—" : num(v)) + "</td></tr>";
+        return "<tr><td>" + esc(c) + "</td><td>" + (v == null ? "—" : num(v)) + "</td></tr>";
       }).join("");
       return '<table class="report-table"><thead><tr><th>Category</th><th>' + esc(series.name) + "</th></tr></thead><tbody>" + rows2 + "</tbody></table>";
     }
@@ -50,6 +50,7 @@
   }
 
   function render(r) {
+    if (!r) return;  // blank input -> generate() returns undefined; never crash
     if (r.escalate) {
       out.innerHTML = '<div class="nodata">' + esc(r.error || "Unfulfillable") +
         ' <a href="mailto:contact@bluebirdadvisory.com.au">contact@bluebirdadvisory.com.au</a></div>';

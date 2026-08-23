@@ -89,6 +89,18 @@ _LEDGER = None
 SESSION_SECRET = os.environ.get("FOI_SESSION_SECRET", "dev-insecure-secret")
 
 
+def _session_secret_insecure() -> bool:
+    """True when SESSION_SECRET is the public 'dev-insecure-secret' default.
+
+    The default is a public constant in this repo, so a prod deploy that lacks
+    FOI_SESSION_SECRET would mint sessions anyone could forge. Checked at boot
+    (loud critical) and per-login (refuse to mint), so the default never signs a
+    valid cookie. Reads the module global at request time, so tests (and an
+    operator reload) can swap the secret and the guard follows.
+    """
+    return SESSION_SECRET == "dev-insecure-secret"
+
+
 def _get_ledger() -> Ledger:
     global _LEDGER
     if _LEDGER is None:
@@ -362,6 +374,11 @@ def create_app():
     mismatch raises SystemExit, so the app cannot start on wrong data."""
     frame, pages = _boot()
 
+    if _session_secret_insecure():
+        _LOGGER.critical("FOI_SESSION_SECRET is unset — using the insecure "
+                         "default. Sessions are forgeable; set "
+                         "FOI_SESSION_SECRET before deploying.")
+
     app = FastAPI(title="Bluebird FOI Insights")
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.state.frame = frame
@@ -438,10 +455,15 @@ def create_app():
     @app.post("/login")
     async def login(request: Request):
         body = await request.body()
-        data = dict(urllib.parse.parse_qsl(body.decode("utf-8"),
+        data = dict(urllib.parse.parse_qsl(body.decode("utf-8", errors="replace"),
                                            keep_blank_values=True))
         username = (data.get("username") or "").strip()
         password = data.get("password") or ""
+        if _session_secret_insecure():
+            # the default secret is public (forgeable) — refuse to mint a session
+            return HTMLResponse(_login_page(
+                "Sign-in is unavailable: the session secret is not configured."),
+                status_code=503)
         user = _authenticate(username, password)
         if user is None:
             return HTMLResponse(_login_page("Invalid username or password"),

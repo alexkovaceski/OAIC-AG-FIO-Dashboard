@@ -81,6 +81,18 @@ def test_report_model_never_writes_digit():
     assert out["stat_key"] == "decided_top20"
     assert out["data"] == foi_stats(frame, "decided_top20")["value"]
 
+def test_report_routes_timeliness_of_decisions_to_corr():
+    # Reviewer: "timeliness of decisions" was misrouted to decided_q1 because
+    # the `decided?|decision` pattern shadowed the later timeliness entry. The
+    # reorder must send it to the timeliness_slippage_corr stat.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("timeliness of decisions", frame)
+    assert out["stat_key"] == "timeliness_slippage_corr"
+    assert out["escalate"] is False
+
 def test_report_unmappable_request_escalates():
     from ingest.normalise import normalise_all
     from storage.frame import Frame

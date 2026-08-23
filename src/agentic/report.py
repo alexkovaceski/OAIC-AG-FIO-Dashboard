@@ -30,8 +30,8 @@ _ROUTER: list[tuple[re.Pattern, str]] = [
     (re.compile(r"received", re.I), "requests_received_q1"),
     (re.compile(r"finalis", re.I), "requests_finalised_q1"),
     (re.compile(r"refus", re.I), "refused_share_q1"),
-    (re.compile(r"decided?|decision", re.I), "decided_q1"),
     (re.compile(r"timeliness|slippage", re.I), "timeliness_slippage_corr"),
+    (re.compile(r"decided?|decision", re.I), "decided_q1"),
 ]
 
 _LABELS = {
