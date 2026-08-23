@@ -176,6 +176,22 @@ def test_foi_charts_js_smoke():
     assert "__pageData.facts" in js, "wireFilters must filter the canonical facts"
 
 
+def test_chat_js_smoke():
+    from pathlib import Path
+    js = Path("src/site/assets/chat.js").read_text(encoding="utf-8")
+    assert '"/chat"' in js
+    assert "chat-send" in js and "chat-in" in js
+    assert "escalate" in js and "contact@bluebirdadvisory.com.au" in js
+
+
+def test_report_js_smoke():
+    from pathlib import Path
+    js = Path("src/site/assets/report.js").read_text(encoding="utf-8")
+    assert '"/report"' in js
+    assert "report-send" in js and "report-in" in js
+    assert "escalate" in js and "contact@bluebirdadvisory.com.au" in js
+
+
 def test_every_page_has_skip_link_and_main_landmark():
     # Task 3: a keyboard user can jump straight past the masthead + sidenav.
     for html in _pages().values():
