@@ -67,6 +67,11 @@ from agentic.builder import build_spec  # noqa: E402
 from agentic.guardrails import check_request, ScopeRefusal  # noqa: E402
 from agentic.render import _stat_key, render_dashboard_page  # noqa: E402
 from stats.catalog import foi_stats  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
+from storage import auth  # noqa: E402
+from agentic.chat import chat as agentic_chat  # noqa: E402
+from agentic.report import build_report  # noqa: E402
+from site.pages import chat_page, reports_page  # noqa: E402
 
 # The golden boot check runs once at import; the frame and pages are immutable
 # within a process, so they are cached at module scope rather than re-derived
@@ -80,6 +85,7 @@ _DATASET_ID = None
 # A module-scope ledger reused by every /ask: Ledger() opens a file handle, so
 # a per-request ledger would leak one FD per request (reviewer I4).
 _LEDGER = None
+SESSION_SECRET = os.environ.get("FOI_SESSION_SECRET", "dev-insecure-secret")
 
 
 def _get_ledger() -> Ledger:
@@ -260,7 +266,93 @@ def _degraded_dashboard_page(artifact_id) -> str:
     return chrome(f"Dashboard — {artifact_id}", body)
 
 
+def _session_user(request: Request) -> dict | None:
+    """The signed-cookie session payload, or None (tampered/expired/missing).
+
+    Normalised to the same {"id", "username"} shape _authenticate returns, so
+    the gated routes can treat both identically (the signed payload's key is
+    user_id — encode_session stores it under that name)."""
+    payload = auth.decode_session(request.cookies.get("foi_session"), SESSION_SECRET)
+    if payload is None:
+        return None
+    return {"id": payload["user_id"], "username": payload["username"]}
+
+
+def _authenticate(username: str, password: str) -> dict | None:
+    """Verify credentials against horizon.foi_chat_users. None on any failure
+    (wrong password, unknown/inactive user, or unreachable DB — fail-open, the
+    login just refuses)."""
+    try:
+        conn = get_conn()
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, pw_hash, is_active "
+                        "FROM horizon.foi_chat_users WHERE username = %s",
+                        (username,))
+            row = cur.fetchone()
+        if row is None or not row[3]:
+            return None
+        if not auth.verify_password(password, row[2]):
+            return None
+        return {"id": row[0], "username": row[1]}
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _record_message(user_id, role: str, content: str) -> None:
+    """Best-effort append to horizon.foi_chat_messages (the audit trail). Never
+    breaks the response: any failure is logged and swallowed."""
+    try:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO horizon.foi_chat_messages "
+                    "(user_id, role, content) VALUES (%s,%s,%s)",
+                    (user_id, role, content[:4000]))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        _LOGGER.warning("_record_message: message log write failed", exc_info=True)
+
+
+def _login_page(error: str | None = None) -> str:
+    err = f'<p class="form-error">{html.escape(error)}</p>' if error else ""
+    body = f"""
+    <h1>Log in</h1>
+    <p class="intro">Sign in to use the Chat &amp; reports section.</p>
+    {err}
+    <form method="post" action="/login" class="login-form">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Log in</button>
+    </form>
+    <p class="hint">Access is by invitation — contact bluebirdadvisory.com.au to
+    request an account.</p>
+    """
+    return chrome("Log in", body)
+
+
 class AskRequest(BaseModel):
+    request: str
+
+
+class ChatBody(BaseModel):
+    question: str
+    history: list[dict] | None = None
+
+
+class ReportBody(BaseModel):
     request: str
 
 
@@ -341,6 +433,65 @@ def create_app():
     @app.get("/")
     def index():
         return HTMLResponse(pages["at-a-glance"])
+
+    @app.post("/login")
+    async def login(request: Request):
+        form = await request.form()
+        username = (form.get("username") or "").strip()
+        password = form.get("password") or ""
+        user = _authenticate(username, password)
+        if user is None:
+            return HTMLResponse(_login_page("Invalid username or password"),
+                                status_code=401)
+        resp = RedirectResponse("/chat.html", status_code=303)
+        resp.set_cookie("foi_session",
+                        auth.encode_session(user["id"], user["username"],
+                                            SESSION_SECRET),
+                        httponly=True, samesite="lax", max_age=43_200)
+        return resp
+
+    @app.get("/logout")
+    def logout():
+        resp = RedirectResponse("/", status_code=303)
+        resp.delete_cookie("foi_session")
+        return resp
+
+    @app.get("/login")
+    def login_page():
+        return HTMLResponse(_login_page())
+
+    @app.get("/chat.html")
+    def chat_gated(request: Request):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse(chat_page(user))
+
+    @app.get("/reports.html")
+    def reports_gated(request: Request):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse(reports_page(user))
+
+    @app.post("/chat")
+    async def chat_route(request: Request, req: ChatBody):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        out = await agentic_chat(req.question, req.history)
+        _record_message(user["id"], "user", req.question)
+        _record_message(user["id"], "assistant", out.get("answer", ""))
+        return out
+
+    @app.post("/report")
+    def report_route(request: Request, req: ReportBody):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        out = build_report(req.request, frame)
+        _record_message(user["id"], "report", req.request)
+        return out
 
     @app.get("/{page}.html")
     def page(page: str):

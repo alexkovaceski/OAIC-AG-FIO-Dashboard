@@ -432,3 +432,94 @@ def test_assets_carry_revalidation_cache_header():
     r = c.get("/assets/site.css")
     assert r.status_code == 200
     assert r.headers.get("cache-control") == "public, no-cache"
+
+
+def test_gated_pages_redirect_when_anonymous():
+    c = TestClient(create_app())
+    for path in ["/chat.html", "/reports.html"]:
+        r = c.get(path, follow_redirects=False)
+        assert r.status_code == 303
+        assert "/login" in r.headers.get("location", "")
+
+def test_gated_page_serves_with_valid_session():
+    from storage import auth
+    import server.app as app_mod
+    token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.get("/chat.html")
+    assert r.status_code == 200
+    assert 'id="chat-log"' in r.text
+
+def test_chat_route_requires_session():
+    c = TestClient(create_app())
+    r = c.post("/chat", json={"question": "how many requests?"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
+
+def test_report_route_requires_session():
+    c = TestClient(create_app())
+    r = c.post("/report", json={"request": "requests received"},
+               follow_redirects=False)
+    assert r.status_code == 303
+
+def test_login_sets_session_cookie(monkeypatch):
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "_authenticate",
+                        lambda u, p: {"id": 1, "username": "alice"})
+    c = TestClient(create_app())
+    r = c.post("/login", data={"username": "alice", "password": "x"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers.get("location") == "/chat.html"
+    assert "foi_session" in r.cookies
+
+def test_login_wrong_password_rejected(monkeypatch):
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "_authenticate", lambda u, p: None)
+    c = TestClient(create_app())
+    r = c.post("/login", data={"username": "alice", "password": "bad"},
+               follow_redirects=False)
+    assert r.status_code == 401
+
+def test_logout_clears_session():
+    from storage import auth
+    import server.app as app_mod
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", auth.encode_session(1, "alice", app_mod.SESSION_SECRET))
+    r = c.get("/logout", follow_redirects=False)
+    assert r.status_code == 303
+    # The session cookie must be CLEARED, not re-sent with a fresh value. The
+    # original brief assertion ("foi_session=" not in set-cookie) was impossible:
+    # Starlette 1.6.0's delete_cookie renders the clearing Set-Cookie as
+    # `foi_session=""; ...; Max-Age=0; ...` — any Set-Cookie that clears the
+    # `foi_session` cookie must name the key. Assert the clearing attributes
+    # instead (empty value via Max-Age=0), and that no new token is minted.
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "foi_session" in set_cookie
+    assert "Max-Age=0" in set_cookie
+
+def test_chat_route_returns_grounded_answer(monkeypatch):
+    import server.app as app_mod
+    from storage import auth
+    token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
+    captured = {}
+
+    async def fake_chat(query, history=None):
+        captured["query"] = query
+        return {"answer": "12,359 requests were received in Q1 2025-26.",
+                "citations": ["catalog:requests_received_q1"],
+                "provider": "deterministic", "escalate": False}
+
+    # IMPORTANT: app.py imports `chat` BY VALUE (`from agentic.chat import
+    # chat as agentic_chat`), so patching agentic.chat.chat does NOT change
+    # what the route calls. Patch the app module's own `agentic_chat` binding.
+    monkeypatch.setattr(app_mod, "agentic_chat", fake_chat)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.post("/chat", json={"question": "how many requests were received?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert captured["query"] == "how many requests were received?"
+    assert body["citations"] == ["catalog:requests_received_q1"]
