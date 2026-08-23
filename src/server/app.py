@@ -281,7 +281,8 @@ def _degraded_dashboard_page(artifact_id) -> str:
 
 
 def _session_user(request: Request) -> dict | None:
-    """The signed-cookie session payload, or None (tampered/expired/missing).
+    """The signed-cookie session payload, or None (tampered/expired/missing,
+    or the session secret is the insecure default).
 
     Normalised to the same {"id", "username"} shape _authenticate returns, so
     the gated routes can treat both identically (the signed payload's key is
