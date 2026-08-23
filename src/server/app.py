@@ -94,9 +94,10 @@ def _session_secret_insecure() -> bool:
 
     The default is a public constant in this repo, so a prod deploy that lacks
     FOI_SESSION_SECRET would mint sessions anyone could forge. Checked at boot
-    (loud critical) and per-login (refuse to mint), so the default never signs a
-    valid cookie. Reads the module global at request time, so tests (and an
-    operator reload) can swap the secret and the guard follows.
+    (loud critical), per-login (refuse to mint) and per-session-validation
+    (refuse to validate a cookie signed with the default), so the default never
+    mints NOR accepts a valid cookie. Reads the module global at request time,
+    so tests (and an operator reload) can swap the secret and the guard follows.
     """
     return SESSION_SECRET == "dev-insecure-secret"
 
@@ -285,6 +286,13 @@ def _session_user(request: Request) -> dict | None:
     Normalised to the same {"id", "username"} shape _authenticate returns, so
     the gated routes can treat both identically (the signed payload's key is
     user_id — encode_session stores it under that name)."""
+    if _session_secret_insecure():
+        # R2: with the public default secret in place, even a cookie signed with
+        # that same default must NOT validate — an attacker who read this repo
+        # can forge encode_session(..., "dev-insecure-secret"). Gate VALIDATION
+        # too (the minting path already refuses), so every gated route treats
+        # the request as anonymous.
+        return None
     payload = auth.decode_session(request.cookies.get("foi_session"), SESSION_SECRET)
     if payload is None:
         return None
@@ -375,9 +383,9 @@ def create_app():
     frame, pages = _boot()
 
     if _session_secret_insecure():
-        _LOGGER.critical("FOI_SESSION_SECRET is unset — using the insecure "
-                         "default. Sessions are forgeable; set "
-                         "FOI_SESSION_SECRET before deploying.")
+        _LOGGER.critical("FOI_SESSION_SECRET is missing or set to the insecure "
+                         "default 'dev-insecure-secret'. Sessions are forgeable; "
+                         "set FOI_SESSION_SECRET before deploying.")
 
     app = FastAPI(title="Bluebird FOI Insights")
     app.add_middleware(GZipMiddleware, minimum_size=1000)

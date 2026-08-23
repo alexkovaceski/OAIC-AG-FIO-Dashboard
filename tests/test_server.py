@@ -441,15 +441,33 @@ def test_gated_pages_redirect_when_anonymous():
         assert r.status_code == 303
         assert "/login" in r.headers.get("location", "")
 
-def test_gated_page_serves_with_valid_session():
+def test_gated_page_serves_with_valid_session(monkeypatch):
     from storage import auth
     import server.app as app_mod
+    # a real secret is required to VALIDATE a session: with the forgeable default
+    # in place the gated routes now treat every cookie as anonymous (303 -> login)
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
     token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
     c = TestClient(create_app())
     c.cookies.set("foi_session", token)
     r = c.get("/chat.html")
     assert r.status_code == 200
     assert 'id="chat-log"' in r.text
+
+def test_gated_page_rejects_cookie_minted_with_default_secret(monkeypatch):
+    # Reviewer R2: with the public default secret in place, a VALIDLY-SIGNED
+    # cookie (minted with the same default) must be rejected on every gated
+    # route — an attacker who read this repo can forge encode_session(1,"alice",
+    # "dev-insecure-secret") and the default must not validate it.
+    from storage import auth
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "dev-insecure-secret")
+    token = auth.encode_session(1, "alice", "dev-insecure-secret")
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.get("/chat.html", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
 
 def test_chat_route_requires_session():
     c = TestClient(create_app())
@@ -522,6 +540,9 @@ def test_logout_clears_session():
 def test_chat_route_returns_grounded_answer(monkeypatch):
     import server.app as app_mod
     from storage import auth
+    # a real secret is required to VALIDATE a session: with the forgeable default
+    # in place the gated routes treat every cookie as anonymous (303 -> login)
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
     token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
     captured = {}
 
