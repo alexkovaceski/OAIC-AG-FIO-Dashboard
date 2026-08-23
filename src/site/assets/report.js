@@ -18,7 +18,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request: q }),
     });
-    if (resp.status === 303) { window.location = "/login"; throw new Error("redirect"); }
+    if (resp.redirected) { window.location = "/login"; throw new Error("redirect"); }
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     return resp.json();
   }

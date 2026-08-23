@@ -182,6 +182,7 @@ def test_chat_js_smoke():
     assert '"/chat"' in js
     assert "chat-send" in js and "chat-in" in js
     assert "escalate" in js and "contact@bluebirdadvisory.com.au" in js
+    assert "redirected" in js
 
 
 def test_report_js_smoke():
@@ -190,6 +191,7 @@ def test_report_js_smoke():
     assert '"/report"' in js
     assert "report-send" in js and "report-in" in js
     assert "escalate" in js and "contact@bluebirdadvisory.com.au" in js
+    assert "redirected" in js
 
 
 def test_every_page_has_skip_link_and_main_landmark():
