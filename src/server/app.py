@@ -40,6 +40,7 @@ import html  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
+import urllib.parse  # noqa: E402
 
 import psycopg2  # noqa: E402
 
@@ -436,9 +437,11 @@ def create_app():
 
     @app.post("/login")
     async def login(request: Request):
-        form = await request.form()
-        username = (form.get("username") or "").strip()
-        password = form.get("password") or ""
+        body = await request.body()
+        data = dict(urllib.parse.parse_qsl(body.decode("utf-8"),
+                                           keep_blank_values=True))
+        username = (data.get("username") or "").strip()
+        password = data.get("password") or ""
         user = _authenticate(username, password)
         if user is None:
             return HTMLResponse(_login_page("Invalid username or password"),
