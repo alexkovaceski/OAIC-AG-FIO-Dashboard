@@ -50,3 +50,43 @@ def test_chat_sovereign_path_returns_model_text(monkeypatch):
     assert out["provider"] == "sovereign"
     assert out["escalate"] is False
     assert out["citations"]  # retrieved docs carried through
+
+def test_report_routes_to_real_figure():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from stats.catalog import foi_stats
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("How many requests were received last quarter?", frame)
+    assert out["stat_key"] == "requests_received_q1"
+    assert out["data"] == foi_stats(frame, "requests_received_q1")["value"]
+
+def test_report_refused_if_out_of_scope():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("crypto trading strategy", frame)
+    assert out["stat_key"] is None
+    assert out["escalate"] is True
+
+def test_report_model_never_writes_digit():
+    # the data value must equal the platform figure, not a model number
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from stats.catalog import foi_stats
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("top agencies for requests decided", frame)
+    assert out["stat_key"] == "decided_top20"
+    assert out["data"] == foi_stats(frame, "decided_top20")["value"]
+
+def test_report_unmappable_request_escalates():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("build me a dashboard widget", frame)
+    assert out["stat_key"] is None
+    assert out["escalate"] is True
+    assert "contact@bluebirdadvisory.com.au" in out["error"]
