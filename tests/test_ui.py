@@ -252,3 +252,26 @@ def test_footer_has_in_site_links():
     html = _pages()["at-a-glance"]
     for link in ["/data-notes.html", "/how-to-use.html", "/api.html"]:
         assert link in html, f"footer missing in-site link {link}"
+
+
+def test_chat_page_oaic_free_and_gated():
+    from site.pages import chat_page
+    html = chat_page({"username": "alice"})
+    assert "oaic.gov.au" not in html and "OAIC" not in html
+    assert 'id="chat-log"' in html and "chat.js" in html
+
+
+def test_reports_page_oaic_free_and_gated():
+    from site.pages import reports_page
+    html = reports_page({"username": "alice"})
+    assert "oaic.gov.au" not in html and "OAIC" not in html
+    assert "report.js" in html
+
+
+def test_seed_script_shape():
+    import sys
+    sys.path.insert(0, "scripts")
+    from seed_chat_users import ACCOUNTS, main
+    assert isinstance(ACCOUNTS, list) and len(ACCOUNTS) >= 1
+    assert all({"username", "display_name"} <= set(a) for a in ACCOUNTS)
+    assert callable(main)

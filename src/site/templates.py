@@ -89,8 +89,18 @@ def sidenav_html(page_key: str) -> str:
     return "\n".join(out)
 
 
+def _user_nav(user) -> str:
+    if user is None:
+        return '<a class="nav-link" href="/login">Log in</a>'
+    return ('<a class="nav-link" href="/chat.html">Chat</a>'
+            '<a class="nav-link" href="/reports.html">Reports</a>'
+            '<span class="nav-username">' + html.escape(str(user.get("username", "")))
+            + '</span>'
+            '<a class="nav-link" href="/logout">Log out</a>')
+
+
 def chrome(title: str, body_html: str = "", page_key: str | None = None,
-           scripts: str | None = None) -> str:
+           scripts: str | None = None, user: dict | None = None) -> str:
     """The FOI Insights shell: dark navy masthead + top nav, breadcrumb, a
     two-column layout of sidenav + main, and the footer.
 
@@ -102,6 +112,11 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
     immediately before </body>; caller-controlled markup, never a URL-routed
     value. The title is escaped here so a URL-routed value can never become
     reflected XSS in <title>.
+
+    `user` (a session dict) selects the masthead account nav; with
+    `user=None` the pre-existing shell content is byte-identical to the old
+    behaviour — only the masthead Log in link is added, and all 13 existing
+    callers omit the param.
     """
     title = html.escape(title)
     active = _page_group(page_key) if page_key else None
@@ -120,6 +135,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <header class="site-header bg-navy text-white border-b-3 border-teal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
   <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">FOI Insights</a></div>
   <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active)}</nav>
+  {_user_nav(user)}
 </header>
 <div class="breadcrumb bg-paper border-b border-hair text-muted text-sm px-8 py-2">{BREADCRUMB}</div>
 <div class="layout flex items-start max-w-layout mx-auto">

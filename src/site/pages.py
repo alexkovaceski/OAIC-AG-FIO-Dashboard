@@ -630,3 +630,43 @@ def render_all_pages(frame) -> dict[str, str]:
         "api": _page_api(),
     }
     return pages
+
+
+def chat_page(user) -> str:
+    """The gated chat page body. Rendered on demand (not in render_all_pages —
+    only reachable behind a session)."""
+    body = f"""
+    <h1>Chat</h1>
+    <p class="intro">Ask questions about Australian Government FOI statistics.
+    Answers are grounded in the published data and the verbatim data notes;
+    every figure carries a source. For anything the site can't answer, you'll
+    be pointed to an email.</p>
+    <div id="chat-log" class="chatlog" role="log" aria-live="polite"></div>
+    <div class="chat-input">
+      <input id="chat-in" type="text" placeholder="Ask about FOI statistics…" autocomplete="off">
+      <button id="chat-send" type="button">Ask</button>
+    </div>
+    <p class="hint">Tip: try "how many requests were received?", "what share
+    of decisions were refused?", "which agencies decide the most requests?".</p>
+    """
+    return chrome("Chat", body, page_key=None, user=user,
+                  scripts='<script src="/assets/chat.js"></script>')
+
+
+def reports_page(user) -> str:
+    """The gated reports page body. Rendered on demand."""
+    body = f"""
+    <h1>Reports</h1>
+    <p class="intro">Describe the FOI figure you want and this page returns the
+    real number, computed from the published data. Custom or complex reports
+    are handled by email.</p>
+    <div class="report-input">
+      <input id="report-in" type="text" placeholder="e.g. 'how many requests were received last quarter?'" autocomplete="off">
+      <button id="report-send" type="button">Generate</button>
+    </div>
+    <div id="report-out" class="report-out" role="region" aria-live="polite"></div>
+    <p class="hint">Try "top agencies for requests decided", "share of
+    decisions refused", "timeliness within statutory".</p>
+    """
+    return chrome("Reports", body, page_key=None, user=user,
+                  scripts='<script src="/assets/report.js"></script>')
