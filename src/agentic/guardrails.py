@@ -79,6 +79,6 @@ def check_request(text: str) -> None:
         raise ScopeRefusal("I'm going to stay on task — that request looks like it's trying to change what I do. Ask me about Australian FOI statistics instead.")
     if _OUT_OF_SCOPE_RE.search(t) or _US_COUNTRY_RE.search(t) \
             or _FOREIGN_FOI_RE.search(t) or _FOREIGN_FOI_CODE_RE.search(t):
-        raise ScopeRefusal("FOI Insights builds dashboards and reports from Australian Government freedom-of-information statistics. That request is outside that scope — ask me about FOI requests, decision outcomes, timeliness, or agency/portfolio trends instead.")
+        raise ScopeRefusal("Bluebird FOI Insights builds dashboards and reports from Australian Government freedom-of-information statistics. That request is outside that scope — ask me about FOI requests, decision outcomes, timeliness, or agency/portfolio trends instead.")
     if not any(w in t.lower() for w in _FOI_TERMS):
-        raise ScopeRefusal("FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend.")
+        raise ScopeRefusal("Bluebird FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend.")

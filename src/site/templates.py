@@ -1,8 +1,8 @@
-"""templates — shared FOI Insights page chrome (header nav, sidenav, footer).
+"""templates — shared Bluebird FOI Insights page chrome (header nav, sidenav, footer).
 
-The chrome is the FOI Insights identity: a dark navy masthead with the top-level
+The chrome is the Bluebird FOI Insights identity: a dark navy masthead with the top-level
 nav (Overview / Requests / Decisions / Timeliness / Reference — all internal,
-the POC must not link out to the OAIC site), a breadcrumb, a two-column layout
+the POC must not link out to the source agency site), a breadcrumb, a two-column layout
 of sidenav + main, and a footer with the Acknowledgement of Country, in-site
 legal links, and the identity stovepipe (fartkraft sovereign stack). The
 stovepipe rides in the footer on every page so it is never out of sight, exactly
@@ -12,7 +12,7 @@ from __future__ import annotations
 import html
 
 # top-level nav: the FOI section's own groups (all internal — the POC must not
-# link out to the OAIC site). Entries are (label, first_page_key); nav_html
+# link out to the source agency site). Entries are (label, first_page_key); nav_html
 # resolves the href from SIDENAV_GROUPS, and chrome() marks the group that
 # contains the current page active.
 NAV = [
@@ -40,7 +40,7 @@ SIDENAV_GROUPS = [
                    ("api", "API access")]),
 ]
 
-BREADCRUMB = ("FOI Insights › FOI statistics")
+BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")
 
 
 def _page_group(page_key: str) -> str | None:
@@ -101,7 +101,7 @@ def _user_nav(user) -> str:
 
 def chrome(title: str, body_html: str = "", page_key: str | None = None,
            scripts: str | None = None, user: dict | None = None) -> str:
-    """The FOI Insights shell: dark navy masthead + top nav, breadcrumb, a
+    """The Bluebird FOI Insights shell: dark navy masthead + top nav, breadcrumb, a
     two-column layout of sidenav + main, and the footer.
 
     Returns a complete, self-contained HTML document. Every page carries the
@@ -133,7 +133,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header bg-navy text-white border-b-3 border-teal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
-  <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">FOI Insights</a></div>
+  <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">Bluebird FOI Insights</a></div>
   <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active)}</nav>
   {_user_nav(user)}
 </header>
@@ -145,7 +145,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <footer class="sitefoot bg-navy text-neutral-200 text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
   <div class="legal"><a href="/data-notes.html">Data notes</a> <span class="sep">·</span> <a href="/how-to-use.html">How to use</a> <span class="sep">·</span> <a href="/api.html">API access</a></div>
-  <div class="stack">FOI Insights — fartkraft sovereign stack · data from data.gov.au (FOI statistics)</div>
+  <div class="stack">Bluebird FOI Insights — fartkraft sovereign stack · data from data.gov.au (FOI statistics)</div>
 </footer>
 {tail_scripts}</body>
 </html>"""

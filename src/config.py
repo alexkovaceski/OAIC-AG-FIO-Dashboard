@@ -1,4 +1,4 @@
-"""Shared config + constants for the FOI Insights POC."""
+"""Shared config + constants for the Bluebird FOI Insights POC."""
 import os
 from pathlib import Path
 

@@ -474,7 +474,7 @@ def _page_data_notes() -> str:
 def _page_how_to_use() -> str:
     body = """
     <h1>How to use</h1>
-    <p class="intro">The 12 FOI Insights pages are built from the source data
+    <p class="intro">The 12 Bluebird FOI Insights pages are built from the source data
     published on data.gov.au (FOI statistics). Every figure is computed
     from that data by the platform — no figure is typed in by hand — and every
     figure carries a basis label so you can tell what window it covers.</p>

@@ -1,4 +1,4 @@
-# Deploy — FOI Insights on idc-1 + foi.fartkraft.ai
+# Deploy — Bluebird FOI Insights on idc-1 + foi.fartkraft.ai
 
 The POC runs on the existing horizon serving stack: a FastAPI origin on idc-1,
 a Cloudflare Tunnel, and a thin Cloudflare Worker. Public URL
@@ -30,7 +30,7 @@ cloudflared is the only public listener — no firewall change.
 
 ```ini
 [Unit]
-Description=FOI Insights dashboard POC (FastAPI origin)
+Description=Bluebird FOI Insights dashboard POC (FastAPI origin)
 After=network-online.target
 Wants=network-online.target
 

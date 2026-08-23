@@ -1,4 +1,4 @@
-# FOI Insights
+# Bluebird FOI Insights
 
 A hosted demo that replaces the OAIC "Australian Government FOI statistics" page
 plus its embedded Power BI report with a dashboard built on the horizon

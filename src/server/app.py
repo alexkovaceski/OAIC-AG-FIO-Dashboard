@@ -1,4 +1,4 @@
-"""app — the FOI Insights FastAPI service (no auth, hosted demo).
+"""app — the Bluebird FOI Insights FastAPI service (no auth, hosted demo).
 
 Routes:
   GET  /health                    {"status":"ok","model":"fartkraft sovereign stack"}
@@ -362,7 +362,7 @@ def create_app():
     mismatch raises SystemExit, so the app cannot start on wrong data."""
     frame, pages = _boot()
 
-    app = FastAPI(title="FOI Insights")
+    app = FastAPI(title="Bluebird FOI Insights")
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.state.frame = frame
     app.state.pages = pages
@@ -644,7 +644,7 @@ def create_app():
 # endpoint down, timeout, non-2xx, malformed body, or null/empty content — the
 # demo must still return a valid spec, so /ask never dies.
 _FALLBACK_SPEC = ('{"title": "FOI request summary", '
-                  '"description": "FOI Insights demo — deterministic completion '
+                  '"description": "Bluebird FOI Insights demo — deterministic completion '
                   '(live model unavailable).", "panels": []}')
 
 

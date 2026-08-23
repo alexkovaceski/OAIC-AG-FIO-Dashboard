@@ -1,1 +1,1 @@
-"""server — the FastAPI HTTP service for the FOI Insights POC."""
+"""server — the FastAPI HTTP service for the Bluebird FOI Insights POC."""

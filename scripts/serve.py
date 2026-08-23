@@ -1,4 +1,4 @@
-"""Run the FOI Insights POC: python scripts/serve.py (uvicorn on :8095 or :FOI_PORT)."""
+"""Run the Bluebird FOI Insights POC: python scripts/serve.py (uvicorn on :8095 or :FOI_PORT)."""
 import sys, os
 sys.path.insert(0, "src")
 import site_shim

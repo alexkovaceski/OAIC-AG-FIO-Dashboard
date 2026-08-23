@@ -104,10 +104,10 @@ def render_dashboard_page(spec, frame, artifact_id, transcript) -> str:
             f'<div class="value">{value_html}</div>{basis_html}'
             f'<div id="c{i}" class="chart"></div></section>')
     body = "\n".join(panels)
-    footer = "<footer>FOI Insights — Australian Government FOI statistics</footer>"
+    footer = "<footer>Bluebird FOI Insights — Australian Government FOI statistics</footer>"
     if artifact_id is not None:
         footer = (f'<footer><a href="/lineage/{int(artifact_id)}">'
-                  "View lineage transcript</a> — FOI Insights — "
+                  "View lineage transcript</a> — Bluebird FOI Insights — "
                   "Australian Government FOI statistics</footer>")
     title = html.escape(str(s.get("title", "FOI dashboard")))
     return (

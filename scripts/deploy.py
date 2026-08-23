@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy the FOI Insights POC to idc-1 (mirrors horizon's tools/deploy_site.py).
+"""Deploy the Bluebird FOI Insights POC to idc-1 (mirrors horizon's tools/deploy_site.py).
 
 scp the service + pinned data to idc-1, install/refresh the venv, and restart
 the systemd unit that serves the origin. Run from the repo root:
@@ -83,7 +83,7 @@ def main() -> int:
         return 2
 
     mode = "DRY-RUN (nothing executed)" if args.dry_run else "REAL"
-    print(f"FOI Insights deploy -> {ssh_target()}:{REMOTE}   [{mode}]")
+    print(f"Bluebird FOI Insights deploy -> {ssh_target()}:{REMOTE}   [{mode}]")
 
     if args.check:
         # One-shot read-only probe: unit state, env file presence, model pin.

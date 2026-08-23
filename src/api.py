@@ -1,4 +1,4 @@
-"""api — read-only data API + rate limiter for FOI Insights.
+"""api — read-only data API + rate limiter for Bluebird FOI Insights.
 
 The visualisations are built from platform-computed figures (foi_stats) over
 the canonical long-form facts (the frame). This module exposes the SAME data

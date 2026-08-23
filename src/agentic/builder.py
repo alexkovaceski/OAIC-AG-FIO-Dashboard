@@ -85,7 +85,7 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
     ledger.append({"event": "request_received", "request": text,
                    "identity": IDENTITY_STOVE})
     system = (
-        "You are the FOI Insights dashboard architect. You build dashboards that "
+        "You are the Bluebird FOI Insights dashboard architect. You build dashboards that "
         "answer questions about Australian Government FOI statistics. "
         "Panels may be: bar, hbar, line, area, pie, table, kpi.\n"
         "Figure sources (enum): " + ", ".join(FIG_KEYS) + "\n"

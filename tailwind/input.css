@@ -1,4 +1,4 @@
-/* Tailwind v4 input for the FOI Insights POC.
+/* Tailwind v4 input for the Bluebird FOI Insights POC.
    Compile: npm run build:css  (output lands in src/site/assets/tailwind.css, committed).
    The OAIC identity tokens are mapped to Tailwind color tokens so utilities like
    bg-navy / text-ink / border-gold exist. site.css keeps the bespoke component

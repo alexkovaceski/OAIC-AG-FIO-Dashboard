@@ -1,4 +1,4 @@
-/* foi-charts.js — ECharts init + live filters for the FOI Insights pages.
+/* foi-charts.js — ECharts init + live filters for the Bluebird FOI Insights pages.
 
  * Reads window.__pageData (the platform-computed figures + canonical facts,
  * emitted by site/pages.py into a <script> before </body>), mounts an ECharts

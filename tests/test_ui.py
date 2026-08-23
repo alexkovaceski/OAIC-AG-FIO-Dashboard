@@ -253,9 +253,9 @@ def test_no_outbound_oaic_links_or_branding():
         assert "© Commonwealth of Australia" not in html, f"{key}: AG copyright"
 
 
-def test_masthead_is_foi_insights():
+def test_masthead_is_bluebird_foi_insights():
     for html in _pages().values():
-        assert ">FOI Insights</a>" in html, "masthead missing FOI Insights"
+        assert ">Bluebird FOI Insights</a>" in html, "masthead missing Bluebird FOI Insights"
 
 
 def test_top_nav_links_are_all_internal():
