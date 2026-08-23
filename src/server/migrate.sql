@@ -67,3 +67,21 @@ CREATE TABLE IF NOT EXISTS horizon.lineage_tool_calls (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lineage_tool_calls_artifact ON horizon.lineage_tool_calls (artifact_id);
+
+CREATE TABLE IF NOT EXISTS horizon.foi_chat_users (
+    id           BIGSERIAL PRIMARY KEY,
+    username     TEXT NOT NULL UNIQUE,
+    pw_hash      TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS horizon.foi_chat_messages (
+    id         BIGSERIAL PRIMARY KEY,
+    user_id    BIGINT NOT NULL REFERENCES horizon.foi_chat_users(id),
+    role       TEXT NOT NULL CHECK (role IN ('user','assistant','report')),
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_foi_chat_messages_user ON horizon.foi_chat_messages (user_id);
