@@ -10,7 +10,7 @@ the systemd unit that serves the origin. Run from the repo root:
     python scripts/deploy.py --check    # verify ssh + the unit + the env file
 
 Auth is your existing SSH key for algolotl@idc-1 (tailnet IP 100.86.3.50); there
-is no password prompt. The public hostname (foi.fartkraft.ai) is NOT touched by
+is no password prompt. The public hostname (foi.axoquant.com) is NOT touched by
 this script - the Cloudflare Worker + tunnel route is one-time setup, documented
 in docs/deploy.md.
 
@@ -52,6 +52,27 @@ PUSH = [
     "pyproject.toml",
 ]
 
+# The DB probe for --check: run through the FOI venv's own python + psycopg2
+# (guaranteed present on idc-1) so the check exercises exactly the DSN and
+# driver the app uses — the host may not have a psql binary (Postgres runs in
+# the algolotl-pg container). Prints role column presence + pilot-account count,
+# one per line. No single quotes inside (the shell wraps it in single quotes).
+_DB_PROBE = (
+    'import os, psycopg2\n'
+    'c = psycopg2.connect(os.environ["FOI_PG_DSN"])\n'
+    'with c.cursor() as cur:\n'
+    '    cur.execute("SELECT column_name FROM information_schema.columns "\n'
+    '                "WHERE table_name=%s AND column_name=%s",\n'
+    '                ("foi_chat_users", "role"))\n'
+    '    role = cur.fetchone()\n'
+    '    cur.execute("SELECT count(*) FROM horizon.foi_chat_users "\n'
+    '                "WHERE username IN (%s,%s,%s,%s)",\n'
+    '                ("foi.public", "foi.pilot", "foi.internal", "foi.officer"))\n'
+    '    n = cur.fetchone()[0]\n'
+    'print(role[0] if role else "NO_ROLE_COLUMN")\n'
+    'print(n)\n'
+)
+
 
 def ssh_target() -> str:
     return f"{REMOTE_USER}@{IDC1}"
@@ -86,7 +107,8 @@ def main() -> int:
     print(f"Bluebird FOI Insights deploy -> {ssh_target()}:{REMOTE}   [{mode}]")
 
     if args.check:
-        # One-shot read-only probe: unit state, env file presence, model pin.
+        # One-shot read-only probe: unit state, env file presence, model pin,
+        # the AutoGluon risk fit, the role access tier, and the pilot accounts.
         # Runs through the remote shell; no process substitution (plain POSIX).
         cmd = (
             f"systemctl is-active {UNIT}; "
@@ -94,7 +116,21 @@ def main() -> int:
             f"v=$(grep '^FOI_LLM_MODEL=' {ENV_FILE} 2>/dev/null | cut -d= -f2); "
             f"if [ \"$v\" = \"{KNOWN_GOOD_MODEL}\" ]; then "
             f"echo \"FOI_LLM_MODEL: pinned ({KNOWN_GOOD_MODEL})\"; else "
-            f"echo \"FOI_LLM_MODEL: NOT pinned to {KNOWN_GOOD_MODEL} (got '$v')\"; fi"
+            f"echo \"FOI_LLM_MODEL: NOT pinned to {KNOWN_GOOD_MODEL} (got '$v')\"; fi; "
+            f"cd {REMOTE} && .venv/bin/python -c \"import autogluon; print('autogluon:', "
+            f"autogluon.__version__)\" 2>/dev/null && echo 'autogluon: installed' || "
+            f"echo 'autogluon: MISSING (run .venv/bin/pip install -r requirements.txt; "
+            f"~6-9GB, idc-1 only)'; "
+            f"d=$(grep '^FOI_PG_DSN=' {ENV_FILE} 2>/dev/null | cut -d= -f2-); "
+            f"out=$(FOI_PG_DSN=\"$d\" .venv/bin/python -c '{_DB_PROBE}' 2>/dev/null); "
+            f"r=$(printf '%s\\n' \"$out\" | sed -n 1p); "
+            f"n=$(printf '%s\\n' \"$out\" | sed -n 2p); "
+            f"if [ \"$r\" = \"role\" ]; then echo 'role column: present'; else "
+            f"echo 'role column: MISSING (not migrated, or DB/probe unreachable; "
+            f"apply the Task 1 ALTER from src/server/migrate.sql)'; fi; "
+            f"if [ \"$n\" = \"4\" ]; then echo 'pilot accounts: seeded (4/4)'; else "
+            f"echo 'pilot accounts: MISSING ('${{n:-none}}'/4; run "
+            f"scripts/seed_pilot_users.py)'; fi"
         )
         run(["ssh", ssh_target(), cmd], dry_run=args.dry_run,
             description="probe idc-1 (unit + env)")
@@ -147,7 +183,7 @@ def main() -> int:
     else:
         print(f"\nDeployed. Verify the origin: ssh {ssh_target()} "
               f"'curl -s http://localhost:{ORIGIN_PORT}/health'"
-              f" then open https://foi.fartkraft.ai")
+              f" then open https://foi.axoquant.com")
     return 0
 
 

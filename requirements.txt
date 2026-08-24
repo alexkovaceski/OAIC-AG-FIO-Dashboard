@@ -6,6 +6,11 @@ httpx
 pandas
 pytest
 pytest-asyncio
+# Offline AutoGluon risk fit (scripts/fit_risk_models.py), idc-1 only — ~6-9GB
+# with torch/CUDA. The runtime import is lazy (src/risk seams), so public/chat/
+# report paths never import torch. [tabarena] pulls BOTH tabular + timeseries;
+# chronos-forecasting is a hard dep of autogluon.timeseries (no [chronos] extra).
+autogluon[tabarena]==1.5.0
 # axoquant-llm is installed from the LOCAL clone on idc-1 (/home/algolotl/axoquant-llm,
 # pinned 235ce71) because the GitHub repo is private. deploy.py does this first.
 # axoquant-llm @ git+https://github.com/axoquant/llm.git@235ce71

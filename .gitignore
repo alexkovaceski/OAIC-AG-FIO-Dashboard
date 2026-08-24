@@ -14,3 +14,6 @@ background/jpg/
 
 # runtime lineage ledger (Task 4 firehose; regenerated per boot)
 data/generated/lineage.jsonl
+
+# fitted risk artifacts (fit_risk_models.py runs offline on idc-1; never committed)
+data/generated/risk/
