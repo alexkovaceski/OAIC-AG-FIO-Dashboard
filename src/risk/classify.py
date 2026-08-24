@@ -15,6 +15,13 @@ def _not_fitted(title):
     )
 
 
+def _tiers(result):
+    """Normalise a predictor result to [{agency, tier, prob}]. List-of-dicts
+    in tests; on idc-1 the fit script adapts the real predict output to this
+    shape (or this helper learns a DataFrame of probabilities + label)."""
+    return list(result)
+
+
 def render_classify_section(meta, model_dir, features=None):
     """features is the build_agency_features DataFrame. Honest not-fitted when
     the artifact or features are absent (never fabricate tiers)."""

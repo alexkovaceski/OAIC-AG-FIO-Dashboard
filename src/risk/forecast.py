@@ -16,6 +16,20 @@ def _not_fitted(title):
     )
 
 
+def _points(result):
+    """Normalise a predictor result to [{fy, value, lo, hi}]. Accepts the
+    render contract (list of dicts) or a TimeSeriesDataFrame (on idc-1) — the
+    fit script guarantees the list shape today; this stays a seam for the
+    frame."""
+    if isinstance(result, list):
+        return result
+    out = []
+    for fy, row in result.iterrows():
+        out.append({"fy": fy, "value": float(row["mean"]),
+                    "lo": float(row["0.1"]), "hi": float(row["0.9"])})
+    return out
+
+
 def render_forecast_section(meta, model_dir, series=None):
     """Series is the build_forecast_series dict. When the model artifact or
     series is absent, render the honest not-fitted block (never fabricate)."""
@@ -28,7 +42,7 @@ def render_forecast_section(meta, model_dir, series=None):
         return _not_fitted("request volume")
     points = _points(pred.predict(series))  # Task 5 defines _points
     rows = "".join(
-        f"<tr><td>{p['fy']}</td><td>{p['value']:.0f}</td></tr>" for p in points)
+        f"<tr><td>{p['fy']}</td><td>{p['value']}</td></tr>" for p in points)
     return (
         "<section class=\"risk-section\"><h2>Forecast &mdash; request volume</h2>"
         f"<p class=\"provenance\">model {meta.get('model')} &middot; fitted "
