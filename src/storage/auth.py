@@ -32,9 +32,9 @@ def verify_password(pw: str, stored: str) -> bool:
     except Exception:
         return False
 
-def encode_session(user_id: int, username: str, secret: str,
+def encode_session(user_id: int, username: str, role: str, secret: str,
                    ttl: int = 43_200) -> str:
-    payload = {"user_id": user_id, "username": username,
+    payload = {"user_id": user_id, "username": username, "role": role,
                "exp": int(time.time()) + ttl}
     body = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")

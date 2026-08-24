@@ -447,12 +447,24 @@ def test_gated_page_serves_with_valid_session(monkeypatch):
     # a real secret is required to VALIDATE a session: with the forgeable default
     # in place the gated routes now treat every cookie as anonymous (303 -> login)
     monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
-    token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
     c = TestClient(create_app())
     c.cookies.set("foi_session", token)
     r = c.get("/chat.html")
     assert r.status_code == 200
     assert 'id="chat-log"' in r.text
+
+def test_session_user_defaults_role_to_viewer(monkeypatch):
+    # Task 1: a session minted before the role column existed (payload lacks
+    # the key) must normalise to "viewer" — never KeyError, never internal.
+    from starlette.requests import Request
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    monkeypatch.setattr(app_mod.auth, "decode_session",
+                        lambda token, secret: {"user_id": 1, "username": "alice"})
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": [],
+             "query_string": b"", "cookies": {"foi_session": "legacy"}}
+    user = app_mod._session_user(Request(scope))
+    assert user == {"id": 1, "username": "alice", "role": "viewer"}
 
 def test_gated_page_rejects_cookie_minted_with_default_secret(monkeypatch):
     # Reviewer R2: with the public default secret in place, a VALIDLY-SIGNED
@@ -462,7 +474,7 @@ def test_gated_page_rejects_cookie_minted_with_default_secret(monkeypatch):
     from storage import auth
     import server.app as app_mod
     monkeypatch.setattr(app_mod, "SESSION_SECRET", "dev-insecure-secret")
-    token = auth.encode_session(1, "alice", "dev-insecure-secret")
+    token = auth.encode_session(1, "alice", "viewer", "dev-insecure-secret")
     c = TestClient(create_app())
     c.cookies.set("foi_session", token)
     r = c.get("/chat.html", follow_redirects=False)
@@ -524,7 +536,7 @@ def test_logout_clears_session():
     from storage import auth
     import server.app as app_mod
     c = TestClient(create_app())
-    c.cookies.set("foi_session", auth.encode_session(1, "alice", app_mod.SESSION_SECRET))
+    c.cookies.set("foi_session", auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET))
     r = c.get("/logout", follow_redirects=False)
     assert r.status_code == 303
     # The session cookie must be CLEARED, not re-sent with a fresh value. The
@@ -543,7 +555,7 @@ def test_chat_route_returns_grounded_answer(monkeypatch):
     # a real secret is required to VALIDATE a session: with the forgeable default
     # in place the gated routes treat every cookie as anonymous (303 -> login)
     monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
-    token = auth.encode_session(1, "alice", app_mod.SESSION_SECRET)
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
     captured = {}
 
     async def fake_chat(query, history=None):

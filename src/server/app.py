@@ -284,9 +284,11 @@ def _session_user(request: Request) -> dict | None:
     """The signed-cookie session payload, or None (tampered/expired/missing,
     or the session secret is the insecure default).
 
-    Normalised to the same {"id", "username"} shape _authenticate returns, so
-    the gated routes can treat both identically (the signed payload's key is
-    user_id — encode_session stores it under that name)."""
+    Normalised to the same {"id", "username", "role"} shape _authenticate
+    returns, so the gated routes can treat both identically (the signed
+    payload's key is user_id — encode_session stores it under that name).
+    Role defaults to "viewer" for legacy sessions minted before the role
+    column existed (payload lacks the key)."""
     if _session_secret_insecure():
         # R2: with the public default secret in place, even a cookie signed with
         # that same default must NOT validate — an attacker who read this repo
@@ -297,7 +299,8 @@ def _session_user(request: Request) -> dict | None:
     payload = auth.decode_session(request.cookies.get("foi_session"), SESSION_SECRET)
     if payload is None:
         return None
-    return {"id": payload["user_id"], "username": payload["username"]}
+    return {"id": payload["user_id"], "username": payload["username"],
+            "role": payload.get("role", "viewer")}
 
 
 def _authenticate(username: str, password: str) -> dict | None:
@@ -310,7 +313,7 @@ def _authenticate(username: str, password: str) -> dict | None:
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, username, pw_hash, is_active "
+            cur.execute("SELECT id, username, pw_hash, is_active, role "
                         "FROM horizon.foi_chat_users WHERE username = %s",
                         (username,))
             row = cur.fetchone()
@@ -318,7 +321,8 @@ def _authenticate(username: str, password: str) -> dict | None:
             return None
         if not auth.verify_password(password, row[2]):
             return None
-        return {"id": row[0], "username": row[1]}
+        return {"id": row[0], "username": row[1],
+                "role": "internal" if row[4] == "internal" else "viewer"}
     except Exception:
         return None
     finally:
@@ -480,6 +484,7 @@ def create_app():
         resp = RedirectResponse("/chat.html", status_code=303)
         resp.set_cookie("foi_session",
                         auth.encode_session(user["id"], user["username"],
+                                            user.get("role", "viewer"),
                                             SESSION_SECRET),
                         httponly=True, samesite="lax", max_age=43_200)
         return resp

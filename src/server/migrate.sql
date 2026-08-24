@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS horizon.foi_chat_users (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Task 1 (role access tier): access tier on foi_chat_users. Existing rows
+-- default to 'viewer'; the CHECK confines role to the two known tiers.
+ALTER TABLE horizon.foi_chat_users
+  ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'viewer'
+  CHECK (role IN ('viewer','internal'));
+
 CREATE TABLE IF NOT EXISTS horizon.foi_chat_messages (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT NOT NULL REFERENCES horizon.foi_chat_users(id),
