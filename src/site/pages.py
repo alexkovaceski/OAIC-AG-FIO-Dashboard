@@ -45,7 +45,7 @@ PAGE_FIGURE_KEYS = {
 }
 
 # series colours (validated categorical palette, slots 1-4 — see site.css)
-_BAR_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
+_BAR_COLOURS = ("#2f9e6e", "#c77b3a", "#b7b4aa", "#6e7680")
 
 # human-readable KPI labels for the STAT_KEYS (the catalog keys are enum
 # identifiers, not prose — the page shows a proper label)

@@ -22,10 +22,11 @@
   "use strict";
 
   // Brand palette (validated categorical slots — see site.css tokens).
+  // Horizon-consistent series on the dark surface; hair is the faint rule.
   var PAL = {
-    teal: "#00567d", blue: "#26547b", gold: "#ffcc00",
-    orange: "#eb6834", green: "#1baf7a", ink: "#0c3c60",
-    hair: "#e6e6e6",
+    teal: "#2f9e6e", blue: "#c77b3a", gold: "#b7b4aa",
+    orange: "#6e7680", green: "#1f6b4a", ink: "#edeae2",
+    hair: "rgba(237, 234, 226, 0.12)",
   };
   var SLOTS = ["teal", "blue", "gold", "orange", "green"];
 
@@ -70,14 +71,15 @@
         type: "category",
         data: cats,
         axisLine: { lineStyle: { color: PAL.hair } },
-        ...(manyCats
-          ? { axisLabel: { interval: 0, rotate: 30, fontSize: 10 } }
-          : {}),
+        axisLabel: { color: PAL.ink, ...(manyCats
+          ? { interval: 0, rotate: 30, fontSize: 10 }
+          : {}) },
       },
       yAxis: {
         type: "value",
         axisLine: { show: false },
         splitLine: { lineStyle: { color: PAL.hair } },
+        axisLabel: { color: PAL.ink },
       },
       series: series,
     };

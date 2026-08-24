@@ -1,6 +1,6 @@
 """templates — shared Bluebird FOI Insights page chrome (header nav, sidenav, footer).
 
-The chrome is the Bluebird FOI Insights identity: a dark navy masthead with the top-level
+The chrome is the Bluebird FOI Insights identity: a dark Horizon masthead with the top-level
 nav (Overview / Requests / Decisions / Timeliness / Reference — all internal,
 the POC must not link out to the source agency site), a breadcrumb, a two-column layout
 of sidenav + main, and a footer with the Acknowledgement of Country, in-site
@@ -62,7 +62,7 @@ def _group_page(group: str) -> str:
 
 def nav_html(active_nav: str | None = None) -> str:
     """Top-level FOI section nav row. `active_nav` marks the current group as
-    active (the gold underline). Links point at each group's first page."""
+    active (the seal underline). Links point at each group's first page."""
     links = []
     for t, first_key in NAV:
         href = f"/{_group_page(t)}.html"
@@ -103,7 +103,7 @@ def _user_nav(user) -> str:
 
 def chrome(title: str, body_html: str = "", page_key: str | None = None,
            scripts: str | None = None, user: dict | None = None) -> str:
-    """The Bluebird FOI Insights shell: dark navy masthead + top nav, breadcrumb, a
+    """The Bluebird FOI Insights shell: dark Horizon masthead + top nav, breadcrumb, a
     two-column layout of sidenav + main, and the footer.
 
     Returns a complete, self-contained HTML document. Every page carries the
@@ -134,17 +134,17 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
-<header class="site-header bg-navy text-white border-b-3 border-teal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
-  <div class="logo text-xl font-bold"><a class="text-white no-underline" href="/">Bluebird FOI Insights</a></div>
+<header class="site-header bg-ink text-paper border-b-3 border-seal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
+  <div class="logo text-xl font-bold"><a class="text-paper no-underline" href="/">Bluebird FOI Insights</a></div>
   <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active)}</nav>
   {_user_nav(user)}
 </header>
-<div class="breadcrumb bg-paper border-b border-hair text-muted text-sm px-8 py-2">{BREADCRUMB}</div>
+<div class="breadcrumb bg-ink border-b border-hair text-paper-dim text-sm px-8 py-2">{BREADCRUMB}</div>
 <div class="layout flex items-start max-w-layout mx-auto">
   {sidenav_html(page_key)}
-  <main id="main" class="flex-1 max-w-main mx-auto bg-white px-8 py-8 min-h-main">{body_html}</main>
+  <main id="main" class="flex-1 max-w-main mx-auto bg-ink px-8 py-8 min-h-main">{body_html}</main>
 </div>
-<footer class="sitefoot bg-navy text-neutral-200 text-sm px-8 py-7">
+<footer class="sitefoot bg-ink-raised text-paper-dim text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
   <div class="legal"><a href="/data-notes.html">Data notes</a> <span class="sep">·</span> <a href="/how-to-use.html">How to use</a> <span class="sep">·</span> <a href="/api.html">API access</a></div>
   <div class="stack">Bluebird FOI Insights — fartkraft sovereign stack · data from data.gov.au (FOI statistics)</div>

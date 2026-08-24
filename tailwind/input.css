@@ -1,28 +1,36 @@
 /* Tailwind v4 input for the Bluebird FOI Insights POC.
    Compile: npm run build:css  (output lands in src/site/assets/tailwind.css, committed).
-   The OAIC identity tokens are mapped to Tailwind color tokens so utilities like
-   bg-navy / text-ink / border-gold exist. site.css keeps the bespoke component
+   Horizon identity tokens are mapped to Tailwind color tokens so utilities like
+   bg-ink / text-paper / border-seal exist. site.css keeps the bespoke component
    layer (chartbox, sidenav, nodata, tables) and its own :root tokens. */
 @import "tailwindcss";
 
 @theme {
-  --color-navy: #002a3a;   /* OAIC header band */
-  --color-teal: #00567d;   /* primary accent */
-  --color-blue: #26547b;   /* secondary blue */
-  --color-dark: #003347;   /* darker navy for depth/footers */
-  --color-ink: #0c3c60;    /* body text */
-  --color-paper: #f7f7f7;  /* page background */
-  --color-white: #ffffff;  /* cards, surfaces */
-  --color-gold: #ffcc00;   /* Commonwealth gold accent */
-  --color-hair: #e6e6e6;   /* grid hairlines */
-  --color-muted: #6b7a86;  /* secondary body text */
-  --color-pos: #1baf7a;    /* positive / within-statutory */
-  --color-neg: #eb6834;    /* negative / refused */
-  --color-c1: #00567d;
-  --color-c2: #26547b;
-  --color-c3: #ffcc00;
-  --color-c4: #eb6834;
-  --color-c5: #1baf7a;
+  --color-ink: #0e1419;        /* near-black surface / body bg */
+  --color-ink-raised: #141b22; /* elevated surface / cards / footer */
+  --color-paper: #edeae2;      /* off-white text / surfaces */
+  --color-paper-dim: #b7b4aa;  /* muted text */
+  --color-seal: #2f9e6e;       /* primary accent (green) */
+  --color-seal-dim: #1f6b4a;   /* secondary / depth green */
+  --color-evidence: #c77b3a;   /* amber accent */
+  --color-ledger: #6e7680;     /* muted slate */
+  --color-white: #ffffff;
+  /* legacy token names kept so existing utilities keep working (mapped to the
+     Horizon equivalents); markup is migrating to the honest Horizon names. */
+  --color-navy: #0e1419;       /* was OAIC header band -> ink */
+  --color-teal: #2f9e6e;       /* primary accent -> seal */
+  --color-blue: #1f6b4a;       /* secondary -> seal-dim */
+  --color-dark: #141b22;       /* depth/footers -> ink-raised */
+  --color-gold: #2f9e6e;       /* active accent -> seal */
+  --color-hair: rgba(237,234,226,0.12);  /* grid hairlines */
+  --color-muted: #b7b4aa;      /* secondary body text -> paper-dim */
+  --color-pos: #2f9e6e;        /* positive / within-statutory */
+  --color-neg: #c77b3a;        /* negative / refused */
+  --color-c1: #2f9e6e;
+  --color-c2: #c77b3a;
+  --color-c3: #b7b4aa;
+  --color-c4: #6e7680;
+  --color-c5: #1f6b4a;
 
   /* layout dimensions. Named utilities (w-sidenav / max-w-main / ...) instead
      of arbitrary values: Tailwind v4's content scan is flaky at picking up
@@ -32,5 +40,5 @@
   --max-width-layout: 1400px;
   --max-width-main: 1100px;
   --min-height-main: 70vh;
-  --border-width-3: 3px;   /* OAIC masthead gold/teal rule */
+  --border-width-3: 3px;   /* masthead accent rule */
 }

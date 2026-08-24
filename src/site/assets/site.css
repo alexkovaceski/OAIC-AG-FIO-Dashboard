@@ -1,45 +1,53 @@
 /* site.css — Bluebird FOI Insights chrome + the Bluebird FOI Insights chart system.
 
-The chrome: a dark navy masthead with white text and a Commonwealth-gold
-active underline, a top-level nav of five internal FOI sections, a two-column
-layout (sidenav + main), and a footer carrying the Acknowledgement of Country,
-in-site legal links and the identity stovepipe.
+The chrome follows the Bluebird Horizon identity: a near-black masthead with
+paper text and a seal-green active underline, a top-level nav of five internal
+FOI sections, a two-column layout (sidenav + main), and a footer carrying the
+Acknowledgement of Country, in-site legal links and the identity stovepipe.
 
-Accessibility choices: contrast is WCAG AA. The --muted and --nodata tokens are
-#54626f (≈ 6.3:1 on white) for the small labels that use them, and
-:focus-visible draws a 2px currentColor outline so the focus ring adapts to the
-background it sits on.
+Accessibility choices: contrast is WCAG AA on the dark surfaces. Body text
+--paper #edeae2 on --ink #0e1419 ≈ 15.9:1; muted --paper-dim #b7b4aa ≈ 7.5:1;
+seal-green #2f9e6e on ink ≈ 6.6:1 for accents/links. :focus-visible draws a
+2px seal outline, and ::selection fills seal-green.
 
 The chart system follows the dataviz method: series colours are a validated
 categorical palette, every figure renders into an ECharts .chartbox mount, and
-text always wears ink rather than a series colour. A missing year renders as
+text always wears paper rather than a series colour. A missing year renders as
 "—"; a genuinely absent measure renders an explicit no-data placeholder.
 */
 
 :root {
-  /* core colour tokens */
-  --navy: #002a3a;   /* header band */
-  --teal: #00567d;   /* primary accent */
-  --blue: #26547b;   /* secondary */
-  --dark: #003347;   /* depth */
-  --ink:  #0c3c60;   /* body text */
-  --paper:#f7f7f7;   /* page bg */
-  --white:#ffffff;
-  --gold: #ffcc00;   /* Commonwealth gold */
-  --hair: #e6e6e6;
-  /* chart series */
-  --c1: #00567d; --c2: #26547b; --c3: #ffcc00;
-  --c4: #eb6834; --c5: #1baf7a;
-  --neg: #eb6834; --pos: #1baf7a;
+  /* core colour tokens (Bluebird Horizon) */
+  --ink:         #0e1419;   /* near-black surface / page bg */
+  --ink-raised:  #141b22;   /* elevated surface / cards / footer */
+  --paper:       #edeae2;   /* off-white text / surfaces */
+  --paper-dim:   #b7b4aa;   /* muted text */
+  --seal:        #2f9e6e;   /* primary accent (green) */
+  --seal-dim:    #1f6b4a;   /* secondary / depth green */
+  --evidence:    #c77b3a;   /* amber accent */
+  --ledger:      #6e7680;   /* muted slate */
+  --white:       #ffffff;
+  /* legacy token names (mapped to Horizon equivalents for compat) */
+  --navy: #0e1419;   /* header band -> ink */
+  --teal: #2f9e6e;   /* primary accent -> seal */
+  --blue: #1f6b4a;   /* secondary -> seal-dim */
+  --dark: #141b22;   /* depth/footers -> ink-raised */
+  --gold: #2f9e6e;   /* active accent -> seal */
+  --hair: rgba(237, 234, 226, 0.12);   /* grid hairlines */
+  /* chart series (Horizon-consistent categorical) */
+  --c1: #2f9e6e; --c2: #c77b3a; --c3: #b7b4aa;
+  --c4: #6e7680; --c5: #1f6b4a;
+  --neg: #c77b3a; --pos: #2f9e6e;
 
   /* derived surfaces */
-  --ink-2:        #4a5a66;
-  --muted:        #54626f;
-  --rule:         #c9c9c2;
-  --link:         #00567d;
-  --link-visited: #4a4a9a;
-  --nodata:       #54626f;
-  --serif:        Georgia, 'Times New Roman', serif;
+  --ink-2:        #b7b4aa;
+  --muted:        #b7b4aa;
+  --rule:         rgba(237, 234, 226, 0.12);
+  --link:         #2f9e6e;
+  --link-visited: #6fcf9e;
+  --nodata:       #b7b4aa;
+  --serif:        "Fraunces", Georgia, 'Times New Roman', serif;
+  --mono:         "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -47,34 +55,34 @@ text always wears ink rather than a series colour. A missing year renders as
 html, body { margin: 0; padding: 0; }
 
 body {
-  background: var(--paper);
-  color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 16px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
-/* --- site header (dark navy masthead) ----------------------------------------
+/* --- site header (Horizon near-black masthead) --------------------------------
    The masthead layout + colour is now Tailwind utilities on the elements
-   (bg-navy / text-white / flex / px-8 py-3 ...). The bespoke nav-link
+   (bg-ink / text-paper / flex / px-8 py-3 ...). The bespoke nav-link
    hover/active states stay here. */
 
 .topnav .nav-link {
-  color: #dbe6ec;
+  color: var(--paper-dim);
   text-decoration: none;
   font-size: 0.92rem;
   padding: 0.35rem 0.5rem;
   border-radius: 4px;
 }
-.topnav .nav-link:hover { color: var(--white); background: rgba(255, 255, 255, 0.12); }
+.topnav .nav-link:hover { color: var(--paper); background: rgba(237, 234, 226, 0.12); }
 .topnav .nav-link.active {
-  color: var(--white);
+  color: var(--paper);
   font-weight: 600;
-  border-bottom: 3px solid var(--gold);   /* Commonwealth gold active accent */
+  border-bottom: 3px solid var(--seal);   /* Horizon seal active accent */
 }
 .topnav .btn-login {
-  background: var(--teal);               /* primary accent — no new palette */
-  color: #fff;
+  background: var(--seal);               /* primary accent — no new palette */
+  color: var(--ink);
   padding: 0.4rem 0.9rem;
   border-radius: 0.375rem;
   font-weight: 600;
@@ -106,11 +114,11 @@ body {
   border-left: 3px solid transparent;
   border-radius: 0 4px 4px 0;
 }
-.sidenav .navbtn:hover { background: #eef3f7; }
+.sidenav .navbtn:hover { background: rgba(237, 234, 226, 0.06); }
 .sidenav .navbtn.active {
-  background: #e7f0f5;
-  border-left-color: var(--teal);
-  color: var(--dark);
+  background: rgba(47, 158, 110, 0.16);
+  border-left-color: var(--seal);
+  color: var(--paper);
   font-weight: 600;
 }
 
@@ -119,7 +127,7 @@ h1 {
   font-size: 2rem;
   font-weight: 700;
   margin: 0 0 0.25rem;
-  color: var(--ink);
+  color: var(--paper);
 }
 
 .intro { color: var(--ink-2); max-width: 60ch; margin: 0 0 1.25rem; }
@@ -137,9 +145,9 @@ a:visited { color: var(--link-visited); }
 }
 
 .kpi {
-  background: var(--white);
+  background: var(--ink-raised);
   border: 1px solid var(--hair);
-  border-top: 3px solid var(--teal);
+  border-top: 3px solid var(--seal);
   border-radius: 6px;
   padding: 0.9rem 1rem;
   display: flex;
@@ -175,6 +183,64 @@ a:visited { color: var(--link-visited); }
   margin: 0 0 1rem;
 }
 
+/* --- login form + hint ------------------------------------------------------ */
+
+.login-form { max-width: 26rem; margin: 1.25rem 0; }
+.login-form label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--paper-dim);
+  margin: 0.9rem 0 0.3rem;
+}
+.login-form input {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 1rem;
+}
+.login-form input:focus {
+  outline: 2px solid var(--seal);
+  outline-offset: 1px;
+  border-color: var(--seal);
+}
+.login-form button {
+  margin-top: 1.1rem;
+  background: var(--seal);
+  color: var(--ink);
+  font-weight: 600;
+  padding: 0.5rem 1.1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.login-form button:hover { filter: brightness(0.92); }
+.form-error {
+  color: var(--evidence);
+  border: 1px dashed var(--rule);
+  border-radius: 4px;
+  padding: 0.6rem 0.9rem;
+  max-width: 26rem;
+}
+.hint { color: var(--paper-dim); font-size: 0.88rem; max-width: 60ch; }
+
+/* --- risk sections --------------------------------------------------------- */
+
+.risk-section { margin: 1.5rem 0; }
+.risk-absent {
+  color: var(--paper-dim);
+  font-style: italic;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.9rem 1.1rem;
+  max-width: 70ch;
+}
+.provenance { color: var(--paper-dim); font-size: 0.8rem; margin: 1.5rem 0 0; }
+
 /* --- ECharts containers ---------------------------------------------------- */
 
 .chartbox { min-height: 320px; }
@@ -195,11 +261,11 @@ a:visited { color: var(--link-visited); }
 
 .lineage { margin-top: 2rem; font-size: 0.95rem; }
 pre {
-  background: #fafafa;
+  background: var(--ink-raised);
   border: 1px solid var(--hair);
   border-radius: 6px;
   padding: 0.85rem 1rem;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 0.82rem;
   line-height: 1.45;
   overflow-x: auto;
@@ -216,8 +282,8 @@ section { margin: 1.4rem 0; }
   text-align: left;
   vertical-align: top;
 }
-.apitable th { background: var(--paper); font-weight: 600; }
-.apitable code { background: #fafafa; padding: 0.1rem 0.3rem; border-radius: 3px;
+.apitable th { background: var(--ink-raised); font-weight: 600; }
+.apitable code { background: var(--ink-raised); padding: 0.1rem 0.3rem; border-radius: 3px;
   font-size: 0.85em; }
 
 /* --- data notes (verbatim corpus) ------------------------------------------ */
@@ -250,24 +316,27 @@ ul { list-style: disc; padding-left: 1.25rem; }
 
 /* --- footer ----------------------------------------------------------------
    The band bg, text colour and padding are Tailwind utilities on the footer
-   (bg-navy / text-neutral-200 / px-8 py-7). The inner link + separator colours
-   are bespoke (utilities can't express the :visited palette) and stay here. */
+   (bg-ink-raised / text-paper-dim / px-8 py-7). The inner link + separator
+   colours are bespoke (utilities can't express the :visited palette) and stay
+   here. */
 
 .sitefoot .country { margin-bottom: 0.4rem; }
-.sitefoot .legal { margin-bottom: 0.4rem; color: #b9b9b4; }
-.sitefoot .legal a { color: #cfe0ff; }
-.sitefoot .legal a:visited { color: #d9c9ff; }
-.sitefoot .legal .sep { color: #6b7a86; padding: 0 0.3em; }
-.sitefoot .stack { color: #b9b9b4; }
-.sitefoot a { color: #cfe0ff; }
-.sitefoot a:visited { color: #d9c9ff; }
+.sitefoot .legal { margin-bottom: 0.4rem; color: var(--paper-dim); }
+.sitefoot .legal a { color: var(--seal); }
+.sitefoot .legal a:visited { color: var(--link-visited); }
+.sitefoot .legal .sep { color: var(--ledger); padding: 0 0.3em; }
+.sitefoot .stack { color: var(--paper-dim); }
+.sitefoot a { color: var(--seal); }
+.sitefoot a:visited { color: var(--link-visited); }
 
 /* --- focus states ---------------------------------------------------------- */
 
 :focus-visible {
-  outline: 2px solid currentColor;
+  outline: 2px solid var(--seal);
   outline-offset: 2px;
 }
+
+::selection { background: var(--seal); color: var(--ink); }
 
 /* --- skip link (WCAG 2.4.1): visually hidden until focused ------------------ */
 
@@ -280,10 +349,10 @@ ul { list-style: disc; padding-left: 1.25rem; }
 .skip-link:focus {
   left: 0;
   top: 0;
-  background: var(--white);
+  background: var(--paper);
   color: var(--ink);
   padding: 0.6rem 1rem;
-  border: 2px solid var(--navy);
+  border: 2px solid var(--seal);
   border-radius: 0 0 6px 0;
   text-decoration: none;
 }
