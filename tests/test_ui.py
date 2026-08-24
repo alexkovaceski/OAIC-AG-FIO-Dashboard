@@ -258,6 +258,13 @@ def test_masthead_is_bluebird_foi_insights():
         assert ">Bluebird FOI Insights</a>" in html, "masthead missing Bluebird FOI Insights"
 
 
+def test_masthead_risk_link_only_for_internal():
+    from site.templates import _user_nav
+    assert "Risk" in _user_nav({"role": "internal", "username": "a"})
+    assert "Risk" not in _user_nav({"role": "viewer", "username": "a"})
+    assert "btn-login" in _user_nav(None)
+
+
 def test_top_nav_links_are_all_internal():
     for html in _pages().values():
         nav = re.search(r'<nav[^>]*aria-label="Primary"[^>]*>(.*?)</nav>', html, re.S)

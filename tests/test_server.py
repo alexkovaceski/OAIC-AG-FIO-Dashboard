@@ -575,3 +575,31 @@ def test_chat_route_returns_grounded_answer(monkeypatch):
     body = r.json()
     assert captured["query"] == "how many requests were received?"
     assert body["citations"] == ["catalog:requests_received_q1"]
+
+def test_risk_page_internal_renders(monkeypatch):
+    from storage import auth
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    token = auth.encode_session(1, "alice", "internal", app_mod.SESSION_SECRET)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.get("/risk.html")
+    assert r.status_code == 200
+    assert "Risk insights" in r.text
+
+
+def test_risk_page_viewer_gets_403(monkeypatch):
+    from storage import auth
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.get("/risk.html", follow_redirects=False)
+    assert r.status_code == 403
+    assert "not authorised" in r.text.lower()
+
+
+def test_risk_page_anonymous_redirects():
+    c = TestClient(create_app())
+    r = c.get("/risk.html", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")

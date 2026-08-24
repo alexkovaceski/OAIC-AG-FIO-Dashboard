@@ -73,6 +73,7 @@ from storage import auth  # noqa: E402
 from agentic.chat import chat as agentic_chat  # noqa: E402
 from agentic.report import build_report  # noqa: E402
 from site.pages import chat_page, reports_page  # noqa: E402
+from risk.load import load_risk_artifacts, risk_page_html  # noqa: E402
 
 # The golden boot check runs once at import; the frame and pages are immutable
 # within a process, so they are cached at module scope rather than re-derived
@@ -369,6 +370,11 @@ def _login_page(error: str | None = None) -> str:
     return chrome("Log in", body)
 
 
+def risk_not_authorized() -> str:
+    return ("<h1>Not authorised</h1>"
+            "<p>Your account does not have access to internal risk views.</p>")
+
+
 class AskRequest(BaseModel):
     request: str
 
@@ -512,6 +518,16 @@ def create_app():
         if user is None:
             return RedirectResponse("/login", status_code=303)
         return HTMLResponse(reports_page(user))
+
+    @app.get("/risk.html")
+    def risk_gated(request: Request):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        if user.get("role") != "internal":
+            return HTMLResponse(risk_not_authorized(), status_code=403)
+        return HTMLResponse(risk_page_html(user, _FRAME,
+                                           artifacts=load_risk_artifacts()))
 
     @app.post("/chat")
     async def chat_route(request: Request, req: ChatBody):

@@ -91,11 +91,13 @@ def sidenav_html(page_key: str) -> str:
 
 def _user_nav(user) -> str:
     if user is None:
-        return '<a class="nav-link" href="/login">Log in</a>'
+        return '<a class="nav-link btn-login" href="/login">Log in</a>'
+    risk = ('<a class="nav-link" href="/risk.html">Risk</a>'
+            if user.get("role") == "internal" else "")
     return ('<a class="nav-link" href="/chat.html">Chat</a>'
-            '<a class="nav-link" href="/reports.html">Reports</a>'
-            '<span class="nav-username">' + html.escape(str(user.get("username", "")))
-            + '</span>'
+            '<a class="nav-link" href="/reports.html">Reports</a>' + risk
+            + '<span class="nav-username">'
+            + html.escape(str(user.get("username", ""))) + '</span>'
             '<a class="nav-link" href="/logout">Log out</a>')
 
 
