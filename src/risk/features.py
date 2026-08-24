@@ -22,10 +22,12 @@ def build_forecast_series(facts, measure):
 
 
 def build_agency_features(facts):
+    if not facts:
+        return pd.DataFrame()
     df = pd.DataFrame([
         {"agency": f["agency_name"], "fy": f["fy"], "measure": f["measure"],
-         "bucket": f["bucket"], "value": float(f["value"])}
-        for f in facts if f["quarter"] is None
+         "value": float(f["value"])}
+        for f in facts if f["quarter"] is None and f["bucket"] == "total"
     ])
     piv = df.pivot_table(index=["agency", "fy"], columns="measure",
                          values="value", aggfunc="sum").reset_index()

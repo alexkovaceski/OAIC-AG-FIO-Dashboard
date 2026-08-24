@@ -33,3 +33,26 @@ def test_forecast_series_is_pure_annual_fy():
     s = build_forecast_series(facts, "received")
     assert s["fy"] == ["2019-20", "2020-21"]
     assert s["values"] == [10.0, 20.0]  # quarter row excluded
+
+
+def test_bucket_total_not_double_counted():
+    facts = [
+        {"agency_key": "a", "agency_name": "A", "fy": "2020-21", "quarter": None,
+         "measure_group": "g", "measure": "received", "bucket": "personal", "value": 6.0,
+         "derived": False},
+        {"agency_key": "a", "agency_name": "A", "fy": "2020-21", "quarter": None,
+         "measure_group": "g", "measure": "received", "bucket": "other", "value": 4.0,
+         "derived": False},
+        {"agency_key": "a", "agency_name": "A", "fy": "2020-21", "quarter": None,
+         "measure_group": "g", "measure": "received", "bucket": "total", "value": 10.0,
+         "derived": False},
+    ]
+    df = build_agency_features(facts)
+    row = df[(df.agency == "A") & (df.fy == "2020-21")].iloc[0]
+    assert row["received"] == 10.0  # not 20.0 (personal + other + total)
+
+
+def test_empty_facts_return_empty_frame():
+    df = build_agency_features([])
+    assert isinstance(df, pd.DataFrame)
+    assert df.empty
