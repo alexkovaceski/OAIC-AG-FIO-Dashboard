@@ -24,8 +24,8 @@ def _load_points(path):
         for row in data:
             if not isinstance(row, dict):
                 return None
-            out.append({"fy": row["fy"], "value": row["value"],
-                        "lo": row["lo"], "hi": row["hi"]})
+            out.append({"fy": row["fy"], "value": float(row["value"]),
+                        "lo": float(row["lo"]), "hi": float(row["hi"])})
         return out
     except (OSError, ValueError, KeyError, TypeError):
         return None

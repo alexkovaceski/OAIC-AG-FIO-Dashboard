@@ -201,9 +201,8 @@ def _point_fy(idx) -> str:
 def fit_forecast(series: dict, time_limit: int = FORECAST_TIME_LIMIT):
     """Fit the Chronos forecast predictor and return the [{fy,value,lo,hi}] list.
 
-    The predictor is saved at forecast/model/ (NOT forecast/) so the current
-    renderer's TimeSeriesPredictor.load('.../forecast') fails cleanly -> honest
-    'not yet fitted' section (see the module docstring and deploy.md).
+    The renderer reads forecast/predictions.json only (never loads the
+    predictor); forecast/model/ keeps the raw predictor for reproducibility.
     """
     from autogluon.timeseries import TimeSeriesPredictor
     tsdf = _series_to_tsdf(series)
@@ -359,9 +358,13 @@ def _print_contract_check(forecast_raw, classify_raw, points, tiers) -> None:
     """Report what the raw AutoGluon predictors returned and where the sidecars
     landed (verified at fit time)."""
     print("\n--- renderer contract check (verified at fit time) ---")
-    print(f"forecast predict() returned {forecast_raw} "
-          f"-> adapted to {len(points)} points [{points[0]['fy']}.."
-          f"{points[-1]['fy']}] in forecast/predictions.json")
+    if points:
+        print(f"forecast predict() returned {forecast_raw} "
+              f"-> adapted to {len(points)} points [{points[0]['fy']}.."
+              f"{points[-1]['fy']}] in forecast/predictions.json")
+    else:
+        print(f"forecast predict() returned {forecast_raw} "
+              f"-> adapted to 0 points in forecast/predictions.json")
     print(f"classify predict() returned {classify_raw} "
           f"-> adapted to {len(tiers)} agency tiers in classify/tiers.json")
     print("The renderers (src/risk/forecast.py, classify.py) load these "
