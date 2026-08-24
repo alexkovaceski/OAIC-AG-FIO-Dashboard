@@ -99,3 +99,27 @@ def test_missing_or_malformed_sidecar_renders_not_fitted(tmp_path):
     assert "Not yet fitted" in cmod.render_classify_section(meta, str(cdir2), None)
     assert "12359" not in fmod.render_forecast_section(meta, str(fdir2), {})
     assert "12359" not in cmod.render_classify_section(meta, str(cdir2), None)
+
+
+def test_classify_sidecar_with_non_numeric_prob_renders_not_fitted(tmp_path):
+    from risk import classify as cmod
+    meta = {"model": "tabpfn", "fitted_at": "2026-08-24T00:00:00Z",
+            "basis": "fy", "source_rows": 100, "rows_hash": "abc"}
+    # prob is a string (coercion to float must fail -> honest not-fitted, never a 500)
+    cdir = tmp_path / "classify"
+    cdir.mkdir()
+    (cdir / "tiers.json").write_text(json.dumps([
+        {"agency": "A", "tier": "medium", "prob": "high"},
+    ]), encoding="utf-8")
+    html = cmod.render_classify_section(meta, str(cdir), None)
+    assert "Not yet fitted" in html
+    assert "12359" not in html
+    # prob is null -> same honest fallback
+    cdir2 = tmp_path / "classify-null"
+    cdir2.mkdir()
+    (cdir2 / "tiers.json").write_text(json.dumps([
+        {"agency": "A", "tier": "medium", "prob": None},
+    ]), encoding="utf-8")
+    html2 = cmod.render_classify_section(meta, str(cdir2), None)
+    assert "Not yet fitted" in html2
+    assert "12359" not in html2

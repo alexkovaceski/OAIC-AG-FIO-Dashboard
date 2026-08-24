@@ -12,25 +12,15 @@ service serves an honest 'not yet fitted' risk page until this runs.
 The model never writes a digit: every figure the risk page shows comes from
 these artifacts (predicted values, class probabilities) or the frame.
 
-Renderer contract: the risk renderers (src/risk/forecast.py, classify.py)
-expect predict() output to adapt to [{fy, value, lo, hi}] / [{agency, tier,
-prob}]. AutoGluon's raw predictors do not return those shapes (Chronos returns
-a TimeSeriesDataFrame; Tabular returns a label Series), so this script runs
-prediction AT FIT TIME and writes the adapted output as JSON sidecars
-(forecast/predictions.json, classify/tiers.json). The sidecars are the model's
-computed numbers — the guarantee that a fitted risk page never fabricates.
-The raw predictors are saved alongside for refits / future use.
-
-The classify predictor is saved at classify/model/ (not classify/) on purpose:
-TabularPredictor.load(".../classify") would succeed for the current renderer,
-whose _tiers(list-of-dicts) would then crash on the label Series. Saving the
-predictor one level down makes the current renderer fail cleanly (load raises
--> honest 'not yet fitted' section) until render_classify_section reads
-classify/tiers.json. The forecast predictor is saved at forecast/model/ for
-the same reason: TimeSeriesPredictor.predict cannot accept the
-build_forecast_series dict shape the current renderer passes, so saving it at
-forecast/model/ makes TSP.load(".../forecast") fail cleanly too. The one-line
-adjustments to read the sidecars are documented in docs/deploy.md.
+Renderer contract: the risk renderers (src/risk/forecast.py, classify.py) read
+the fitted numbers straight from the JSON sidecars this script writes:
+forecast/predictions.json is [{fy, value, lo, hi}] and classify/tiers.json is
+[{agency, tier, prob}] — the exact contracts the renderers were built against,
+so no renderer adjustment is needed. The renderers never import autogluon and
+never live-predict; a missing or unparseable sidecar renders the honest
+'not yet fitted' block. The sidecars are the model's computed numbers — the
+guarantee that a fitted risk page never fabricates. The raw predictors are
+saved alongside (forecast/model/, classify/model/) for refits / future use.
 
 Usage:
   .venv/bin/python scripts/fit_risk_models.py --dry-run   # non-fit path, no writes
@@ -191,6 +181,23 @@ def _ts_to_fy(ts) -> str:
     return f"{ts.year}-{str((ts.year + 1) % 100).zfill(2)}"
 
 
+def _point_fy(idx) -> str:
+    """Extract the FY from a predict-output index entry, regardless of whether
+    AutoGluon emits (timestamp, item_id) or (item_id, timestamp) order.
+
+    We build the training index as (timestamp, item_id), but AutoGluon's
+    predict() output index ordering is not something we control or assert. Bind
+    the Timestamp defensively and raise a clear error if neither slot is one —
+    the fit must never abort after the ~1h GPU fit with an AttributeError.
+    """
+    a, b = idx
+    ts = a if isinstance(a, pd.Timestamp) else (b if isinstance(b, pd.Timestamp) else None)
+    if ts is None:
+        raise ValueError(
+            f"unexpected forecast index {idx!r}: no pd.Timestamp in either slot")
+    return _ts_to_fy(ts)
+
+
 def fit_forecast(series: dict, time_limit: int = FORECAST_TIME_LIMIT):
     """Fit the Chronos forecast predictor and return the [{fy,value,lo,hi}] list.
 
@@ -210,9 +217,9 @@ def fit_forecast(series: dict, time_limit: int = FORECAST_TIME_LIMIT):
                   time_limit=time_limit)
     raw = predictor.predict(tsdf)
     points = []
-    for (_, ts), row in raw.iterrows():
+    for idx, row in raw.iterrows():
         points.append({
-            "fy": _ts_to_fy(ts),
+            "fy": _point_fy(idx),
             "value": float(row["mean"]),
             "lo": float(row[str(QUANTILE_LEVELS[0])]),
             "hi": float(row[str(QUANTILE_LEVELS[1])]),
@@ -317,23 +324,14 @@ def record_lineage(facts, meta: dict, *, conn=None) -> None:
 def _write_forecast_readme() -> None:
     readme = (
         "This directory holds the offline AutoGluon-Chronos forecast fit.\n\n"
-        "  model/            the TimeSeriesPredictor artifact (saved one level "
-        "down so the\n"
-        "                    current renderer's "
-        "TimeSeriesPredictor.load('.../forecast') fails\n"
-        "                    cleanly -> an honest 'not yet fitted' section "
-        "rather than a 500 on\n"
-        "                    a predict() call the real predictor cannot serve "
-        "with the\n"
-        "                    build_forecast_series dict shape).\n"
+        "  model/            the TimeSeriesPredictor artifact (kept for "
+        "reproducibility;\n"
+        "                    the renderer does not load or predict with it).\n"
         "  predictions.json  the model's computed next-FY forecast [{fy, value, "
         "lo, hi}] — the\n"
-        "                    exact contract src/risk/forecast.py's _points "
-        "expects.\n\n"
-        "To surface the fitted forecast, render_forecast_section must read "
-        "predictions.json\n"
-        "instead of pred.predict(series) (see docs/deploy.md, 'Fitted risk "
-        "models').\n"
+        "                    exact contract src/risk/forecast.py's "
+        "render_forecast_section\n"
+        "                    reads directly. No renderer edit required.\n"
     )
     (FORECAST_DIR / "README.md").write_text(readme, encoding="utf-8")
 
@@ -341,20 +339,14 @@ def _write_forecast_readme() -> None:
 def _write_classify_readme() -> None:
     readme = (
         "This directory holds the offline AutoGluon classify fit.\n\n"
-        "  model/        the TabularPredictor artifact (saved one level down so "
-        "the current\n"
-        "                renderer's TabularPredictor.load('.../classify') fails "
-        "cleanly -> an\n"
-        "                honest 'not yet fitted' section rather than a crash on "
-        "the raw\n"
-        "                label Series predict() output).\n"
+        "  model/        the TabularPredictor artifact (kept for "
+        "reproducibility;\n"
+        "                the renderer does not load or predict with it).\n"
         "  tiers.json    the model's computed per-agency forward-looking tiers "
         "[{agency, tier,\n"
         "                prob}] — the exact contract src/risk/classify.py's "
-        "_tiers expects.\n\n"
-        "To surface the fitted tiers, render_classify_section must read "
-        "tiers.json instead of\n"
-        "pred.predict(features) (see docs/deploy.md, 'Fitted risk models').\n"
+        "render_classify_section\n"
+        "                reads directly. No renderer edit required.\n"
     )
     (CLASSIFY_DIR / "README.md").write_text(readme, encoding="utf-8")
 
@@ -364,25 +356,21 @@ def _write_classify_readme() -> None:
 # --------------------------------------------------------------------------- #
 
 def _print_contract_check(forecast_raw, classify_raw, points, tiers) -> None:
-    """Report what the raw AutoGluon predictors returned vs the renderer
-    contract, and the exact renderer adjustments needed (verified at fit time)."""
+    """Report what the raw AutoGluon predictors returned and where the sidecars
+    landed (verified at fit time)."""
     print("\n--- renderer contract check (verified at fit time) ---")
     print(f"forecast predict() returned {forecast_raw} "
           f"-> adapted to {len(points)} points [{points[0]['fy']}.."
           f"{points[-1]['fy']}] in forecast/predictions.json")
     print(f"classify predict() returned {classify_raw} "
           f"-> adapted to {len(tiers)} agency tiers in classify/tiers.json")
-    print("The raw AutoGluon predictors are saved at forecast/model/ and "
-          "classify/model/,")
-    print("so the current renderers' load('.../forecast') / load('.../classify') "
-          "fail cleanly")
-    print("into the honest 'not yet fitted' section. The documented one-line "
-          "adjustments in")
-    print("docs/deploy.md ('Fitted risk models') make the renderers read the "
-          "sidecars so the")
-    print("fitted numbers surface. No number on the risk page is ever "
-          "fabricated — every figure")
-    print("comes from these artifacts or the frame.")
+    print("The renderers (src/risk/forecast.py, classify.py) load these "
+          "sidecars directly")
+    print("at route time, so the fitted numbers surface on the next /risk.html "
+          "request — no")
+    print("renderer edit and no restart needed. No number on the risk page is "
+          "ever fabricated —")
+    print("every figure comes from these artifacts or the frame.")
 
 
 def dry_run() -> int:
@@ -404,9 +392,10 @@ def dry_run() -> int:
           f"from training)")
     train = labeled[labeled["fy"] <= SPLIT_FY]
     test = labeled[labeled["fy"] > SPLIT_FY]
-    print(f"time-split on {SPLIT_FY}: train {len(train)} rows (FY<=split), "
-          f"test {len(test)} rows (FY>split)")
-    if train["tier_next"].notna().sum() < 2:
+    print(f"label FY boundary {SPLIT_FY}: {len(train)} labeled rows at/before it, "
+          f"{len(test)} after (no-leakage check; the production fit uses ALL "
+          f"{len(labeled)} labeled rows — no held-out evaluation runs)")
+    if labeled["tier_next"].notna().sum() < 2:
         print("warning: too few labeled rows for a meaningful fit")
     print("would fit (on idc-1, autogluon required):")
     print(f"  forecast  TimeSeriesPredictor preset={FORECAST_PRESET} "
@@ -474,10 +463,10 @@ def main(argv=None) -> int:
         print("\n[lineage] skipped (--skip-lineage)")
 
     _print_contract_check(forecast_raw, classify_raw, points, tiers)
-    print("\nDone. Restart foi-insights to load the fitted risk artifacts, or "
-          "apply the")
-    print("documented renderer adjustment first (docs/deploy.md 'Fitted risk "
-          "models').")
+    print("\nDone. The fitted risk artifacts are live — /risk.html reads them at "
+          "route time,")
+    print("so the next request shows the model-computed numbers (no restart "
+          "needed).")
     return 0
 
 

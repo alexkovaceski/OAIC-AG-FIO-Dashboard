@@ -24,8 +24,12 @@ def _load_tiers(path):
         for row in data:
             if not isinstance(row, dict):
                 return None
+            # prob must be a number: the :.0% format step raises TypeError on a
+            # string/null, which would 500 — coerce here so a bad prob degrades
+            # to the honest not-fitted block instead (ValueError/TypeError are
+            # caught below).
             out.append({"agency": row["agency"], "tier": row["tier"],
-                        "prob": row["prob"]})
+                        "prob": float(row["prob"])})
         return out
     except (OSError, ValueError, KeyError, TypeError):
         return None
