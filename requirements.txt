@@ -3,6 +3,7 @@ uvicorn[standard]
 openpyxl
 psycopg2-binary
 httpx
+pandas
 pytest
 pytest-asyncio
 # axoquant-llm is installed from the LOCAL clone on idc-1 (/home/algolotl/axoquant-llm,

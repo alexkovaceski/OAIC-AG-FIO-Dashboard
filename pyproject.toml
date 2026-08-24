@@ -13,6 +13,7 @@ dependencies = [
     "openpyxl",
     "psycopg2-binary",
     "httpx",
+    "pandas",
 ]
 
 [project.optional-dependencies]
