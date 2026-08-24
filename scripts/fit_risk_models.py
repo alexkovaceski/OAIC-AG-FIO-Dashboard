@@ -173,7 +173,9 @@ def _series_to_tsdf(series: dict):
         })
     if not rows:
         raise ValueError("forecast series has no values to fit")
-    df = pd.DataFrame(rows).set_index(["timestamp", "item_id"])
+    df = pd.DataFrame(rows)
+    df["item_id"] = df["item_id"].astype(str)
+    df = df.set_index(["item_id", "timestamp"])
     return TimeSeriesDataFrame(df)
 
 
