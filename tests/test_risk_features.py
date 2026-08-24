@@ -56,3 +56,13 @@ def test_empty_facts_return_empty_frame():
     df = build_agency_features([])
     assert isinstance(df, pd.DataFrame)
     assert df.empty
+
+
+def test_features_no_annual_rows_returns_empty_frame():
+    facts = [
+        {"agency_key": "a", "agency_name": "A", "fy": "2025-26", "quarter": 1,
+         "measure_group": "g", "measure": "received", "bucket": "total",
+         "value": 12359.0, "derived": True},
+    ]
+    df = build_agency_features(facts)
+    assert df.empty
