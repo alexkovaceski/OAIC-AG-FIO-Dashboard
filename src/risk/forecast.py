@@ -1,11 +1,7 @@
 # src/risk/forecast.py — forecast section renderer (honest until fitted)
 from __future__ import annotations
-
-
-def _get_predictor():
-    # lazy: autogluon is only imported when the forecast artifact is present
-    from autogluon.timeseries import TimeSeriesPredictor
-    return TimeSeriesPredictor
+import json
+import os
 
 
 def _not_fitted(title):
@@ -16,31 +12,38 @@ def _not_fitted(title):
     )
 
 
-def _points(result):
-    """Normalise a predictor result to [{fy, value, lo, hi}]. Accepts the
-    render contract (list of dicts) or a TimeSeriesDataFrame (on idc-1) — the
-    fit script guarantees the list shape today; this stays a seam for the
-    frame."""
-    if isinstance(result, list):
-        return result
-    out = []
-    for fy, row in result.iterrows():
-        out.append({"fy": fy, "value": float(row["mean"]),
-                    "lo": float(row["0.1"]), "hi": float(row["0.9"])})
-    return out
+def _load_points(path):
+    """Load the [{fy, value, lo, hi}] sidecar, or None when absent, unreadable
+    or malformed — never a 500, never a fabricated number."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return None
+        out = []
+        for row in data:
+            if not isinstance(row, dict):
+                return None
+            out.append({"fy": row["fy"], "value": row["value"],
+                        "lo": row["lo"], "hi": row["hi"]})
+        return out
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def render_forecast_section(meta, model_dir, series=None):
-    """Series is the build_forecast_series dict. When the model artifact or
-    series is absent, render the honest not-fitted block (never fabricate)."""
-    if series is None:
+    """Render the fitted forecast from the predictions.json sidecar.
+
+    The fit script (scripts/fit_risk_models.py) runs prediction at fit time and
+    writes [{fy, value, lo, hi}] to os.path.join(model_dir, "predictions.json").
+    This renderer never imports autogluon and never live-predicts: a missing or
+    unparseable sidecar renders the honest not-fitted block. `series` is kept
+    for signature compatibility (load.py passes it) but no longer drives the
+    render.
+    """
+    points = _load_points(os.path.join(model_dir, "predictions.json"))
+    if points is None:
         return _not_fitted("request volume")
-    try:
-        TSP = _get_predictor()
-        pred = TSP.load(model_dir)
-    except Exception:
-        return _not_fitted("request volume")
-    points = _points(pred.predict(series))  # Task 5 defines _points
     rows = "".join(
         f"<tr><td>{p['fy']}</td><td>{p['value']}</td></tr>" for p in points)
     return (

@@ -1,10 +1,7 @@
 # src/risk/classify.py — risk-tier section renderer (honest until fitted)
 from __future__ import annotations
-
-
-def _get_tabular():
-    from autogluon.tabular import TabularPredictor
-    return TabularPredictor
+import json
+import os
 
 
 def _not_fitted(title):
@@ -15,24 +12,37 @@ def _not_fitted(title):
     )
 
 
-def _tiers(result):
-    """Normalise a predictor result to [{agency, tier, prob}]. List-of-dicts
-    in tests; on idc-1 the fit script adapts the real predict output to this
-    shape (or this helper learns a DataFrame of probabilities + label)."""
-    return list(result)
+def _load_tiers(path):
+    """Load the [{agency, tier, prob}] sidecar, or None when absent, unreadable
+    or malformed — never a 500, never a fabricated tier."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return None
+        out = []
+        for row in data:
+            if not isinstance(row, dict):
+                return None
+            out.append({"agency": row["agency"], "tier": row["tier"],
+                        "prob": row["prob"]})
+        return out
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def render_classify_section(meta, model_dir, features=None):
-    """features is the build_agency_features DataFrame. Honest not-fitted when
-    the artifact or features are absent (never fabricate tiers)."""
-    if features is None:
+    """Render the fitted tiers from the tiers.json sidecar.
+
+    The fit script (scripts/fit_risk_models.py) writes [{agency, tier, prob}]
+    to os.path.join(model_dir, "tiers.json"). This renderer never imports
+    autogluon and never live-predicts: a missing or unparseable sidecar renders
+    the honest not-fitted block. `features` is kept for signature compatibility
+    (load.py passes it) but no longer drives the render.
+    """
+    tiers = _load_tiers(os.path.join(model_dir, "tiers.json"))
+    if tiers is None:
         return _not_fitted("outcome mix")
-    try:
-        TP = _get_tabular()
-        pred = TP.load(model_dir)
-    except Exception:
-        return _not_fitted("outcome mix")
-    tiers = _tiers(pred.predict(features))  # Task 5 defines _tiers
     rows = "".join(
         f"<tr><td>{t['agency']}</td><td>{t['tier']}</td>"
         f"<td>{t['prob']:.0%}</td></tr>" for t in tiers)

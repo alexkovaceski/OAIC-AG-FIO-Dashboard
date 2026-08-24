@@ -292,27 +292,18 @@ Labels are strictly future: the label for agency A at FY `n` is A's
 timeliness share at FY `n+1`, the split is hard on the FY boundary, and the
 final FY (no next-FY outcome) is unlabeled and excluded from training.
 
-**Renderer contract.** The risk renderers (`src/risk/forecast.py`,
-`classify.py`) were built against `[{fy, value, lo, hi}]` / `[{agency, tier,
-prob}]` contracts. The real AutoGluon predictors do not return those shapes and
-`TimeSeriesPredictor.predict` cannot take the `build_forecast_series` dict the
-renderers pass, so the fit script does prediction **at fit time**, stores the
-adapted output as JSON sidecars (`forecast/predictions.json`,
-`classify/tiers.json`), and saves the raw predictors at
-`forecast/model/` + `classify/model/`. Because the predictor artifacts sit one
-level below the directory the renderers load, the current renderers' `load()`
-fails cleanly into the honest "not yet fitted" section — a fitted idc-1 never
-500s. To surface the fitted numbers, apply these one-line adjustments (deferred
-to a follow-up; they change the render contract from "load + predict" to "load
-+ read sidecar"):
-
-- `src/risk/forecast.py` `render_forecast_section`: replace
-  `points = _points(pred.predict(series))` with
-  `points = json.load(open(os.path.join(model_dir, "predictions.json")))`
-  (import `json`/`os`).
-- `src/risk/classify.py` `render_classify_section`: replace
-  `tiers = _tiers(pred.predict(features))` with
-  `tiers = json.load(open(os.path.join(model_dir, "tiers.json")))`.
+**Renderer contract.** The risk renderers read the fitted numbers straight
+from the JSON sidecars the fit script writes, so no follow-up adjustment is
+needed. `render_forecast_section` loads `forecast/predictions.json`
+(`[{fy, value, lo, hi}]`) and `render_classify_section` loads
+`classify/tiers.json` (`[{agency, tier, prob}]`) — the exact contracts the
+renderers were built against. A missing or unparseable sidecar renders the
+honest "not yet fitted" block. The renderers never import autogluon and never
+live-predict, so the request path stays torch-free. Artifacts are loaded at
+route time, so once `fit_risk_models.py` has written the sidecars the fitted
+numbers surface on the next `/risk.html` request — no restart required. The raw
+predictors are also saved at `forecast/model/` + `classify/model/` for
+reproducibility (git-ignored).
 
 Every number the risk page shows comes from these artifacts or the frame — the
 model never writes a digit.
