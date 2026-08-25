@@ -17,10 +17,19 @@ _SQL_PATH = _PROJECT / "src" / "server" / "migrate.sql"
 
 def _schema_columns():
     sql = _SQL_PATH.read_text(encoding="utf-8")
+    cols = set()
+    # Extract columns from CREATE TABLE block
     table = re.search(
         r"CREATE TABLE IF NOT EXISTS horizon\.foi_facts \((.*?)\);", sql, re.S
     ).group(1)
-    return {ln.strip().split()[0] for ln in table.splitlines() if ln.strip()}
+    cols.update({ln.strip().split()[0] for ln in table.splitlines() if ln.strip()})
+    # Extract columns from ALTER TABLE ADD COLUMN statements
+    for alter_match in re.finditer(
+        r"ALTER TABLE horizon\.foi_facts\s+ADD COLUMN IF NOT EXISTS\s+(\w+)",
+        sql, re.S
+    ):
+        cols.add(alter_match.group(1))
+    return cols
 
 
 def _load_facts_select_columns():
@@ -50,9 +59,9 @@ def test_load_facts_returns_canonical_dicts():
             self.sql = sql
             self.params = params
         def fetchall(self):
-            # matches the SELECT column order in load_facts (no portfolio column)
+            # matches the SELECT column order in load_facts (includes portfolio column)
             return [("_all", "Total", "2025-26", 1, "requests", "received",
-                     "total", 12359.0, True)]
+                     "total", 12359.0, True, "Health")]
 
     class FakeConn:
         def cursor(self):
@@ -71,3 +80,4 @@ def test_load_facts_returns_canonical_dicts():
     assert row["measure"] == "received" and row["bucket"] == "total"
     assert row["value"] == 12359.0 and row["derived"] is True
     assert "portfolio" in row  # canonical fact shape preserved
+    assert row["portfolio"] == "Health"  # portfolio value round-trips
