@@ -120,3 +120,41 @@ def test_disr_renamed_to_most_recent_name():
              ("2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26")}
     assert by_fy == {"2019-20": 126, "2020-21": 307, "2021-22": 182,
                      "2022-23": 182, "2023-24": 191, "2024-25": 255, "2025-26": 168}, by_fy
+
+
+def test_portfolio_captured_from_banner_rows():
+    # Stage 1 (spec S1.1): the banner rows are no longer discarded silently —
+    # each agency fact carries the portfolio its own source file assigned it
+    # that year (per-(agency, FY), no curated map).
+    facts = normalise_all()
+    real = [f for f in facts if not f["derived"]]
+    with_portfolio = [f for f in real if f["portfolio"]]
+    assert len(with_portfolio) / len(real) >= 0.95, \
+        f"only {len(with_portfolio)}/{len(real)} facts carry a portfolio"
+    # MEASURE: pin the two (banner, agency) pairs printed by the discovery
+    # script — one per file — replacing the placeholders below before running.
+    known = [
+        ("2024-25", "Administrative Appeals Tribunal", "Attorney-General's"),
+        ("2025-26", "Administrative Review Council", "Attorney-General's"),
+    ]
+    for fy, agency, portfolio in known:
+        rows = [f for f in real if f["fy"] == fy and f["agency_name"] == agency]
+        assert rows, f"no facts for {agency} in {fy}"
+        assert all(f["portfolio"] == portfolio for f in rows), \
+            f"{agency} {fy}: got {sorted({f['portfolio'] for f in rows})}"
+
+
+def test_portfolio_values_are_banners_not_agencies():
+    # A portfolio value must never be an agency name: the set of portfolios and
+    # the set of agencies are disjoint.
+    facts = normalise_all()
+    portfolios = {f["portfolio"] for f in facts if f["portfolio"]}
+    agencies = {f["agency_name"] for f in facts}
+    assert not (portfolios & agencies), sorted(portfolios & agencies)
+
+
+def test_golden_facts_have_no_portfolio():
+    facts = normalise_all()
+    for f in facts:
+        if f["derived"]:
+            assert f["portfolio"] == ""

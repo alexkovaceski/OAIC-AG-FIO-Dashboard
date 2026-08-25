@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from config import DATA_SOURCES_DIR, GOLDEN_Q1_FIGURES
 from ingest.xlsx import read_sheets
-from ingest.mog import normalise_agency, PORTFOLIO_MAP
+from ingest.mog import normalise_agency
 
 def _num(v):
     if v is None: return 0
@@ -38,11 +38,12 @@ MEASURE_COLS = {
     "finalised": (16, 17, 18),
 }
 
-def _fact(agency_key, agency_name, fy, quarter, group, measure, bucket, value, derived=False):
+def _fact(agency_key, agency_name, fy, quarter, group, measure, bucket, value,
+          derived=False, portfolio=""):
     return {"agency_key": agency_key, "agency_name": agency_name, "fy": fy,
             "quarter": quarter, "measure_group": group, "measure": measure,
             "bucket": bucket, "value": _num(value), "derived": derived,
-            "portfolio": PORTFOLIO_MAP.get(agency_name, "")}
+            "portfolio": portfolio}
 
 # header-driven P/O/T sheet parser: measures found by header substring in row 0;
 # P/O/T read by position at first-match offset of each measure group
@@ -66,32 +67,38 @@ def _parse_pot_sheet(rows, measures, fy, quarter, group):
         for substr, measure in measures.items():
             if hl.startswith(substr) and measure not in offsets:
                 offsets[measure] = (i, i + 1, i + 2)
+    portfolio = ""
     for r in rows[3:]:
         if not r[0]: continue
         name = str(r[0]).strip()
         if name.startswith("x") or name.startswith("xx"): continue
         if name.lower() == "total": continue  # Total row is a trusted value, not a fact
-        if not _is_data_row(r): continue  # portfolio banner rows (all-text, no figures)
+        if not _is_data_row(r):
+            portfolio = name  # portfolio banner row: remember, don't emit
+            continue
         key = normalise_agency(name)
         for measure, (pc, oc, tc) in offsets.items():
-            facts.append(_fact(key, key, fy, quarter, group, measure, "personal", _num(r[pc])))
-            facts.append(_fact(key, key, fy, quarter, group, measure, "other", _num(r[oc])))
-            facts.append(_fact(key, key, fy, quarter, group, measure, "total", _num(r[tc])))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "personal", _num(r[pc]), portfolio=portfolio))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "other", _num(r[oc]), portfolio=portfolio))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "total", _num(r[tc]), portfolio=portfolio))
     return facts
 
 def _agency_facts(sheet_rows, fy, quarter, measure_group):
     facts = []
+    portfolio = ""
     for r in sheet_rows[3:]:  # skip header + repeated-name rows
         if not r[0]: continue
         name = str(r[0]).strip()
         if name.startswith("x") or name.startswith("xx"): continue
         if name.lower() == "total": continue  # Total row is a trusted value, not a fact
-        if not _is_data_row(r): continue  # portfolio banner rows (all-text, no figures)
+        if not _is_data_row(r):
+            portfolio = name  # portfolio banner row: remember, don't emit
+            continue
         key = normalise_agency(name)
         for measure, (pc, oc, tc) in MEASURE_COLS.items():
-            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "personal", _num(r[pc])))
-            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "other", _num(r[oc])))
-            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "total", _num(r[tc])))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "personal", _num(r[pc]), portfolio=portfolio))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "other", _num(r[oc]), portfolio=portfolio))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "total", _num(r[tc]), portfolio=portfolio))
     return facts
 
 # map golden Q1 constants to fact measures (all bucket=total, quarter=1)
