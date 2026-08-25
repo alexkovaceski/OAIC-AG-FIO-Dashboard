@@ -70,11 +70,16 @@ Independent Health and Aged Care Pricing Authority; Asbestos Safety and
 Eradication Agency → Asbestos and Silica Safety and Eradication Agency;
 Department of Health and Aged Care → Department of Health, Disability and
 Ageing; Net Zero Economy Agency → Net Zero Economy Authority.
-**Decision: the 2021 courts merger maps both predecessors**
-(Federal Circuit Court of Australia, Family Court of Australia) **to
-"Federal Circuit and Family Court of Australia"**, consistent with
-OAIC's documented most-recent-name convention; the aggregation is
-disclosed in data-notes. Each entry gets a test asserting the old name
+**Decision (superseded 2026-08-25 during implementation): the 2021
+courts merger keeps all entities distinct, with disclosure.** The
+original decision (map both predecessors to the merged court) assumed a
+single merged row; the source actually publishes Division 1 and
+Division 2 as separate active entities from 2021-22, and OAIC's own
+data-notes state merger-created entities are represented as new
+entities. Predecessor courts and both divisions therefore stay separate,
+and the topology is explained in the data-notes Platform reconciliation
+section. Alex ruled "keep distinct + disclose" when the conflict
+surfaced. Each entry gets a test asserting the old name
 yields zero distinct agency keys.
 
 **S1.3 Transfer channel (B5 data half) + totals note (A2).** New measure
