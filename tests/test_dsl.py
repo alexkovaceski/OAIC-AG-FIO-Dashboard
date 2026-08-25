@@ -92,14 +92,12 @@ def test_by_portfolio_excludes_total():
     r = query_dataset(f, "by_portfolio", {"measure": "received", "fy": "2025-26", "bucket": "total"})
     # portfolio data comes from banner-row capture (Tasks 1-2); some agencies are mapped,
     # some are not. The result excludes the golden "Total" pseudo-agency grand total
-    # (46,777), counting only per-agency facts and summing mapped + unmapped values.
-    assert "portfolios" in r
-    assert len(r["portfolios"]) > 0
-    assert r.get("unmapped_agency_count") is not None
-    # verify the golden Total is excluded: the per-agency total (34,418) is greater
-    # than the sum of mapped portfolios, confirming unmapped agencies exist
+    # (46,777), counting only per-agency facts and summing mapped values only.
+    # Measured as of this test write: 14 portfolios, 11 unmapped agencies, mapped_sum=34303.
+    assert len(r["portfolios"]) == 14
+    assert r.get("unmapped_agency_count") == 11
     mapped_sum = sum(p["value"] for p in r["portfolios"])
-    assert mapped_sum < 34418  # unmapped agencies bring the total to 34,418
+    assert mapped_sum == 34303
 
 
 def test_kpis_op_carries_basis():

@@ -33,3 +33,18 @@ def test_by_portfolio_aggregates_mapped_facts():
     assert out["portfolios"] == [{"portfolio": "Health", "value": 30},
                                  {"portfolio": "Treasury", "value": 5}]
     assert out.get("unmapped_agency_count") == 0
+
+
+def test_by_portfolio_excludes_golden_total():
+    """Regression: the golden 'Total' pseudo-agency must be filtered out,
+    even when it carries a portfolio. This test verifies the exclusion filter
+    (agency_name.lower() != "total") works, not the unmapped-split fallback."""
+    frame = Frame([_fact("A", "2024-25", 10, "Health"),
+                   # golden Total with a portfolio should be excluded
+                   _fact("Total", "2024-25", 1000, "Health"),
+                   _fact("B", "2024-25", 20, "Treasury")])
+    out = query_dataset(frame, "by_portfolio", {"fy": "2024-25"})
+    # Golden Total (1000) must not be included in Health's sum; results sorted by value desc
+    assert out["portfolios"] == [{"portfolio": "Treasury", "value": 20},
+                                 {"portfolio": "Health", "value": 10}]
+    assert out.get("unmapped_agency_count") == 0
