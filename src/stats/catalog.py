@@ -207,6 +207,11 @@ def _figure(frame, key):
     if spec["kind"] == "ratio_trend":
         nums = [_fy_series(frame, m) for m in spec["numerators"]]
         den = _fy_series(frame, spec["denominator"])
+        if not den or any(not s for s in nums):
+            # legacy zip semantics: an empty operand series truncates the
+            # whole ratio to [] — and [] is what _figure_has_data needs to
+            # show the honest no-data note instead of an all-null ghost line
+            return {"categories": cats, "series": [{"name": spec["name"], "values": []}]}
         values = []
         for i in range(len(cats)):
             parts = [s[i] if i < len(s) else None for s in nums]

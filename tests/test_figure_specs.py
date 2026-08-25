@@ -57,3 +57,15 @@ def test_top_n_spec_takes_fy_parameter():
     for key in ("received_top20", "decided_top20"):
         assert FIGURE_SPECS[key]["default_fy"] == LATEST_COMPLETE_FY
         assert FIGURE_SPECS[key]["n"] == 20
+
+
+def test_ratio_trend_with_empty_operand_yields_empty_values():
+    # legacy zip shape: an absent measure truncates the ratio to [], which is
+    # what keeps _figure_has_data honest (a [None,...] list would ghost-render)
+    facts = [{"agency_key": "A", "agency_name": "A", "fy": "2023-24",
+              "quarter": None, "measure_group": "requests", "measure": "decided",
+              "bucket": "total", "value": 10.0, "derived": False, "portfolio": ""}]
+    frame = Frame(facts)
+    # numerator 'refused' has zero rows in this frame
+    fig = foi_stats(frame, "refused_pct_trend")["value"]
+    assert fig["series"][0]["values"] == []
