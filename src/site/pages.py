@@ -26,6 +26,11 @@ _DATA_NOTES = _CORPUS / "data-notes.md"
 _CHART_SCRIPTS = ('<script src="/assets/echarts.common.min.js"></script>\n'
                   '<script src="/assets/foi-charts.js"></script>')
 
+# provenance caption for the transcribed golden Q1 figures (spec S1.4)
+GOLDEN_SOURCE = ("Transcribed from the OAIC Power BI report, Q1 2025-26 "
+                 "(Jul–Sep 2025); not derivable from the cumulative "
+                 "Q1–Q3 workbook.")
+
 # page_key -> the figure keys that page's chartboxes reference (the keys the
 # page's window.__pageData blob ships). Pages without charts ship no figures.
 PAGE_FIGURE_KEYS = {
@@ -204,12 +209,13 @@ def _bar(cat, name, v, colour, row_idx, data_max=None):
             f'</div>')
 
 
-def _kpi(label, value_html, basis=None, title=None) -> str:
-    """A KPI tile: label, value, and the basis label when one is available."""
+def _kpi(label, value_html, basis=None, title=None, source=None) -> str:
+    """A KPI tile: label, value, basis label, and provenance line when given."""
     basis_html = f'<span class="basis">{html.escape(str(basis))}</span>' if basis else ""
     title_html = f'<span class="tlabel">{html.escape(str(title))}</span>' if title else ""
+    source_html = f'<span class="source">{html.escape(str(source))}</span>' if source else ""
     return (f'<div class="kpi">{title_html}<span class="label">{label}</span>'
-            f'<span class="value">{value_html}</span>{basis_html}</div>')
+            f'<span class="value">{value_html}</span>{basis_html}{source_html}</div>')
 
 
 def _kpis(frame, keys) -> str:
@@ -226,22 +232,25 @@ def _kpis(frame, keys) -> str:
         else:
             value_html = html.escape(str(value))
             basis = _basis_label(stat)
+        source = GOLDEN_SOURCE if (basis and "single quarter" in str(basis)) else None
         cells.append(_kpi(_STAT_LABELS.get(key, key.replace("_", " ")),
-                          value_html, basis))
+                          value_html, basis, source=source))
     return f'<div class="kpis">{chr(10).join(cells)}</div>'
 
 
-def _trend_section(title, fig, chart_key) -> str:
+def _trend_section(title, fig, chart_key, source=None) -> str:
     basis = _basis_label({"basis": "fy"})
+    source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="basis">{basis}</p>'
+            f'<p class="basis">{basis}</p>{source_html}'
             f'{_chart_container(chart_key, fig)}</section>')
 
 
-def _top20_section(title, fig, chart_key) -> str:
+def _top20_section(title, fig, chart_key, source=None) -> str:
     basis = _basis_label({"basis": "fy"})
+    source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="basis">{basis}</p>'
+            f'<p class="basis">{basis}</p>{source_html}'
             f'{_chart_container(chart_key, fig)}</section>')
 
 
@@ -280,23 +289,28 @@ def _page_at_a_glance(frame) -> str:
     basis_sq = _basis_label(g("requests_received_q1"))
     share = lambda k: f"{g(k)['value']}% of decisions"
     kpis = ("<div class=\"kpis\">"
-            + _kpi("Requests received", _q1_total(frame, "received"), basis_sq)
-            + _kpi("Requests finalised", _q1_total(frame, "finalised"), basis_sq)
-            + _kpi("Requests decided", _q1_total(frame, "decided"), basis_sq)
+            + _kpi("Requests received", _q1_total(frame, "received"), basis_sq,
+                   source=GOLDEN_SOURCE)
+            + _kpi("Requests finalised", _q1_total(frame, "finalised"), basis_sq,
+                   source=GOLDEN_SOURCE)
+            + _kpi("Requests decided", _q1_total(frame, "decided"), basis_sq,
+                   source=GOLDEN_SOURCE)
             + _kpi("Decided within statutory", _q1_total(frame, "within_statutory"),
-                   basis_sq, title=share("within_statutory_pct_q1"))
+                   basis_sq, title=share("within_statutory_pct_q1"),
+                   source=GOLDEN_SOURCE)
             + _kpi("Granted in full", _q1_total(frame, "granted_full"), basis_sq,
-                   title=share("granted_full_share_q1"))
+                   title=share("granted_full_share_q1"), source=GOLDEN_SOURCE)
             + _kpi("Granted in part", _q1_total(frame, "granted_part"), basis_sq,
-                   title=share("granted_part_share_q1"))
+                   title=share("granted_part_share_q1"), source=GOLDEN_SOURCE)
             + _kpi("Refused", _q1_total(frame, "refused"), basis_sq,
-                   title=share("refused_share_q1"))
-            + _kpi("Withdrawn", _q1_total(frame, "withdrawn"), basis_sq)
+                   title=share("refused_share_q1"), source=GOLDEN_SOURCE)
+            + _kpi("Withdrawn", _q1_total(frame, "withdrawn"), basis_sq,
+                   source=GOLDEN_SOURCE)
             + "</div>")
     kpis += ("<div class=\"kpis\">"
              + _kpi("Granted full / part / refused (share of decisions)",
                     f"{g('granted_full_share_q1')['value']}/{g('granted_part_share_q1')['value']}/{g('refused_share_q1')['value']}%",
-                    _basis_label(g('granted_full_share_q1')))
+                    _basis_label(g('granted_full_share_q1')), source=GOLDEN_SOURCE)
              + "</div>")
     body = f"""
     <h1>FOI at a glance</h1>
@@ -307,7 +321,9 @@ def _page_at_a_glance(frame) -> str:
     {_filters_bar(frame, "at-a-glance")}
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
-                    "requests_received_trend")}
+                    "requests_received_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("at-a-glance")}
     {_page_data_script(frame, "at-a-glance")}"""
     return chrome("FOI at a glance", body,
@@ -323,7 +339,9 @@ def _page_requests_received(frame) -> str:
     {_filters_bar(frame, "requests-received")}
     {_kpis(frame, ["requests_received_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
-                    "requests_received_trend")}
+                    "requests_received_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("requests-received")}
     {_page_data_script(frame, "requests-received")}"""
     return chrome("Requests received", body,
@@ -337,7 +355,8 @@ def _page_key_agency_contributions_received(frame) -> str:
     <p class="intro">Top 20 agencies by FOI requests received in FY2024-25
     (the latest complete financial year in the annual files).</p>
     {_filters_bar(frame, "key-agency-contributions-received")}
-    {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20")}
+    {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20",
+                    source="Source: agency-foi-data-2024-25.xlsx")}
     {_lineage_panel("key-agency-contributions-received")}
     {_page_data_script(frame, "key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
@@ -355,7 +374,9 @@ def _page_requests_finalised(frame) -> str:
     {_filters_bar(frame, "requests-finalised")}
     {_kpis(frame, ["requests_finalised_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
-                    "requests_finalised_trend")}
+                    "requests_finalised_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("requests-finalised")}
     {_page_data_script(frame, "requests-finalised")}"""
     return chrome("Requests finalised", body,
@@ -383,7 +404,8 @@ def _page_key_agency_contributions_decided(frame) -> str:
     <h1>Key agency contributions — requests decided</h1>
     <p class="intro">Top 20 agencies by FOI requests decided in the latest
     complete financial year in the annual files.</p>
-    {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20")}
+    {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20",
+                    source="Source: agency-foi-data-2024-25.xlsx")}
     {_lineage_panel("key-agency-contributions-decided")}
     {_page_data_script(frame, "key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",

@@ -293,12 +293,21 @@ def test_tailwind_ink2_token_passes_aa_on_page():
 
 
 def test_no_outbound_oaic_links_or_branding():
+    # S1.4 (spec 2026-08-25, B15) carved a narrow, deliberate exception: the
+    # golden-Q1 provenance caption legitimately names its source ("Transcribed
+    # from the OAIC Power BI report...") inside a .source citation — that is
+    # sourcing, not branding. Strip .source spans/paragraphs before checking;
+    # everywhere else (masthead, nav, footer, body copy) "OAIC" must still stay
+    # out of the rebranded Bluebird product, and no outbound OAIC link or AG
+    # copyright survives anywhere, source captions included.
     for key, html in _pages().items():
         assert "oaic.gov.au" not in html, f"{key}: outbound OAIC link remains"
+        stripped = re.sub(r'<(span|p) class="source">.*?</\1>', "", html, flags=re.S)
         if key == "data-notes":
-            assert "OAIC" in html  # verbatim corpus keeps the publisher's name
+            assert "OAIC" in stripped  # verbatim corpus keeps the publisher's name
         else:
-            assert "OAIC" not in html, f"{key}: OAIC name remains outside corpus"
+            assert "OAIC" not in stripped, \
+                f"{key}: OAIC name remains outside corpus/provenance caption"
         assert "© Commonwealth of Australia" not in html, f"{key}: AG copyright"
 
 
@@ -369,6 +378,24 @@ def test_data_notes_platform_reconciliation_section():
     assert "Platform reconciliation notes" in page
     assert "34,418" in page and "34,810" in page and "392" in page
     assert "Federal Circuit and Family Court" in page
+
+
+GOLDEN_SOURCE_SNIPPET = "Transcribed from the OAIC Power BI report, Q1 2025-26"
+
+
+def test_single_quarter_kpis_carry_transcription_source():
+    # B15 (spec S1.4): every basis-single-quarter tile says where the number
+    # comes from — it is not derivable from the cumulative workbook.
+    pages = _pages()
+    for key in ("at-a-glance", "decision-outcomes", "timeliness"):
+        assert GOLDEN_SOURCE_SNIPPET in pages[key], \
+            f"{key} lacks the golden-source caption"
+
+
+def test_fy_figure_cards_name_their_source():
+    pages = _pages()
+    assert "agency-foi-data-2024-25.xlsx" in pages["key-agency-contributions-received"]
+    assert "data.gov.au FOI statistics workbooks" in pages["requests-received"]
 
 
 def test_pilot_seed_script_shape():

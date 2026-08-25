@@ -208,6 +208,9 @@ h1 {
 .kpi .tlabel { font-size: 0.78rem; color: var(--muted); }
 .kpi .value { font-size: 1.9rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .kpi .basis { font-size: 0.78rem; color: var(--ink-2); border-top: 1px dashed var(--border); padding-top: 0.3rem; margin-top: 0.3rem; }
+.kpi .source, .figure-card .source {
+  display: block; font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+}
 
 /* --- figure cards ---------------------------------------------------------- */
 
