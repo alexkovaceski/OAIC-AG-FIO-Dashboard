@@ -125,12 +125,22 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         if params.get("fy"): rows = [f for f in rows if f["fy"] == params["fy"]]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
+        mapped = [f for f in rows if f.get("portfolio")]
+        unmapped_agencies = {f["agency_name"] for f in rows if not f.get("portfolio")}
+        if rows and not mapped:
+            # fail-loud: an all-unmapped slice would otherwise collapse into one
+            # plausible-looking "Unmapped" bucket (spec S1.1)
+            return {"error": "portfolio mapping unavailable for this slice; "
+                             "no fact carries a portfolio — re-ingest with the "
+                             "banner-row capture normaliser"}
         aggs = {}
-        for f in rows:
-            p = f.get("portfolio") or "Unmapped"
-            aggs.setdefault(p, 0.0)
-            aggs[p] += f["value"]
-        return {"basis": params.get("window_mode", "fy"), "portfolios": [{"portfolio": p, "value": round(v)} for p, v in sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)]}
+        for f in mapped:
+            aggs.setdefault(f["portfolio"], 0.0)
+            aggs[f["portfolio"]] += f["value"]
+        return {"basis": params.get("window_mode", "fy"),
+                "unmapped_agency_count": len(unmapped_agencies),
+                "portfolios": [{"portfolio": p, "value": round(v)}
+                               for p, v in sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)]}
     if op == "kpis":
         # every KPI tile carries its basis — basis is a field of the output
         return {k: {"value": foi_stats(frame, k)["value"],
