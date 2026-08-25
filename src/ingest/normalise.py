@@ -11,6 +11,25 @@ def _num(v):
     try: return float(str(v).strip().replace(",", ""))
     except: return 0
 
+
+def _is_data_row(r):
+    """True if a sheet row carries real data: at least one numeric cell after
+    column 0. Portfolio banner rows (merged section headers) repeat the portfolio
+    name across the data columns and parse as all-text; skipping them drops the
+    phantom zero agencies that otherwise pollute the agency filter. A genuinely
+    zero-request agency still has numeric 0s, so it is kept."""
+    for c in r[1:]:
+        if isinstance(c, (int, float)):
+            return True
+        if c is None:
+            continue
+        try:
+            float(str(c).strip().replace(",", ""))
+            return True
+        except ValueError:
+            continue
+    return False
+
 # column layout (current file): 0 Agency, 1-3 OnHand(P,O,T), 4-6 RecvApplicant(P,O,T),
 # 7-9 Transfer(P,O,T), 10-12 TotalReceived(P,O,T), 13-15 %share, 16-18 Finalised(P,O,T),
 # 19 onhand31mar, 20-21 onhand30jun
@@ -52,11 +71,12 @@ def _parse_pot_sheet(rows, measures, fy, quarter, group):
         name = str(r[0]).strip()
         if name.startswith("x") or name.startswith("xx"): continue
         if name.lower() == "total": continue  # Total row is a trusted value, not a fact
+        if not _is_data_row(r): continue  # portfolio banner rows (all-text, no figures)
         key = normalise_agency(name)
         for measure, (pc, oc, tc) in offsets.items():
-            facts.append(_fact(key, name, fy, quarter, group, measure, "personal", _num(r[pc])))
-            facts.append(_fact(key, name, fy, quarter, group, measure, "other", _num(r[oc])))
-            facts.append(_fact(key, name, fy, quarter, group, measure, "total", _num(r[tc])))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "personal", _num(r[pc])))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "other", _num(r[oc])))
+            facts.append(_fact(key, key, fy, quarter, group, measure, "total", _num(r[tc])))
     return facts
 
 def _agency_facts(sheet_rows, fy, quarter, measure_group):
@@ -66,11 +86,12 @@ def _agency_facts(sheet_rows, fy, quarter, measure_group):
         name = str(r[0]).strip()
         if name.startswith("x") or name.startswith("xx"): continue
         if name.lower() == "total": continue  # Total row is a trusted value, not a fact
+        if not _is_data_row(r): continue  # portfolio banner rows (all-text, no figures)
         key = normalise_agency(name)
         for measure, (pc, oc, tc) in MEASURE_COLS.items():
-            facts.append(_fact(key, name, fy, quarter, measure_group, measure, "personal", _num(r[pc])))
-            facts.append(_fact(key, name, fy, quarter, measure_group, measure, "other", _num(r[oc])))
-            facts.append(_fact(key, name, fy, quarter, measure_group, measure, "total", _num(r[tc])))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "personal", _num(r[pc])))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "other", _num(r[oc])))
+            facts.append(_fact(key, key, fy, quarter, measure_group, measure, "total", _num(r[tc])))
     return facts
 
 # map golden Q1 constants to fact measures (all bucket=total, quarter=1)

@@ -89,3 +89,34 @@ def test_six_figures_no_longer_empty():
         fig = foi_stats(frame, key)["value"]
         assert fig["series"], f"{key} series empty"
         assert any(v is not None for s in fig["series"] for v in s["values"]), f"{key} all None"
+
+
+def test_portfolio_banner_rows_skipped():
+    # the source sheets carry portfolio banner rows (merged section headers)
+    # whose data columns repeat the portfolio name as text. They used to parse
+    # as phantom zero-request agencies and pollute the agency filter. They must
+    # not appear as agencies at all.
+    facts = normalise_all()
+    agencies = {f["agency_name"] for f in facts}
+    for banner in ("Industry, Science and Resources",
+                   "Industry, Science, Energy and Resources",
+                   "Industry, Innovation and Science",
+                   "Agriculture, Water and the Environment"):
+        assert banner not in agencies, f"banner row parsed as an agency: {banner}"
+
+
+def test_disr_renamed_to_most_recent_name():
+    # DISR was renamed in the 2022 MoG changes (the "Energy" portfolio moved
+    # out). The data notes say renamed agencies appear under their most recent
+    # name, so the pre-2022-23 spelling must resolve to the current one and DISR
+    # must read as one continuous series across the whole period.
+    facts = normalise_all()
+    agencies = {f["agency_name"] for f in facts}
+    assert "Department of Industry, Science, Energy and Resources" not in agencies, \
+        "old DISR spelling should resolve to the current name"
+    disr = [f for f in facts if f["agency_name"] == "Department of Industry, Science and Resources"
+            and f["measure"] == "received" and f["bucket"] == "total"]
+    by_fy = {fy: round(sum(f["value"] for f in disr if f["fy"] == fy)) for fy in
+             ("2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26")}
+    assert by_fy == {"2019-20": 126, "2020-21": 307, "2021-22": 182,
+                     "2022-23": 182, "2023-24": 191, "2024-25": 255, "2025-26": 168}, by_fy

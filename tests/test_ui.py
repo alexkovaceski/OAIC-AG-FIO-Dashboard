@@ -292,6 +292,15 @@ def test_masthead_is_bluebird_foi_insights():
         assert 'class="wordmark-product">FOI INSIGHTS</span>' in html, "masthead missing FOI INSIGHTS"
 
 
+def test_masthead_has_bluebird_logo():
+    # the Horizon masthead carries the Bluebird mark (bb-logo.png) before the
+    # wordmark; the FOI site must match.
+    from pathlib import Path
+    assert Path("src/site/assets/bb-logo.png").exists(), "bb-logo.png not vendored"
+    for html in _pages().values():
+        assert 'class="bb-mark" src="/assets/bb-logo.png"' in html, "masthead missing bb-mark logo"
+
+
 def test_masthead_risk_link_only_for_internal():
     from site.templates import _user_nav
     assert "Risk" in _user_nav({"role": "internal", "username": "a"})

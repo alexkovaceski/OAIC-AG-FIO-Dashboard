@@ -79,9 +79,12 @@ a { color: var(--link); }
   border-bottom: 1px solid var(--border);
 }
 
-.logo { display: flex; align-items: baseline; }
+.logo { display: flex; align-items: center; gap: 10px; }
 
-.wordmark { text-decoration: none; color: inherit; }
+/* the Bluebird mark — same 34x34 flex-none as the Horizon masthead */
+.bb-mark { width: 34px; height: 34px; flex: none; border-radius: 6px; }
+
+.wordmark { text-decoration: none; color: inherit; display: flex; align-items: baseline; gap: 10px; }
 
 .wordmark-name {
   font-family: var(--sans);

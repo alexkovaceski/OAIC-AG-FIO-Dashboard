@@ -138,7 +138,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header flex items-center justify-between flex-wrap gap-2 px-8 py-3">
-  <div class="logo"><a class="wordmark" href="/"><span class="wordmark-name">Bluebird</span><span class="wordmark-product">FOI INSIGHTS</span></a></div>
+  <div class="logo"><img class="bb-mark" src="/assets/bb-logo.png" alt="Bluebird" width="34" height="34"><a class="wordmark" href="/"><span class="wordmark-name">Bluebird</span><span class="wordmark-product">FOI INSIGHTS</span></a></div>
   <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active)}</nav>
   {_user_nav(user)}
 </header>
