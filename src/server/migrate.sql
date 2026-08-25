@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS horizon.foi_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_foi_facts_measure ON horizon.foi_facts (dataset_id, measure, bucket);
 
+-- Stage 1 (portfolio dimension): source-file portfolio per fact. Existing
+-- rows default to ''; new ingests write the banner-row portfolio.
+ALTER TABLE horizon.foi_facts
+  ADD COLUMN IF NOT EXISTS portfolio TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS horizon.lineage_artifacts (
     id            BIGSERIAL PRIMARY KEY,
     artifact_type TEXT NOT NULL,

@@ -76,11 +76,12 @@ def ingest_facts(facts: list[dict], *, conn=None,
                 cur.execute(
                     "INSERT INTO horizon.foi_facts "
                     "(dataset_id, agency_key, agency_name, fy, quarter, "
-                    " measure_group, measure, bucket, value, derived, row_hash) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    " measure_group, measure, bucket, value, derived, portfolio, row_hash) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (dataset_id, row["agency_key"], row["agency_name"], row["fy"],
                      row["quarter"], row["measure_group"], row["measure"],
                      row["bucket"], row["value"], bool(row["derived"]),
+                     row.get("portfolio") or "",
                      hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()))
         conn.commit()
         return dataset_id
@@ -107,7 +108,7 @@ def load_facts(dataset_id: int, *, conn=None) -> list[dict] | None:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT agency_key, agency_name, fy, quarter, measure_group, "
-                "measure, bucket, value, derived "
+                "measure, bucket, value, derived, portfolio "
                 "FROM horizon.foi_facts WHERE dataset_id = %s "
                 "ORDER BY agency_key, fy, quarter, measure_group, measure, bucket",
                 (dataset_id,))
@@ -115,7 +116,7 @@ def load_facts(dataset_id: int, *, conn=None) -> list[dict] | None:
         return [
             {"agency_key": r[0], "agency_name": r[1], "fy": r[2], "quarter": r[3],
              "measure_group": r[4], "measure": r[5], "bucket": r[6],
-             "value": float(r[7]), "derived": bool(r[8]), "portfolio": ""}
+             "value": float(r[7]), "derived": bool(r[8]), "portfolio": r[9] or ""}
             for r in rows
         ]
     except psycopg2.OperationalError:
