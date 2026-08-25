@@ -50,12 +50,21 @@ BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")
 _ASSETS = Path(__file__).resolve().parent / "assets"
 
 
+def _asset_digest(name: str) -> str:
+    return hashlib.sha256((_ASSETS / name).read_bytes()).hexdigest()[:12]
+
+
 def _css_link(rel: str, name: str) -> str:
     """A versioned stylesheet link: a ?v= content-hash suffix so a CSS change
     changes the URL and any browser holding the pre-fix cached sheet re-fetches
     (the site serves stylesheets with Cache-Control: public, max-age=14400)."""
-    digest = hashlib.sha256((_ASSETS / name).read_bytes()).hexdigest()[:12]
-    return f'<link rel="{rel}" href="/assets/{name}?v={digest}">'
+    return f'<link rel="{rel}" href="/assets/{name}?v={_asset_digest(name)}">'
+
+
+def _asset_link(name: str) -> str:
+    """A versioned script tag — same content-hash contract as _css_link, so a
+    JS behaviour change can never outlive a deploy in a browser cache."""
+    return f'<script src="/assets/{name}?v={_asset_digest(name)}"></script>'
 
 
 def _page_group(page_key: str) -> str | None:

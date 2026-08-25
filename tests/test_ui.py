@@ -6,6 +6,7 @@ carries a `.chartbox` mount point plus a per-page `window.__pageData` JSON blob
 options). No fabricated figures: an uncomputable measure stays out of the blob
 as an empty series, never a flat-zero line.
 """
+import json
 import re
 import sys
 
@@ -410,3 +411,38 @@ def test_pilot_seed_script_shape():
         "pilot04.user", "pilot05.user"]
     assert all(a["role"] == "internal" for a in ACCOUNTS)
     assert callable(reset_main)
+
+
+def test_script_tags_carry_content_hash():
+    # B14 residual (spec S1.6): JS gets the same ?v= content-hash the CSS got
+    # in c58a325 — a behaviour change must never serve from a stale cache.
+    page = _pages()["at-a-glance"]
+    for name in ("echarts.common.min.js", "foi-charts.js"):
+        assert re.search(rf'src="/assets/{re.escape(name)}\?v=[0-9a-f]{{12}}"', page), \
+            f"{name} script tag is unversioned"
+
+
+def test_type_dropdown_has_no_total_option():
+    # B3 (decision 2026-08-25): 'All types' already yields total-basis figures;
+    # a separate 'total' option reads as duplication.
+    page = _pages()["requests-received"]
+    assert '<option value="total">' not in page
+    assert '<option value="">All types</option>' in page
+
+
+def test_how_to_use_does_not_claim_filters_are_pending():
+    page = _pages()["how-to-use"]
+    assert "the filters become live in the interactive build" not in page
+    assert "live on the chart pages" in page
+
+
+def test_filters_blob_exposes_portfolios():
+    # spec S1.1: the platform-derived filter options include the portfolio
+    # dimension (the dropdown itself ships with the Stage-2 engine).
+    page = _pages()["requests-received"]
+    m = re.search(r"window\.__pageData = (.*?);</script>", page, re.S)
+    assert m, "no __pageData blob"
+    blob = json.loads(m.group(1).replace("<\\/", "</").replace("\\u002d\\u002d", "--"))
+    portfolios = blob["filters"].get("portfolios")
+    assert portfolios and len(portfolios) >= 10, portfolios
+    assert all(p for p in portfolios)

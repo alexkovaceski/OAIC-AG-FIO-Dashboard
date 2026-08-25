@@ -17,14 +17,14 @@ import re
 from pathlib import Path
 
 from stats.catalog import foi_stats, FIG_CAPTIONS
-from site.templates import chrome
+from site.templates import chrome, _asset_link
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
 _DATA_NOTES = _CORPUS / "data-notes.md"
 
 # script tags every chart page loads, rendered before </body> by chrome()
-_CHART_SCRIPTS = ('<script src="/assets/echarts.common.min.js"></script>\n'
-                  '<script src="/assets/foi-charts.js"></script>')
+_CHART_SCRIPTS = (_asset_link("echarts.common.min.js") + "\n"
+                  + _asset_link("foi-charts.js"))
 
 # provenance caption for the transcribed golden Q1 figures (spec S1.4)
 GOLDEN_SOURCE = ("Transcribed from the OAIC Power BI report, Q1 2025-26 "
@@ -118,6 +118,7 @@ def _filters_blob(frame) -> dict:
         "agencies": sorted({f["agency_name"] for f in frame.facts}),
         "types": sorted({f["bucket"] for f in frame.facts}),
         "fys": sorted({f["fy"] for f in frame.facts}),
+        "portfolios": sorted({f["portfolio"] for f in frame.facts if f["portfolio"]}),
     }
 
 
@@ -156,9 +157,10 @@ def _filters_bar(frame, page_key) -> str:
                 f'class="filter-select text-sm">{chr(10).join(opts)}</select></label>')
 
     agency = _select("Agency", "agency", f["agencies"], "All agencies")
-    # the type options are the platform's own buckets; "total" is a valid
-    # selection — it is the bucket every figure is derived from
-    type_opts = [t for t in ("personal", "other", "total") if t in types]
+    # personal/other are the drill-down buckets; the platform's total-basis
+    # figures are what "All types" (no filter) already shows, so a separate
+    # "total" option would duplicate it (B3, decision 2026-08-25).
+    type_opts = [t for t in ("personal", "other") if t in types]
     typ = _select("Type", "type", type_opts, "All types")
     fy = _select("FY", "fy", f["fys"], "All FYs")
     return (f'<div class="filters flex flex-wrap items-center gap-3" '
@@ -536,9 +538,10 @@ def _page_how_to_use() -> str:
     <em>No published data for this measure</em> — a flat zero line would be a
     fabricated number. A year without a figure in a series renders as "—".</p>
     <h2>Filters</h2>
-    <p>The filters row (portfolio / agency · type (personal/other) · FY or
-    quarter) is the drill-down surface. In this static POC the pages render
-    the full dataset; the filters become live in the interactive build.</p>
+    <p>The filters row (agency &middot; type (personal/other) &middot; FY) is
+    live on the chart pages: selections re-derive the charts from the
+    platform's own published facts. Where a selection has no published
+    aggregate, the page says so instead of inventing one.</p>
     <h2>Data notes</h2>
     <p>The <a href="/data-notes.html">Data notes and disclaimer</a> page carries
     the publisher's definitional notes verbatim.</p>
@@ -692,7 +695,7 @@ def chat_page(user) -> str:
     of decisions were refused?", "which agencies decide the most requests?".</p>
     """
     return chrome("Chat", body, page_key=None, user=user,
-                  scripts='<script src="/assets/chat.js"></script>')
+                  scripts=_asset_link("chat.js"))
 
 
 def reports_page(user) -> str:
@@ -711,4 +714,4 @@ def reports_page(user) -> str:
     decisions refused", "timeliness within statutory".</p>
     """
     return chrome("Reports", body, page_key=None, user=user,
-                  scripts='<script src="/assets/report.js"></script>')
+                  scripts=_asset_link("report.js"))
