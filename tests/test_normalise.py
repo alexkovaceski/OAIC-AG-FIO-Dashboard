@@ -187,3 +187,14 @@ def test_mog_renames_resolve_to_most_recent_name():
                 "Department of Health, Disability and Ageing",
                 "Net Zero Economy Authority"):
         assert new in agencies, f"current name missing: {new}"
+
+
+def test_received_transfer_measure_ingested():
+    # B5 (spec S1.3): the on-transfer channel (cols 7-9) is a real measure.
+    # FY2024-25 transfer total is 697 — the sheet's own Total row transfer
+    # value (427 P + 270 O = 697 T), verified against the source 2026-08-25.
+    facts = normalise_all()
+    rows = [f for f in facts if f["measure"] == "received_transfer"
+            and f["bucket"] == "total" and f["fy"] == "2024-25"]
+    assert rows, "no received_transfer facts for 2024-25"
+    assert round(sum(f["value"] for f in rows)) == 697

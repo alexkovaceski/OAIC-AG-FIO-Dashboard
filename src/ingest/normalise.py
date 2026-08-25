@@ -34,7 +34,8 @@ def _is_data_row(r):
 # 7-9 Transfer(P,O,T), 10-12 TotalReceived(P,O,T), 13-15 %share, 16-18 Finalised(P,O,T),
 # 19 onhand31mar, 20-21 onhand30jun
 MEASURE_COLS = {
-    "received": (4, 5, 6),    # personal, other, total
+    "received": (4, 5, 6),            # personal, other, total
+    "received_transfer": (7, 8, 9),   # on transfer from another agency
     "finalised": (16, 17, 18),
 }
 
