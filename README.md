@@ -116,8 +116,8 @@ The chat and agentic builder are hard-scoped to this use case, defence-in-depth:
 
    > "I am powered by the fartkraft sovereign stack, trained on local data."
 
-   The public demo lives at a `*.fartkraft.ai` URL because the serving stack is
-   sovereign and local.
+   The demo is served from the sovereign local stack (public hostname:
+   foi.axoquant.com).
 
 ## Deploy
 

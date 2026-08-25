@@ -9,7 +9,7 @@ def test_deploy_probe_checks_the_five_pilot_accounts():
         assert name in src, f"probe missing {name}"
     for old in ("foi.public", "foi.pilot", "foi.internal", "foi.officer"):
         assert old not in src, f"probe still references retired account {old}"
-    assert "/5" in src and '"5"' in src, "probe denominator still /4"
+    assert "(5/5)" in src and "/5; run" in src, "probe denominator still /4"
 
 
 def test_readme_advertises_the_live_hostname():

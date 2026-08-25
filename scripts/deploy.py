@@ -110,8 +110,6 @@ def main() -> int:
         # One-shot read-only probe: unit state, env file presence, model pin,
         # the AutoGluon risk fit, the role access tier, and the pilot accounts.
         # Runs through the remote shell; no process substitution (plain POSIX).
-        # Pilot accounts: five seeded (pilot01.user..pilot05.user); the shell
-        # comparison below checks the live count against "5", not "4".
         cmd = (
             f"systemctl is-active {UNIT}; "
             f"test -f {ENV_FILE} && echo 'env file: present' || echo 'env file: MISSING'; "
