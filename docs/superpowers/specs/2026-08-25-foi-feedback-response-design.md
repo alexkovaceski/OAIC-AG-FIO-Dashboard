@@ -199,8 +199,7 @@ agentic layer.
   implies growing backlog, from what `src/risk` already computes.
 
 **S3.3 Reviewer accounts.** Named accounts `amna.saleem` and
-`alexia.<surname>` (surname supplied by Alex at execution; internal
-role) via the existing
+`alexia.hunter` (internal role) via the existing
 `create_accounts(conn, accounts)` helper — pilot01–05 stay reserved for
 the pilot cohort. Passwords are delivered by Alex out of band, never in
 the reply and never in committed files.
