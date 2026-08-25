@@ -1,12 +1,14 @@
 """templates — shared Bluebird FOI Insights page chrome (header nav, sidenav, footer).
 
-The chrome is the Bluebird FOI Insights identity: a dark Horizon masthead with the top-level
-nav (Overview / Requests / Decisions / Timeliness / Reference — all internal,
-the POC must not link out to the source agency site), a breadcrumb, a two-column layout
-of sidenav + main, and a footer with the Acknowledgement of Country, in-site
-legal links, and the identity stovepipe (fartkraft sovereign stack). The
-stovepipe rides in the footer on every page so it is never out of sight, exactly
-as the Task 6 guardrail carries it on the chat path.
+The chrome is the Bluebird FOI Insights identity, styled after Bluebird Horizon
+(horizon.axoquant.com): a light surface masthead with the navy "Bluebird" word
+and violet "FOI INSIGHTS" product label, the top-level nav (Overview / Requests /
+Decisions / Timeliness / Reference — all internal, the POC must not link out to
+the source agency site), a breadcrumb, a two-column layout of sidenav + main,
+and a footer with the Acknowledgement of Country, in-site legal links, and the
+identity stovepipe (fartkraft sovereign stack). The stovepipe rides in the
+footer on every page so it is never out of sight, exactly as the Task 6
+guardrail carries it on the chat path.
 """
 from __future__ import annotations
 import html
@@ -103,8 +105,8 @@ def _user_nav(user) -> str:
 
 def chrome(title: str, body_html: str = "", page_key: str | None = None,
            scripts: str | None = None, user: dict | None = None) -> str:
-    """The Bluebird FOI Insights shell: dark Horizon masthead + top nav, breadcrumb, a
-    two-column layout of sidenav + main, and the footer.
+    """The Bluebird FOI Insights shell: Bluebird Horizon masthead + top nav,
+    breadcrumb, a two-column layout of sidenav + main, and the footer.
 
     Returns a complete, self-contained HTML document. Every page carries the
     identity stovepipe in the footer (never out of sight).
@@ -127,6 +129,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.setAttribute("data-theme","light");</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <link rel="stylesheet" href="/assets/site.css">
@@ -134,17 +137,18 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
-<header class="site-header bg-ink text-paper border-b-3 border-seal flex items-center justify-between flex-wrap gap-2 px-8 py-3">
-  <div class="logo text-xl font-bold"><a class="text-paper no-underline" href="/">Bluebird FOI Insights</a></div>
+<header class="site-header flex items-center justify-between flex-wrap gap-2 px-8 py-3">
+  <div class="logo"><a class="wordmark" href="/"><span class="wordmark-name">Bluebird</span><span class="wordmark-product">FOI INSIGHTS</span></a></div>
   <nav class="topnav flex flex-wrap gap-1" aria-label="Primary">{nav_html(active)}</nav>
   {_user_nav(user)}
 </header>
-<div class="breadcrumb bg-ink border-b border-hair text-paper-dim text-sm px-8 py-2">{BREADCRUMB}</div>
+<div class="hairlines"></div>
+<div class="breadcrumb text-sm px-8 py-2">{BREADCRUMB}</div>
 <div class="layout flex items-start max-w-layout mx-auto">
   {sidenav_html(page_key)}
-  <main id="main" class="flex-1 max-w-main mx-auto bg-ink px-8 py-8 min-h-main">{body_html}</main>
+  <main id="main" class="flex-1 max-w-main mx-auto px-8 py-8 min-h-main">{body_html}</main>
 </div>
-<footer class="sitefoot bg-ink-raised text-paper-dim text-sm px-8 py-7">
+<footer class="sitefoot text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
   <div class="legal"><a href="/data-notes.html">Data notes</a> <span class="sep">·</span> <a href="/how-to-use.html">How to use</a> <span class="sep">·</span> <a href="/api.html">API access</a></div>
   <div class="stack">Bluebird FOI Insights — fartkraft sovereign stack · data from data.gov.au (FOI statistics)</div>

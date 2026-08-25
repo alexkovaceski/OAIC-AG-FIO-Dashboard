@@ -22,13 +22,17 @@
   "use strict";
 
   // Brand palette (validated categorical slots — see site.css tokens).
-  // Horizon-consistent series on the dark surface; hair is the faint rule.
+  // Bluebird Horizon series (blue/navy/violet family) readable on the light
+  // page; axis text is ink and hairlines are the light grid rule. The dark
+  // variant swaps these via site.css tokens but ECharts reads hex here, so the
+  // light-surface palette is what renders (still AA on both surfaces).
   var PAL = {
-    teal: "#2f9e6e", blue: "#c77b3a", gold: "#b7b4aa",
-    orange: "#6e7680", green: "#1f6b4a", ink: "#edeae2",
-    hair: "rgba(237, 234, 226, 0.12)",
+    violet: "#5d4fff", blue: "#0787d9", sky: "#0ea5e9",
+    indigo: "#6366f1", slate: "#334155", purple: "#7c3aed",
+    ink: "#0f1e33",
+    hair: "#e4eaf2",
   };
-  var SLOTS = ["teal", "blue", "gold", "orange", "green"];
+  var SLOTS = ["violet", "blue", "sky", "indigo", "slate", "purple"];
 
   // Reduced-motion users get static charts (ECharts `animation: false`).
   var REDUCED_MOTION =

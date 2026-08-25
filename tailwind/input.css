@@ -1,36 +1,50 @@
 /* Tailwind v4 input for the Bluebird FOI Insights POC.
    Compile: npm run build:css  (output lands in src/site/assets/tailwind.css, committed).
-   Horizon identity tokens are mapped to Tailwind color tokens so utilities like
-   bg-ink / text-paper / border-seal exist. site.css keeps the bespoke component
-   layer (chartbox, sidenav, nodata, tables) and its own :root tokens. */
+   Bluebird Horizon identity tokens (from horizon.axoquant.com/assets/horizon.css)
+   are mapped to Tailwind color tokens so utilities like bg-surface / text-ink /
+   border-grid exist. site.css keeps the bespoke component layer (masthead,
+   wordmark, sidenav, chartbox, tables) and the opt-in dark token override. */
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #0e1419;        /* near-black surface / body bg */
-  --color-ink-raised: #141b22; /* elevated surface / cards / footer */
-  --color-paper: #edeae2;      /* off-white text / surfaces */
-  --color-paper-dim: #b7b4aa;  /* muted text */
-  --color-seal: #2f9e6e;       /* primary accent (green) */
-  --color-seal-dim: #1f6b4a;   /* secondary / depth green */
-  --color-evidence: #c77b3a;   /* amber accent */
-  --color-ledger: #6e7680;     /* muted slate */
+  /* Bluebird Horizon chrome (light — the reference site pins light; the opt-in
+     dark variant lives in site.css under :root[data-theme=dark]) */
+  --color-page: #ffffff;        /* page background */
+  --color-surface: #f7f9fc;     /* masthead / cards / footer */
+  --color-ink: #0f1e33;         /* body text */
+  --color-ink-2: #4a5a72;       /* secondary text */
+  --color-muted: #7b8ca4;       /* small decorative labels */
+  --color-grid: #e4eaf2;        /* hairline rules */
+  --color-baseline: #cbd5e1;
+  --color-navy: #00294b;        /* wordmark name / ribbon */
+  --color-brand: #5d4fff;       /* primary accent / links / product label */
+  --color-blue: #0787d9;        /* hover / focus */
+  --color-cyan: #7ef9ff;        /* brand accent */
   --color-white: #ffffff;
-  /* legacy token names kept so existing utilities keep working (mapped to the
-     Horizon equivalents); markup is migrating to the honest Horizon names. */
-  --color-navy: #0e1419;       /* was OAIC header band -> ink */
-  --color-teal: #2f9e6e;       /* primary accent -> seal */
-  --color-blue: #1f6b4a;       /* secondary -> seal-dim */
-  --color-dark: #141b22;       /* depth/footers -> ink-raised */
-  --color-gold: #2f9e6e;       /* active accent -> seal */
-  --color-hair: rgba(237,234,226,0.12);  /* grid hairlines */
-  --color-muted: #b7b4aa;      /* secondary body text -> paper-dim */
-  --color-pos: #2f9e6e;        /* positive / within-statutory */
-  --color-neg: #c77b3a;        /* negative / refused */
-  --color-c1: #2f9e6e;
-  --color-c2: #c77b3a;
-  --color-c3: #b7b4aa;
-  --color-c4: #6e7680;
-  --color-c5: #1f6b4a;
+  /* chart series (blue/navy/violet family — readable on white) */
+  --color-c1: #5d4fff;
+  --color-c2: #0787d9;
+  --color-c3: #0ea5e9;
+  --color-c4: #6366f1;
+  --color-c5: #334155;
+  --color-c6: #7c3aed;
+  /* status */
+  --color-pos: #16a34a;
+  --color-neg: #ea580c;
+  --color-crit: #dc2626;
+  /* legacy token names kept mapped to the Horizon equivalents so any surviving
+     utility still compiles to a sane value; markup migrates to the honest names. */
+  --color-paper: #ffffff;
+  --color-ink-raised: #f7f9fc;
+  --color-paper-dim: #4a5a72;
+  --color-seal: #5d4fff;
+  --color-seal-dim: #0787d9;
+  --color-evidence: #dc2626;
+  --color-ledger: #4a5a72;
+  --color-gold: #5d4fff;
+  --color-teal: #0787d9;
+  --color-dark: #f7f9fc;
+  --color-hair: rgba(15, 30, 51, 0.10);
 
   /* layout dimensions. Named utilities (w-sidenav / max-w-main / ...) instead
      of arbitrary values: Tailwind v4's content scan is flaky at picking up
@@ -40,5 +54,4 @@
   --max-width-layout: 1400px;
   --max-width-main: 1100px;
   --min-height-main: 70vh;
-  --border-width-3: 3px;   /* masthead accent rule */
 }

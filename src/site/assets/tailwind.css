@@ -22,24 +22,24 @@
     --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --default-font-family: var(--font-sans);
     --default-mono-font-family: var(--font-mono);
-    --color-ink: #0e1419;
-    --color-ink-raised: #141b22;
-    --color-paper: #edeae2;
-    --color-paper-dim: #b7b4aa;
-    --color-seal: #2f9e6e;
-    --color-seal-dim: #1f6b4a;
-    --color-evidence: #c77b3a;
-    --color-ledger: #6e7680;
-    --color-navy: #0e1419;
-    --color-teal: #2f9e6e;
-    --color-gold: #2f9e6e;
-    --color-hair: rgba(237,234,226,0.12);
-    --color-muted: #b7b4aa;
+    --color-ink: #0f1e33;
+    --color-ink-2: #4a5a72;
+    --color-muted: #7b8ca4;
+    --color-navy: #00294b;
+    --color-paper: #ffffff;
+    --color-ink-raised: #f7f9fc;
+    --color-paper-dim: #4a5a72;
+    --color-seal: #5d4fff;
+    --color-seal-dim: #0787d9;
+    --color-evidence: #dc2626;
+    --color-ledger: #4a5a72;
+    --color-gold: #5d4fff;
+    --color-teal: #0787d9;
+    --color-hair: rgba(15, 30, 51, 0.10);
     --width-sidenav: 216px;
     --max-width-layout: 1400px;
     --max-width-main: 1100px;
     --min-height-main: 70vh;
-    --border-width-3: 3px;
   }
 }
 @layer base {
@@ -329,13 +329,9 @@
     border-style: var(--tw-border-style);
     border-width: 1px;
   }
-  .border-b {
-    border-bottom-style: var(--tw-border-style);
-    border-bottom-width: 1px;
-  }
   .border-b-3 {
     border-bottom-style: var(--tw-border-style);
-    border-bottom-width: var(--border-width-3);
+    border-bottom-width: 3px;
   }
   .border-gold {
     border-color: var(--color-gold);
@@ -364,14 +360,8 @@
   .bg-white {
     background-color: var(--color-white);
   }
-  .px-2 {
-    padding-inline: calc(var(--spacing) * 2);
-  }
   .px-8 {
     padding-inline: calc(var(--spacing) * 8);
-  }
-  .py-1 {
-    padding-block: var(--spacing);
   }
   .py-2 {
     padding-block: calc(var(--spacing) * 2);
@@ -411,6 +401,9 @@
   }
   .text-ink {
     color: var(--color-ink);
+  }
+  .text-ink-2 {
+    color: var(--color-ink-2);
   }
   .text-muted {
     color: var(--color-muted);

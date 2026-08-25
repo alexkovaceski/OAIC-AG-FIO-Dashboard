@@ -207,47 +207,73 @@ def test_top_nav_has_primary_aria_label():
         assert 'aria-label="Primary"' in html
 
 
-def _ratio_on_dark(hex_color: str) -> float:
-    # Contrast of `hex_color` against the Horizon near-black --ink surface
-    # (#0e1419). The dark restyle moved the muted/nodata labels onto the ink
-    # page background, so AA is asserted on that surface, not white.
-    ink_lum = _relative_luminance("#0e1419")
+def _ratio_on_page(hex_color: str) -> float:
+    # Contrast of `hex_color` against the Bluebird Horizon page background.
+    # The reference site pins data-theme=light and renders light on every
+    # machine (the dark tokens only apply under :root[data-theme=dark]), so AA
+    # is asserted on the light page surface #ffffff.
+    page_lum = _relative_luminance("#ffffff")
     color_lum = _relative_luminance(hex_color)
-    lighter, darker = (color_lum, ink_lum) if color_lum > ink_lum else (ink_lum, color_lum)
+    lighter, darker = (color_lum, page_lum) if color_lum > page_lum else (page_lum, color_lum)
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def test_muted_token_passes_aa_on_dark():
-    # --muted (paper-dim) renders on the dark --ink surface; must reach 4.5:1.
+def test_page_pins_light_theme():
+    # horizon.axoquant.com forces data-theme="light" in the head before any CSS
+    # so the site stays light even on dark-OS machines; the FOI site must
+    # replicate that (the site.css dark block is gated on :root[data-theme=dark],
+    # never a bare prefers-color-scheme match).
+    for html in _pages().values():
+        assert 'setAttribute("data-theme","light")' in html, "head must pin data-theme=light"
+
+
+def test_sitecss_dark_is_opt_in_not_auto():
+    # site.css must gate the dark variant exactly like the reference site:
+    # only :root[data-theme=dark] or :root:not([data-theme=light]) under a dark
+    # preference — never a bare prefers-color-scheme block flipping :root.
     from pathlib import Path
     css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
-    m = re.search(r"--muted:\s*(#[0-9a-fA-F]{6})", css)
-    assert m, "no --muted token"
-    ratio = _ratio_on_dark(m.group(1))
-    assert ratio >= 4.5, f"--muted {m.group(1)} is {ratio:.2f}:1 on ink (needs >= 4.5:1)"
+    assert ":root[data-theme=dark]" in css
+    assert ":root:not([data-theme=light])" in css
+    # a bare media dark block that flips plain :root would be the old auto-dark
+    m = re.search(r"@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root\s*\{", css)
+    assert not m, "dark variant must not trigger on a bare :root"
 
 
-def test_nodata_token_passes_aa_on_dark():
-    # --nodata is used for the "No published data" placeholder text on the dark
-    # page background; it must clear the same 4.5:1 AA bar as --muted.
+def test_ink2_token_passes_aa_on_page():
+    # --ink-2 carries the secondary text (intros, basis labels, hints) on the
+    # light --page background; it must reach 4.5:1. --muted is a smaller
+    # decorative label colour (the Horizon reference uses #7b8ca4 at 3.4:1 for
+    # tiny group labels) and is not body text, so it is not held to AA.
+    from pathlib import Path
+    css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
+    m = re.search(r"--ink-2:\s*(#[0-9a-fA-F]{6})", css)
+    assert m, "no --ink-2 token"
+    ratio = _ratio_on_page(m.group(1))
+    assert ratio >= 4.5, f"--ink-2 {m.group(1)} is {ratio:.2f}:1 on page (needs >= 4.5:1)"
+
+
+def test_nodata_token_passes_aa_on_page():
+    # --nodata is used for the "No published data" placeholder text on the light
+    # page background; it must clear the same 4.5:1 AA bar as --ink-2.
     from pathlib import Path
     css = Path("src/site/assets/site.css").read_text(encoding="utf-8")
     m = re.search(r"--nodata:\s*(#[0-9a-fA-F]{6})", css)
     assert m, "no --nodata token"
-    ratio = _ratio_on_dark(m.group(1))
-    assert ratio >= 4.5, f"--nodata {m.group(1)} is {ratio:.2f}:1 on ink (needs >= 4.5:1)"
+    ratio = _ratio_on_page(m.group(1))
+    assert ratio >= 4.5, f"--nodata {m.group(1)} is {ratio:.2f}:1 on page (needs >= 4.5:1)"
 
 
-def test_tailwind_muted_token_passes_aa_on_dark():
-    # tailwind.css is loaded on every page; its .text-muted utility carries the
-    # breadcrumb and filter-label text on the dark --ink page background.
-    # It must clear the same 4.5:1 AA bar as site.css's --muted.
+def test_tailwind_ink2_token_passes_aa_on_page():
+    # tailwind.css is loaded on every page; its .text-ink-2 utility carries the
+    # filter-label text on the light --page background. It must clear the same
+    # 4.5:1 AA bar as site.css's --ink-2.
     from pathlib import Path
     css = Path("src/site/assets/tailwind.css").read_text(encoding="utf-8")
-    m = re.search(r"--color-muted:\s*(#[0-9a-fA-F]{6})", css)
-    assert m, "no --color-muted token in tailwind.css"
-    ratio = _ratio_on_dark(m.group(1))
-    assert ratio >= 4.5, f"--color-muted {m.group(1)} is {ratio:.2f}:1 on ink (needs >= 4.5:1)"
+    m = re.search(r"--color-ink-2:\s*(#[0-9a-fA-F]{6})", css)
+    assert m, "no --color-ink-2 token in tailwind.css"
+    ratio = _ratio_on_page(m.group(1))
+    assert ratio >= 4.5, f"--color-ink-2 {m.group(1)} is {ratio:.2f}:1 on page (needs >= 4.5:1)"
 
 
 def test_no_outbound_oaic_links_or_branding():
@@ -262,7 +288,8 @@ def test_no_outbound_oaic_links_or_branding():
 
 def test_masthead_is_bluebird_foi_insights():
     for html in _pages().values():
-        assert ">Bluebird FOI Insights</a>" in html, "masthead missing Bluebird FOI Insights"
+        assert 'class="wordmark-name">Bluebird</span>' in html, "masthead missing Bluebird"
+        assert 'class="wordmark-product">FOI INSIGHTS</span>' in html, "masthead missing FOI INSIGHTS"
 
 
 def test_masthead_risk_link_only_for_internal():

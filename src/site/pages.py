@@ -44,9 +44,6 @@ PAGE_FIGURE_KEYS = {
     "api": [],
 }
 
-# series colours (validated categorical palette, slots 1-4 — see site.css)
-_BAR_COLOURS = ("#2f9e6e", "#c77b3a", "#b7b4aa", "#6e7680")
-
 # human-readable KPI labels for the STAT_KEYS (the catalog keys are enum
 # identifiers, not prose — the page shows a proper label)
 _STAT_LABELS = {
@@ -148,11 +145,10 @@ def _filters_bar(frame, page_key) -> str:
         opts = [f'<option value="">{html.escape(all_label)}</option>']
         opts += [f'<option value="{html.escape(str(v))}">{html.escape(str(v))}</option>'
                  for v in options]
-        return (f'<label class="flex items-center gap-2 text-sm text-muted" '
+        return (f'<label class="flex items-center gap-2 text-sm text-ink-2" '
                 f'for="filter-{filter_name}">{html.escape(label)}'
                 f'<select data-filter="{filter_name}" id="filter-{filter_name}" '
-                f'class="border border-hair rounded bg-white px-2 py-1 text-sm '
-                f'text-ink">{chr(10).join(opts)}</select></label>')
+                f'class="filter-select text-sm">{chr(10).join(opts)}</select></label>')
 
     agency = _select("Agency", "agency", f["agencies"], "All agencies")
     # the type options are the platform's own buckets; "total" is a valid
