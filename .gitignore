@@ -17,3 +17,6 @@ data/generated/lineage.jsonl
 
 # fitted risk artifacts (fit_risk_models.py runs offline on idc-1; never committed)
 data/generated/risk/
+
+# session handover notes may carry throwaway credentials; never bulk-added
+docs/memories/

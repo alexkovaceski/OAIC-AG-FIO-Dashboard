@@ -66,8 +66,8 @@ _DB_PROBE = (
     '                ("foi_chat_users", "role"))\n'
     '    role = cur.fetchone()\n'
     '    cur.execute("SELECT count(*) FROM horizon.foi_chat_users "\n'
-    '                "WHERE username IN (%s,%s,%s,%s)",\n'
-    '                ("foi.public", "foi.pilot", "foi.internal", "foi.officer"))\n'
+    '                "WHERE username IN (%s,%s,%s,%s,%s)",\n'
+    '                ("pilot01.user", "pilot02.user", "pilot03.user", "pilot04.user", "pilot05.user"))\n'
     '    n = cur.fetchone()[0]\n'
     'print(role[0] if role else "NO_ROLE_COLUMN")\n'
     'print(n)\n'
@@ -110,6 +110,8 @@ def main() -> int:
         # One-shot read-only probe: unit state, env file presence, model pin,
         # the AutoGluon risk fit, the role access tier, and the pilot accounts.
         # Runs through the remote shell; no process substitution (plain POSIX).
+        # Pilot accounts: five seeded (pilot01.user..pilot05.user); the shell
+        # comparison below checks the live count against "5", not "4".
         cmd = (
             f"systemctl is-active {UNIT}; "
             f"test -f {ENV_FILE} && echo 'env file: present' || echo 'env file: MISSING'; "
@@ -129,9 +131,9 @@ def main() -> int:
             f"if [ \"$r\" = \"role\" ]; then echo 'role column: present'; else "
             f"echo 'role column: MISSING (not migrated, or DB/probe unreachable; "
             f"apply the Task 1 ALTER from src/server/migrate.sql)'; fi; "
-            f"if [ \"$n\" = \"4\" ]; then echo 'pilot accounts: seeded (4/4)'; else "
-            f"echo 'pilot accounts: MISSING ('${{n:-none}}'/4; run "
-            f"scripts/seed_pilot_users.py)'; fi"
+            f"if [ \"$n\" = \"5\" ]; then echo 'pilot accounts: seeded (5/5)'; else "
+            f"echo 'pilot accounts: MISSING ('${{n:-none}}'/5; run "
+            f"scripts/reset_pilot_users.py)'; fi"
         )
         run(["ssh", ssh_target(), cmd], dry_run=args.dry_run,
             description="probe idc-1 (unit + env)")

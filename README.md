@@ -7,7 +7,7 @@ adds a natural-language dashboard/report builder, and records lineage for
 everything: data sourced → calculations applied → outcomes, and every
 dashboard-builder request.
 
-Public demo: **`https://foi.fartkraft.ai`** (no auth).
+Public demo: **`https://foi.axoquant.com`** (no auth).
 
 ## What it is
 
@@ -121,7 +121,7 @@ The chat and agentic builder are hard-scoped to this use case, defence-in-depth:
 
 ## Deploy
 
-- **Public hostname:** `https://foi.fartkraft.ai` — Cloudflare Worker →
+- **Public hostname:** `https://foi.axoquant.com` — Cloudflare Worker →
   Cloudflare tunnel → idc-1 origin, no auth.
 - **Deploy script:** `python scripts/deploy.py` (dry-run/`--check`/`--no-restart`
   modes) pushes the service + pinned data to idc-1 and restarts the unit. Full
@@ -164,7 +164,7 @@ data/
   generated/       lineage JSONL firehose (runtime; regenerated per boot)
 scripts/
   serve.py         run the app locally
-  deploy.py        deploy to idc-1 + foi.fartkraft.ai
+  deploy.py        deploy to idc-1 + foi.axoquant.com
 docs/
   deploy.md        the idc-1 systemd unit, tunnel + Worker route, env vars
 ```
