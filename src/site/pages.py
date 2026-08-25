@@ -256,7 +256,7 @@ def _top20_section(title, fig, chart_key, source=None) -> str:
             f'{_chart_container(chart_key, fig)}</section>')
 
 
-def _notes_section(title, fig, chart_key) -> str:
+def _notes_section(title, fig, chart_key, source=None) -> str:
     """The figure card for a chart page. A note is emitted only when the
     figure's series are empty — the source files do not report the measure —
     so the empty chart reads as honest, not broken. A figure with data carries
@@ -266,8 +266,9 @@ def _notes_section(title, fig, chart_key) -> str:
         note = ('<p class="note">No published data for this measure. '
                 'The source files do not report this breakdown for the '
                 'financial years covered.</p>')
+    source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
-            f'<p class="basis">{_basis_label({"basis": "fy"})}</p>'
+            f'<p class="basis">{_basis_label({"basis": "fy"})}</p>{source_html}'
             f'{note}{_chart_container(chart_key, fig)}</section>')
 
 
@@ -393,7 +394,9 @@ def _page_requests_decided(frame) -> str:
     ministers, by financial year, alongside the latest published quarter.</p>
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
-                    "requests_decided_trend")}
+                    "requests_decided_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("requests-decided")}
     {_page_data_script(frame, "requests-decided")}"""
     return chrome("Requests decided", body,
@@ -425,7 +428,9 @@ def _page_decision_outcomes(frame) -> str:
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
-                    "decision_outcomes_trend")}
+                    "decision_outcomes_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("decision-outcomes")}
     {_page_data_script(frame, "decision-outcomes")}"""
     return chrome("Decision outcomes", body,
@@ -439,7 +444,9 @@ def _page_change_decision_outcomes(frame) -> str:
     <p class="intro">Change in the percentage of decisions granted in full or
     in part, by financial year.</p>
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
-                    "granted_full_part_change")}
+                    "granted_full_part_change",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
     return chrome("Change in decision outcomes", body,
@@ -455,7 +462,9 @@ def _page_timeliness(frame) -> str:
     the within-statutory measure is published in the source files; the
     after-statutory buckets are not ingested.</p>
     {_kpis(frame, ["within_statutory_pct_q1"])}
-    {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend")}
+    {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("timeliness")}
     {_page_data_script(frame, "timeliness")}"""
     return chrome("Timeliness", body,
@@ -468,7 +477,9 @@ def _page_change_timeliness(frame) -> str:
     <h1>Change in timeliness</h1>
     <p class="intro">Change in the percentage of decisions within the statutory
     time period, by financial year.</p>
-    {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change")}
+    {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""
     return chrome("Change in timeliness", body,
@@ -501,10 +512,11 @@ def _page_data_notes() -> str:
         'Federal Circuit and Family Court of Australia. The source data reports '
         'this as two separate, still-active divisions (Division 1 and Division '
         '2) with no single combined row, and does not indicate which '
-        'predecessor court maps to which division. Pending confirmation, the '
-        'dashboard shows all four as distinct series (the two predecessor '
-        'courts to 2020-21, the two divisions from 2021-22) rather than '
-        'merging them.</li>'
+        'predecessor court maps to which division. The dashboard keeps all '
+        'four as distinct series (the two predecessor courts to 2020-21, the '
+        'two divisions from 2021-22) by design, rather than merging them — '
+        'this matches the publisher\'s own convention of representing '
+        'merger-created bodies as new entities.</li>'
         '</ul></div>')
     body = ("<h1>Data notes and disclaimer</h1>"
             '<p class="intro">These notes are reproduced verbatim from the '
@@ -533,10 +545,11 @@ def _page_how_to_use() -> str:
     </ul>
     <h2>Missing data is shown, not invented</h2>
     <p>Where the source files do not publish a measure (for example, the
-    after-statutory timeliness buckets, or the transferred measures, which the
-    dashboard does not render), the page shows
+    after-statutory timeliness buckets), the page shows
     <em>No published data for this measure</em> — a flat zero line would be a
-    fabricated number. A year without a figure in a series renders as "—".</p>
+    fabricated number. A year without a figure in a series renders as "—". The
+    on-transfer request channel is published and ingested as its own measure;
+    it is not yet charted.</p>
     <h2>Filters</h2>
     <p>The filters row (agency &middot; type (personal/other) &middot; FY) is
     live on the chart pages: selections re-derive the charts from the

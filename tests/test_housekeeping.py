@@ -12,6 +12,14 @@ def test_deploy_probe_checks_the_five_pilot_accounts():
     assert "(5/5)" in src and "/5; run" in src, "probe denominator still /4"
 
 
+def test_deploy_probe_checks_the_portfolio_column():
+    # Stage-1 migration guard: the probe must also verify foi_facts.portfolio,
+    # not just the role column, so --check catches an unapplied Stage-1 ALTER.
+    src = Path("scripts/deploy.py").read_text(encoding="utf-8")
+    assert "portfolio" in src and "foi_facts" in src
+    assert "portfolio column:" in src
+
+
 def test_readme_advertises_the_live_hostname():
     src = Path("README.md").read_text(encoding="utf-8")
     assert "foi.fartkraft.ai" not in src

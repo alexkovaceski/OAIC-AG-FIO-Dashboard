@@ -57,4 +57,4 @@ def test_boot_seeds_static_lineage():
     src = Path("src/server/app.py").read_text(encoding="utf-8")
     assert "_seed_static_lineage" in src
     assert re.search(r"artifact_type=.static_page.", src)
-    assert src.index("_seed_static_lineage(") < len(src)
+    assert re.search(r"_seed_static_lineage\(conn, frame, _DATASET_ID\)", src)

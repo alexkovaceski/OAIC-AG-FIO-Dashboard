@@ -23,8 +23,13 @@ RENAME_MAP = {
     # Attorney-General's portfolio, and both divisions cut over cleanly, so
     # portfolio/timing alone can't disambiguate a 1:1 mapping from a summed
     # one). Mapping both predecessor keys to one division would misattribute
-    # the other division's history. Left unmapped pending a decision — see
-    # task-4-report.md for the full discovery output and options.
+    # the other division's history. Ruling (Alex, 2026-08-25, spec
+    # 2026-08-25-foi-feedback-response-design.md): keep all four entities
+    # distinct, with disclosure on data-notes. The 2021 merger created
+    # Division 1 and Division 2 as separate reporting entities in the source
+    # data, matching OAIC's own convention of representing merger-created
+    # bodies as new entities — see task-4-report.md for the full discovery
+    # output and options.
 }
 
 def normalise_agency(name: str) -> str:

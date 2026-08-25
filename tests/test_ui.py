@@ -397,6 +397,8 @@ def test_fy_figure_cards_name_their_source():
     pages = _pages()
     assert "agency-foi-data-2024-25.xlsx" in pages["key-agency-contributions-received"]
     assert "data.gov.au FOI statistics workbooks" in pages["requests-received"]
+    assert "data.gov.au FOI statistics workbooks" in pages["requests-decided"]
+    assert "data.gov.au FOI statistics workbooks" in pages["timeliness"]
 
 
 def test_pilot_seed_script_shape():

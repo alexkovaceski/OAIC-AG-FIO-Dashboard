@@ -55,8 +55,9 @@ PUSH = [
 # The DB probe for --check: run through the FOI venv's own python + psycopg2
 # (guaranteed present on idc-1) so the check exercises exactly the DSN and
 # driver the app uses — the host may not have a psql binary (Postgres runs in
-# the algolotl-pg container). Prints role column presence + pilot-account count,
-# one per line. No single quotes inside (the shell wraps it in single quotes).
+# the algolotl-pg container). Prints role column presence + portfolio column
+# presence + pilot-account count, one per line. No single quotes inside (the
+# shell wraps it in single quotes).
 _DB_PROBE = (
     'import os, psycopg2\n'
     'c = psycopg2.connect(os.environ["FOI_PG_DSN"])\n'
@@ -65,11 +66,16 @@ _DB_PROBE = (
     '                "WHERE table_name=%s AND column_name=%s",\n'
     '                ("foi_chat_users", "role"))\n'
     '    role = cur.fetchone()\n'
+    '    cur.execute("SELECT column_name FROM information_schema.columns "\n'
+    '                "WHERE table_name=%s AND column_name=%s",\n'
+    '                ("foi_facts", "portfolio"))\n'
+    '    portfolio = cur.fetchone()\n'
     '    cur.execute("SELECT count(*) FROM horizon.foi_chat_users "\n'
     '                "WHERE username IN (%s,%s,%s,%s,%s)",\n'
     '                ("pilot01.user", "pilot02.user", "pilot03.user", "pilot04.user", "pilot05.user"))\n'
     '    n = cur.fetchone()[0]\n'
     'print(role[0] if role else "NO_ROLE_COLUMN")\n'
+    'print(portfolio[0] if portfolio else "NO_PORTFOLIO_COLUMN")\n'
     'print(n)\n'
 )
 
@@ -125,10 +131,14 @@ def main() -> int:
             f"d=$(grep '^FOI_PG_DSN=' {ENV_FILE} 2>/dev/null | cut -d= -f2-); "
             f"out=$(FOI_PG_DSN=\"$d\" .venv/bin/python -c '{_DB_PROBE}' 2>/dev/null); "
             f"r=$(printf '%s\\n' \"$out\" | sed -n 1p); "
-            f"n=$(printf '%s\\n' \"$out\" | sed -n 2p); "
+            f"p=$(printf '%s\\n' \"$out\" | sed -n 2p); "
+            f"n=$(printf '%s\\n' \"$out\" | sed -n 3p); "
             f"if [ \"$r\" = \"role\" ]; then echo 'role column: present'; else "
             f"echo 'role column: MISSING (not migrated, or DB/probe unreachable; "
             f"apply the Task 1 ALTER from src/server/migrate.sql)'; fi; "
+            f"if [ \"$p\" = \"portfolio\" ]; then echo 'portfolio column: present'; else "
+            f"echo 'portfolio column: MISSING (apply the Stage-1 ALTER from "
+            f"src/server/migrate.sql)'; fi; "
             f"if [ \"$n\" = \"5\" ]; then echo 'pilot accounts: seeded (5/5)'; else "
             f"echo 'pilot accounts: MISSING ('${{n:-none}}'/5; run "
             f"scripts/reset_pilot_users.py)'; fi"
