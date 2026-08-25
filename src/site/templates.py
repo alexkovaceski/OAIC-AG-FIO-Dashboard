@@ -12,6 +12,8 @@ guardrail carries it on the chat path.
 """
 from __future__ import annotations
 import html
+import hashlib
+from pathlib import Path
 
 # top-level nav: the FOI section's own groups (all internal — the POC must not
 # link out to the source agency site). Entries are (label, first_page_key); nav_html
@@ -43,6 +45,17 @@ SIDENAV_GROUPS = [
 ]
 
 BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")
+
+
+_ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+def _css_link(rel: str, name: str) -> str:
+    """A versioned stylesheet link: a ?v= content-hash suffix so a CSS change
+    changes the URL and any browser holding the pre-fix cached sheet re-fetches
+    (the site serves stylesheets with Cache-Control: public, max-age=14400)."""
+    digest = hashlib.sha256((_ASSETS / name).read_bytes()).hexdigest()[:12]
+    return f'<link rel="{rel}" href="/assets/{name}?v={digest}">'
 
 
 def _page_group(page_key: str) -> str | None:
@@ -132,8 +145,8 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <script>document.documentElement.setAttribute("data-theme","light");</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<link rel="stylesheet" href="/assets/site.css">
-<link rel="stylesheet" href="/assets/tailwind.css">
+{_css_link("stylesheet", "site.css")}
+{_css_link("stylesheet", "tailwind.css")}
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>

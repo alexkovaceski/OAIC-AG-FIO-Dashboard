@@ -227,6 +227,22 @@ def test_page_pins_light_theme():
         assert 'setAttribute("data-theme","light")' in html, "head must pin data-theme=light"
 
 
+def test_stylesheet_links_carry_content_hash():
+    # the CSS links must be versioned with a content hash (?v=<sha>), mirroring
+    # horizon's horizon.css?v=2 — otherwise a browser holding the pre-fix cached
+    # sheet keeps the old navy theme for the full Cache-Control window
+    import hashlib
+    from pathlib import Path
+    assets = Path("src/site/assets")
+    html = _pages()["at-a-glance"]
+    for name in ("site.css", "tailwind.css"):
+        digest = hashlib.sha256((assets / name).read_bytes()).hexdigest()[:12]
+        assert f'/assets/{name}?v={digest}' in html, \
+            f"{name} link must carry its content hash"
+    assert re.search(r"href=\"/assets/(site|tailwind)\.css\"(?![?])", html) is None, \
+        "an unversioned stylesheet link remains"
+
+
 def test_sitecss_dark_is_opt_in_not_auto():
     # site.css must gate the dark variant exactly like the reference site:
     # only :root[data-theme=dark] or :root:not([data-theme=light]) under a dark
@@ -343,3 +359,17 @@ def test_seed_script_shape():
     assert isinstance(ACCOUNTS, list) and len(ACCOUNTS) >= 1
     assert all({"username", "display_name"} <= set(a) for a in ACCOUNTS)
     assert callable(main)
+
+
+def test_pilot_seed_script_shape():
+    # The pilot accounts are the five named pilot01.user..pilot05.user; the
+    # reset script deletes the old accounts and re-seeds these five fresh.
+    import sys
+    sys.path.insert(0, "scripts")
+    from seed_pilot_users import ACCOUNTS
+    from reset_pilot_users import main as reset_main
+    assert [a["username"] for a in ACCOUNTS] == [
+        "pilot01.user", "pilot02.user", "pilot03.user",
+        "pilot04.user", "pilot05.user"]
+    assert all(a["role"] == "internal" for a in ACCOUNTS)
+    assert callable(reset_main)
