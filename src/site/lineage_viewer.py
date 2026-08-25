@@ -27,15 +27,42 @@ def _s(data, key):
     return None
 
 
-def _load_artifact(artifact_id, conn):
+def _resolve_key_id(artifact_key, conn):
+    """Latest lineage_artifacts.id for an artifact_key, or None."""
     if conn is None:
         return None
     try:
         with conn.cursor() as cur:
             cur.execute(
+                "SELECT id FROM horizon.lineage_artifacts "
+                "WHERE artifact_key = %s ORDER BY id DESC LIMIT 1",
+                (str(artifact_key),))
+            row = cur.fetchone()
+        return row[0] if row else None
+    except psycopg2.OperationalError:
+        return None
+    except psycopg2.Error:
+        raise
+
+
+def _load_artifact(artifact_id, conn):
+    if conn is None:
+        return None
+    try:
+        with conn.cursor() as cur:
+            # B1: the static pages link /lineage/<page-key>. A non-numeric id
+            # against the BIGSERIAL id column raises psycopg2.DataError (a
+            # non-Operational error -> 500). Resolve page keys via artifact_key
+            # (latest row wins); only genuinely numeric ids hit the id compare.
+            if not (isinstance(artifact_id, int)
+                    or (isinstance(artifact_id, str) and artifact_id.isdigit())):
+                artifact_id = _resolve_key_id(artifact_id, conn)
+                if artifact_id is None:
+                    return None
+            cur.execute(
                 "SELECT artifact_type, artifact_key, user_id, dataset_id, "
                 "request_text, spec_json, model, status "
-                "FROM horizon.lineage_artifacts WHERE id = %s", (artifact_id,))
+                "FROM horizon.lineage_artifacts WHERE id = %s", (int(artifact_id),))
             row = cur.fetchone()
         if not row:
             return None
@@ -138,10 +165,14 @@ def render_lineage_page(artifact_id, conn=None, *, data=None) -> str:
     Returns the full HTML page.
     """
     artifact = _s(data, "artifact") or _load_artifact(artifact_id, conn)
+    resolved_id = artifact_id
+    if artifact is not None and not (isinstance(artifact_id, int) or
+                                     (isinstance(artifact_id, str) and str(artifact_id).isdigit())):
+        resolved_id = _resolve_key_id(artifact_id, conn)
     dataset_id = (artifact or {}).get("dataset_id")
     dataset = _s(data, "dataset") or _load_dataset(dataset_id, conn)
-    ops = _s(data, "ops") or _load_ops(artifact_id, conn)
-    tool_calls = _s(data, "tool_calls") or _load_tool_calls(artifact_id, conn)
+    ops = _s(data, "ops") or (_load_ops(resolved_id, conn) if resolved_id is not None else None)
+    tool_calls = _s(data, "tool_calls") or (_load_tool_calls(resolved_id, conn) if resolved_id is not None else None)
 
     request = (artifact or {}).get("request_text")
     if isinstance(request, dict):

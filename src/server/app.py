@@ -161,6 +161,8 @@ def _seed_facts(frame) -> None:
     try:
         ensure_schema(conn)
         _DATASET_ID = ingest_facts(frame.facts, conn=conn)
+        if _DATASET_ID is not None:
+            _seed_static_lineage(conn, frame, _DATASET_ID)
     except Exception:
         _LOGGER.exception("_seed_facts: facts seed failed; durable spine "
                           "skipped (best-effort)")
@@ -169,6 +171,44 @@ def _seed_facts(frame) -> None:
             conn.close()
         except Exception:
             pass
+
+
+def _seed_static_lineage(conn, frame, dataset_id) -> None:
+    """Seed one static_page lineage artifact per rendered page (spec S1.5), so
+    'View lineage for this dashboard' is truthful for the static pages, not
+    just AI-built ones. Idempotent per (artifact_key, dataset_id): a re-boot
+    over the same dataset seeds nothing. Best-effort like the rest of lineage."""
+    from site.pages import PAGE_FIGURE_KEYS
+    from site.templates import SIDENAV_GROUPS
+    page_keys = [key for _, items in SIDENAV_GROUPS for key, _ in items]
+    for key in page_keys:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM horizon.lineage_artifacts "
+                    "WHERE artifact_key = %s AND dataset_id = %s LIMIT 1",
+                    (key, dataset_id))
+                if cur.fetchone():
+                    continue
+            fig_keys = PAGE_FIGURE_KEYS.get(key, [])
+            artifact_id = record_artifact(
+                conn, artifact_type="static_page", artifact_key=key,
+                user_id=None, dataset_id=dataset_id,
+                request_text=(f"Static dashboard page '{key}': rendered at boot "
+                              "from the normalised frame (no AI involved)."),
+                spec_json={"page": key, "figures": fig_keys},
+                model="static-render", status="rendered")
+            if artifact_id is None:
+                continue
+            for fig_key in fig_keys:
+                stat = foi_stats(frame, fig_key)
+                record_op(conn, artifact_id=artifact_id, dataset_id=dataset_id,
+                          kind="figure", op=fig_key, params={},
+                          row_count=stat.get("source_rows"),
+                          rows_hash=stat.get("rows_hash"),
+                          result_value=stat.get("value"))
+        except psycopg2.OperationalError:
+            return  # fail-open: lineage must never block boot
 
 
 def _dataset_id_for(conn) -> int | None:
