@@ -158,3 +158,32 @@ def test_golden_facts_have_no_portfolio():
     for f in facts:
         if f["derived"]:
             assert f["portfolio"] == ""
+
+
+def test_mog_renames_resolve_to_most_recent_name():
+    # Stage 1 (spec S1.2): OAIC's convention — renamed agencies appear under
+    # their most recent name for all periods. Verified clean, non-overlapping
+    # FY cutovers for each pair (discovery, Task 4) before adding to RENAME_MAP.
+    #
+    # NOTE: the 2021 courts merger (Federal Circuit Court of Australia + Family
+    # Court of Australia -> Federal Circuit and Family Court of Australia) is
+    # deliberately NOT included here or in RENAME_MAP. Discovery found the
+    # source splits post-merger reporting into TWO divisions (Division 1,
+    # Division 2) with no single combined row, and no in-source evidence
+    # establishes a 1:1 predecessor->division mapping (both are Attorney-
+    # General's portfolio, both cut over cleanly, but so does either pairing).
+    # The approved design (S1.2) assumed a single merged name; discovery
+    # contradicts that premise, so it is blocked pending a decision rather than
+    # guessed. See task-4-report.md for the full discovery output.
+    facts = normalise_all()
+    agencies = {f["agency_name"] for f in facts}
+    for old in ("Independent Hospital Pricing Authority",
+                "Asbestos Safety and Eradication Agency",
+                "Department of Health and Aged Care",
+                "Net Zero Economy Agency"):
+        assert old not in agencies, f"old name not resolved: {old}"
+    for new in ("Independent Health and Aged Care Pricing Authority",
+                "Asbestos and Silica Safety and Eradication Agency",
+                "Department of Health, Disability and Ageing",
+                "Net Zero Economy Authority"):
+        assert new in agencies, f"current name missing: {new}"

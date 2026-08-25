@@ -361,6 +361,16 @@ def test_seed_script_shape():
     assert callable(main)
 
 
+def test_data_notes_platform_reconciliation_section():
+    # A2 + S1.2 disclosure: the data-notes page explains the 34,810 vs 34,418
+    # split and the courts-merger topology, in a clearly-separated platform
+    # section (the corpus notes above it stay verbatim).
+    page = _pages()["data-notes"]
+    assert "Platform reconciliation notes" in page
+    assert "34,418" in page and "34,810" in page and "392" in page
+    assert "Federal Circuit and Family Court" in page
+
+
 def test_pilot_seed_script_shape():
     # The pilot accounts are the five named pilot01.user..pilot05.user; the
     # reset script deletes the old accounts and re-seeds these five fresh.

@@ -459,10 +459,34 @@ def _page_data_notes() -> str:
     except OSError:
         notes = ("# Data notes and disclaimer\n\n"
                  "The data notes document is missing from the corpus.")
+    platform = (
+        '<h2>Platform reconciliation notes</h2>'
+        '<div class="notes"><p>These notes are Bluebird FOI Insights\' own, '
+        'separate from the publisher\'s notes above.</p><ul>'
+        '<li><strong>Requests received basis.</strong> The dashboard\'s '
+        '"requests received" figures count requests received <em>from '
+        'applicants</em> (34,418 for FY2025-26 Q1&ndash;Q3). The source '
+        'workbook\'s "Total requests received" (34,810) additionally includes '
+        '392 requests received on transfer from another agency; the transfer '
+        'channel is ingested as its own measure.</li>'
+        '<li><strong>Agency renames.</strong> Renamed agencies appear under '
+        'their most recent name for all periods (e.g. DISR, IHACPA, ASSEA, '
+        'Health, Disability and Ageing, Net Zero Economy Authority).</li>'
+        '<li><strong>2021 courts merger.</strong> The Federal Circuit Court of '
+        'Australia and the Family Court of Australia merged in 2021 into the '
+        'Federal Circuit and Family Court of Australia. The source data reports '
+        'this as two separate, still-active divisions (Division 1 and Division '
+        '2) with no single combined row, and does not indicate which '
+        'predecessor court maps to which division. Pending confirmation, the '
+        'dashboard shows all four as distinct series (the two predecessor '
+        'courts to 2020-21, the two divisions from 2021-22) rather than '
+        'merging them.</li>'
+        '</ul></div>')
     body = ("<h1>Data notes and disclaimer</h1>"
             '<p class="intro">These notes are reproduced verbatim from the '
             "source dataset (FOI statistics) on data.gov.au.</p>"
-            f'<div class="notes">{_md(notes)}</div>')
+            f'<div class="notes">{_md(notes)}</div>'
+            f'{platform}')
     return chrome("Data notes and disclaimer", body,
                   page_key="data-notes")
 
