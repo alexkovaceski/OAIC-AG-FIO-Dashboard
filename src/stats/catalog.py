@@ -40,6 +40,48 @@ FIG_CAPTIONS = {
     "timeliness_change": "Change in % within statutory time period",
 }
 
+# The latest complete financial year in the annual files. The 2025-26 file is
+# a Q1-Q3 cumulative partial; top-N rankings default to the last full year.
+# Update once per year when the new annual file lands. This is the ONLY place
+# the year is written — specs and pages reference the constant.
+LATEST_COMPLETE_FY = "2024-25"
+
+# FIGURE_SPECS — the declarative engine (spec S2.1). Each chartable figure is
+# declared once; the server's generic _figure and the client's rederivation
+# both interpret the same vocabulary:
+#   trend       — one measure summed per FY (annual rows, bucket-scoped)
+#   multi_trend — several measures, one series each
+#   ratio_trend — 100 * sum(numerators) / sum(denominator) per FY, 1dp
+#   top_n       — agencies ranked by one measure for one FY (default_fy unless
+#                 the client's FY filter overrides it)
+FIGURE_SPECS = {
+    "requests_received_trend":  {"kind": "trend", "measures": ["received"]},
+    "requests_finalised_trend": {"kind": "trend", "measures": ["finalised"]},
+    "requests_decided_trend":   {"kind": "trend", "measures": ["decided"]},
+    "decision_outcomes_trend":  {"kind": "multi_trend",
+                                 "measures": ["granted_full", "granted_part",
+                                              "refused", "withdrawn"]},
+    "timeliness_trend":         {"kind": "trend", "measures": ["within_statutory"]},
+    "refused_pct_trend":        {"kind": "ratio_trend", "numerators": ["refused"],
+                                 "denominator": "decided", "name": "refused_pct"},
+    "granted_full_part_change": {"kind": "ratio_trend",
+                                 "numerators": ["granted_full", "granted_part"],
+                                 "denominator": "decided",
+                                 "name": "granted_full_or_part_pct"},
+    "timeliness_change":        {"kind": "ratio_trend",
+                                 "numerators": ["within_statutory"],
+                                 "denominator": "decided",
+                                 "name": "within_statutory_pct"},
+    "received_top20":           {"kind": "top_n", "measure": "received", "n": 20,
+                                 "default_fy": LATEST_COMPLETE_FY},
+    "decided_top20":            {"kind": "top_n", "measure": "decided", "n": 20,
+                                 "default_fy": LATEST_COMPLETE_FY},
+    "agency_contributions_received": {"kind": "top_n", "measure": "received",
+                                      "n": 20, "default_fy": LATEST_COMPLETE_FY},
+    "agency_contributions_decided":  {"kind": "top_n", "measure": "decided",
+                                      "n": 20, "default_fy": LATEST_COMPLETE_FY},
+}
+
 # a fact row the stat consumed -> canonical JSON. NOTE: portfolio is excluded —
 # the foi_facts table does not store it (load_facts returns portfolio=""), so a
 # hash that included portfolio could never be reproduced from a DB reload, which
@@ -146,74 +188,47 @@ def _refusal_rate_movers(frame, fy_a: str, fy_b: str) -> list[dict]:
 
 
 def _figure(frame, key):
-    """A chartable figure: {categories, series}. Computed from the Frame.
-
-    The FY trend reads the annual files (quarter=None, bucket=total); per-agency
-    breakdowns read the agency rows. The single-quarter Q1 2025-26 headline is
-    carried on the separate *_q1 stats, not blended into the FY series (per the
-    trend-window decision). For measures that only exist as Q1 2025-26 facts
-    (decided/within_statutory/granted_full/granted_part/refused/withdrawn), the
-    trend is not computed from a single point — the series is left empty rather
-    than minting a misleading flat line.
+    """A chartable figure: {categories, series}, computed by interpreting the
+    figure's FIGURE_SPECS entry. The FY trends read the annual files
+    (quarter=None, bucket=total); the top-N reads one FY's agency rows. The
+    single-quarter Q1 2025-26 headline stays on the separate *_q1 stats, never
+    blended into the FY series (per the trend-window decision). A measure with
+    no annual rows yields an empty/None-holed series, never a fabricated line.
     """
+    spec = FIGURE_SPECS.get(key)
+    if spec is None:
+        return {"categories": [], "series": []}
     cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
 
-    if key == "requests_received_trend":
-        return {"categories": cats, "series": [{"name": "received", "values": _fy_series(frame, "received")}]}
-    if key == "requests_finalised_trend":
-        return {"categories": cats, "series": [{"name": "finalised", "values": _fy_series(frame, "finalised")}]}
-    if key == "requests_decided_trend":
-        return {"categories": cats, "series": [{"name": "decided", "values": _fy_series(frame, "decided")}]}
-    if key == "decision_outcomes_trend":
+    if spec["kind"] in ("trend", "multi_trend"):
         return {"categories": cats, "series": [
-            {"name": "granted_full", "values": _fy_series(frame, "granted_full")},
-            {"name": "granted_part", "values": _fy_series(frame, "granted_part")},
-            {"name": "refused", "values": _fy_series(frame, "refused")},
-            {"name": "withdrawn", "values": _fy_series(frame, "withdrawn")}]}
-    if key == "timeliness_trend":
-        # only within_statutory is published; an invented "after_statutory"
-        # series would be a fabricated number, so it is omitted
-        return {"categories": cats, "series": [{"name": "within_statutory",
-                "values": _fy_series(frame, "within_statutory")}]}
-    if key == "refused_pct_trend":
-        refused = _fy_series(frame, "refused")
-        decided = _fy_series(frame, "decided")
-        return {"categories": cats, "series": [{"name": "refused_pct",
-                "values": [round(100 * r / d, 1) if r is not None and d else None
-                           for r, d in zip(refused, decided)]}]}
-    if key == "granted_full_part_change":
-        gf, gp = _fy_series(frame, "granted_full"), _fy_series(frame, "granted_part")
-        decided = _fy_series(frame, "decided")
-        return {"categories": cats, "series": [{"name": "granted_full_or_part_pct",
-                "values": [round(100 * (a + b) / d, 1)
-                           if a is not None and b is not None and d else None
-                           for a, b, d in zip(gf, gp, decided)]}]}
-    if key == "timeliness_change":
-        within = _fy_series(frame, "within_statutory")
-        decided = _fy_series(frame, "decided")
-        return {"categories": cats, "series": [{"name": "within_statutory_pct",
-                "values": [round(100 * w / d, 1) if w is not None and d else None
-                           for w, d in zip(within, decided)]}]}
-    if key == "received_top20":
-        rows = frame.filter(measure="received", bucket="total", fy="2024-25")
+            {"name": m, "values": _fy_series(frame, m)} for m in spec["measures"]]}
+
+    if spec["kind"] == "ratio_trend":
+        nums = [_fy_series(frame, m) for m in spec["numerators"]]
+        den = _fy_series(frame, spec["denominator"])
+        values = []
+        for i in range(len(cats)):
+            parts = [s[i] if i < len(s) else None for s in nums]
+            d = den[i] if i < len(den) else None
+            if any(p is None for p in parts) or not d:
+                values.append(None)
+            else:
+                values.append(round(100 * sum(parts) / d, 1))
+        return {"categories": cats, "series": [{"name": spec["name"], "values": values}]}
+
+    if spec["kind"] == "top_n":
+        rows = frame.filter(measure=spec["measure"], bucket="total",
+                            fy=spec["default_fy"])
         aggs = {}
         for f in rows:
             aggs.setdefault(f["agency_name"], 0.0)
             aggs[f["agency_name"]] += f["value"]
-        top = sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)[:20]
-        return {"categories": [a for a, _ in top], "series": [{"name": "received", "values": [round(v) for _, v in top]}]}
-    if key == "decided_top20":
-        rows = frame.filter(measure="decided", bucket="total", fy="2024-25")
-        aggs = {}
-        for f in rows:
-            aggs.setdefault(f["agency_name"], 0.0)
-            aggs[f["agency_name"]] += f["value"]
-        top = sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)[:20]
-        return {"categories": [a for a, _ in top], "series": [{"name": "decided", "values": [round(v) for _, v in top]}]}
-    if key == "agency_contributions_received":
-        return _figure(frame, "received_top20")
-    if key == "agency_contributions_decided":
-        return _figure(frame, "decided_top20")
+        top = sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)[:spec["n"]]
+        return {"categories": [a for a, _ in top],
+                "series": [{"name": spec["measure"],
+                            "values": [round(v) for _, v in top]}]}
+
     return {"categories": [], "series": []}
 
 
