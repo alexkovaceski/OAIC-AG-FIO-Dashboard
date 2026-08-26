@@ -210,12 +210,16 @@ def test_a_transcribed_q1_figure_does_not_list_seven_workbooks_as_its_sources():
         by_part.setdefault(row["part"], []).append(row["detail"])
     assert "Source file" not in by_part, \
         "an unmarked workbook list under a transcribed figure's heading"
-    marked = by_part["Source file (not this figure — transcribed, see below)"]
+    marked = by_part["Source file (not this figure)"]
     assert len(marked) == 7
+    # the explanation is said ONCE, as its own pointer row, not repeated on
+    # every mark (the old per-row label squeezed the detail column that carries
+    # the URLs and sha256 hashes a reader came for)
+    assert "Reading the marks below" in by_part
     # same for the sheet derivations — no sheet supplied a transcribed value
     assert "Derivation" in by_part          # the convention entries, unmarked
     assert any("Action on requests" in d for d in
-               by_part["Derivation (not this figure — transcribed, see below)"])
+               by_part["Derivation (not this figure)"])
     assert not any("sheet supplies" in d for d in by_part["Derivation"])
     # the OAIC dashboard the figure IS from is still in front of the reader
     assert any("oaic.gov.au" in d for d in by_part["Reference"])
@@ -234,26 +238,105 @@ def test_a_chart_figure_is_still_marked_by_year_not_by_transcription():
         _frame())
     parts = {row["part"] for row in out["data"]}
     assert "Source file (this figure)" in parts
-    assert "Source file (not this figure — transcribed, see below)" not in parts
+    assert "Source file (not this figure)" not in parts
+    assert "Reading the marks below" not in parts   # the pointer is transcribed-only
 
 
-def test_the_subject_gate_is_strictly_tighter_than_the_scope_screen():
-    # The gate only does work if it refuses things check_request admits. If it
-    # ever became a second copy of _FOI_TERMS this passes vacuously, so the
-    # assertion is about the DIFFERENCE: the generic in-scope signals are what
-    # the leaked phrasings cleared the screen on, and none may satisfy the gate.
-    from agentic import guardrails
-    from agentic.report import _PROVENANCE_SUBJECT_RE
-    generic = [t for t in guardrails._FOI_TERMS
-               if not _PROVENANCE_SUBJECT_RE.search(t)]
-    assert set(generic) >= {"top", "year", "quarter", "compare", "trend"}
-    # and nothing the gate admits is outside the screen — the gate must never be
-    # a way IN to a request the screen would have refused
-    for word in ("foi", "requests", "received", "finalised", "decided",
-                 "decisions", "refused", "granted", "withdrawn", "timeliness",
-                 "statutory", "agency", "agencies", "portfolio"):
-        assert _PROVENANCE_SUBJECT_RE.search(word), word
-        assert any(t in word for t in guardrails._FOI_TERMS), word
+def test_the_subject_gate_admits_only_the_platform_s_own_vocabulary():
+    # Attempt 2's gate was EXISTENTIAL — "does the request contain at least one
+    # FOI-domain noun?" — and it leaked 29 more phrasings, because a share
+    # PORTFOLIO, a travel AGENCY, pull REQUESTS and GRANTED liquor licences are
+    # ordinary English. Attempt 3 inverts the test: EVERY content word must be in
+    # this platform's vocabulary (_derived_vocabulary, read off the catalog, plus
+    # the shape/platform words), so a single foreign noun declines the route no
+    # matter how many in-scope words stand beside it. Measured over the real
+    # frame, 2026-08-27.
+    from agentic.report import build_report, _out_of_vocabulary
+    # CONDITION 1 — closed vocabulary. One foreign content word declines, and
+    # the helper says WHICH word, so a regression names the noun rather than
+    # leaving a bare escalate.
+    for question, expected in (
+        ("where did the travel agency data come from?", ["travel"]),
+        ("where did the liquor licence requests data come from?",
+         ["liquor", "licence"]),
+        ("where did the top tourism data come from?", ["tourism"]),
+    ):
+        assert _out_of_vocabulary(question, _frame()) == expected, question
+        out = build_report(question, _frame())
+        assert out["escalate"] is True, question
+        assert out.get("provenance") is None, question
+    # CONDITION 2 — a citable subject. These are entirely in-vocabulary, so the
+    # vocabulary check passes; they must still decline because they neither
+    # resolve a figure key nor name this platform's subject. "share portfolio"
+    # is the phrase attempt 2 leaked on: "portfolio" is a platform word, but a
+    # share portfolio is a financial thing this platform cannot cite.
+    for question in ("where did the share portfolio data come from?",
+                     "where did the top rate data come from?"):
+        assert _out_of_vocabulary(question, _frame()) == [], question
+        out = build_report(question, _frame())
+        assert out["escalate"] is True, question
+        assert out.get("provenance") is None, question
+    # ...and the anchor: a legitimate whole-platform question is empty on the
+    # same helper, so the conditions above are measuring the gate, not a helper
+    # that declines everything.
+    assert _out_of_vocabulary("where did the FOI data come from?", _frame()) == []
+
+
+def test_deixis_is_never_admitted():
+    # "last year's FOI data" and "next quarter's FOI data" name a time this
+    # platform does not publish, so they must decline, not be answered as though
+    # they named a year that is here. _NEVER_ADMITTED holds that line: the cheap
+    # way to "fix" an escalation on "where did last year's FOI data come from?"
+    # is to drop "last" into _FRAME_WORDS, which silently re-opens the
+    # out-of-coverage class ("next year's FOI requests data"). The membership
+    # asserts below fail if anyone does.
+    from agentic.report import (_FRAME_WORDS, _NEVER_ADMITTED, _VOCABULARY,
+                                build_report)
+    for word in _NEVER_ADMITTED:
+        assert word not in _VOCABULARY, f"{word!r} must not be vocabulary"
+    # "coming" is the one exception to "neither set": it is also the gerund of
+    # "come" and belongs in _FRAME_WORDS for "where is this coming from". As
+    # future deixis ("the coming year") it is still declined, by the
+    # citable-subject condition rather than the vocabulary one.
+    for word in _NEVER_ADMITTED - {"coming"}:
+        assert word not in _FRAME_WORDS, f"{word!r} must not be a frame word"
+    for question in ("where did last year's FOI requests data come from?",
+                     "where does next quarter's FOI data come from?"):
+        out = build_report(question, _frame())
+        assert out["escalate"] is True, question
+        assert out.get("provenance") is None, question
+
+
+def test_the_campaign_s_canonical_leak_phrasings_still_escalate():
+    # The campaign memory lists these as live leaks at 62ef9dc: FOI-domain nouns
+    # used in their ordinary-English sense (a share PORTFOLIO, a travel AGENCY,
+    # pull REQUESTS, granted liquor LICENCES), foreign/national subjects, and the
+    # coincidental keyword hit the memory names explicitly ("train timeliness"
+    # -> the timeliness correlation). Every one must now escalate — none may
+    # return lineage, and none may fall through to an unrelated statistic.
+    # Measured over the real frame, 2026-08-27.
+    from agentic.report import build_report
+    leaks = [
+        "where did the song requests data come from?",
+        "where does the share portfolio returns data come from?",
+        "where did the pull requests chart come from?",
+        "where did the travel agency bookings data come from?",
+        "where did the credit rating agency scores come from?",
+        "where did the granted liquor licences come from?",
+        "where did the 1995 FOI requests data come from?",
+        "where did the Irish FOI requests data come from?",
+        "where did the NSW GIPA requests data come from?",
+        "where did the local council FOI data come from?",
+        # "train" is foreign, but "timeliness" is a stat keyword — it must not
+        # fall through to the timeliness correlation stat
+        "where did the train timeliness data come from?",
+    ]
+    for question in leaks:
+        out = build_report(question, _frame())
+        assert out["escalate"] is True, question
+        assert out["stat_key"] is None, \
+            f"{question!r} routed to {out['stat_key']}"
+        assert out.get("provenance") is None, question
 
 
 def test_provenance_answer_calls_a_stat_by_its_label_not_its_key():
