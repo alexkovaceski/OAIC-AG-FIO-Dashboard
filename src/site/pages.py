@@ -128,15 +128,17 @@ def _partial_fy_blob(frame) -> dict:
     LATEST_COMPLETE_FY, and the prose lives here where it is escaped once and
     testable from the server side.
 
-    Six strings per year, because the engine has to say the true one:
+    Eight strings per year, because the engine has to say the true one:
 
       basis        — replaces the figure card's "basis: financial year" line
       count_note   — what the year covers, for a figure that plots COUNTS
       ratio_note   — the same, for a figure that plots a RATE
-      axis_note_lowered / _raised / _unchanged
+      axis_note_count_lowered / _raised / _unchanged
+      axis_note_ratio_lowered / _raised / _unchanged
                    — why the axis is pinned to the selection's own maximum
-                     instead of the full-year baseline, in the three directions
-                     that pin can take (see the axis contract in foi-charts.js)
+                     instead of the full-year baseline: one sentence per
+                     (figure kind x direction the pin moved). See the axis
+                     contract in foi-charts.js.
 
     Why the note comes in two shapes. One count-shaped sentence used to fire on
     every figure kind, including the two ratio pages: it told a reader looking
@@ -146,16 +148,26 @@ def _partial_fy_blob(frame) -> dict:
     over a shorter period and a smaller denominator, so a handful of decisions
     can move it in a way a full year would damp.
 
-    Why the axis note comes in three. The part-year exception pins the axis to
-    the SELECTION's own maximum rather than holding the unfiltered baseline. On
-    a count that is a rescale DOWN (nine months of activity against a full
-    year). On a rate it is frequently a rescale UP — measured 2026-08-26 over
-    change-timeliness and change-decision-outcomes at FY2025-26, across
-    portfolio x type, 34 of the 90 selections that publish a figure put the axis
-    ABOVE the unfiltered baseline (change-timeliness, Attorney-General's,
-    personal: baseline 78.6, axis 99.4) while the single note claimed a rescale
-    down. One selection landed exactly on the baseline. The engine measures the
-    direction and picks the sentence that is true of the chart it just drew.
+    Why the AXIS note is a 2x3 matrix and not a 1x3 one. The part-year exception
+    pins the axis to the SELECTION's own maximum rather than holding the
+    unfiltered baseline, and that pin can move either way — so the first split
+    is the direction. Splitting on direction ALONE still left the count-shaped
+    rationale firing on rates: the lowered sentence says a part year "reads as a
+    fall in FOI activity that the data does not show", and re-measured
+    2026-08-27 over all 495 publishing part-year selections, 55 of the 90 on the
+    two ratio pages lowered their axis and drew that sentence — including the
+    DEFAULT part-year view of change-decision-outcomes (baseline 85.0, axis
+    73.0), one dropdown click from how the page loads. It is false twice on a
+    rate: a grant rate is not "FOI activity", and 73.0% against the earlier
+    years' 85.0% is exactly what the data shows. A rate's honest axis caveat is
+    about comparability of HEIGHTS between two differently scaled charts, not
+    about activity falling.
+
+    Measured 2026-08-27 across the eleven shipped figures, FY2025-26, every
+    portfolio x type selection that publishes a figure (495 of 858): counts
+    405 lowered / 0 raised / 0 unchanged; rates 55 lowered / 34 raised /
+    1 unchanged. The three count sentences are unchanged from the single set
+    they replaced, so no count-shaped figure's note moved.
 
     Measured 2026-08-26: returns one entry, 2025-26.
     """
@@ -171,18 +183,42 @@ def _partial_fy_blob(frame) -> dict:
             "ratio_note": (f"{covers} This rate is measured over that shorter "
                            f"period and a smaller denominator, so it is not "
                            f"comparable with a full-year rate."),
-            "axis_note_lowered": ("Axis rescaled down to this part-year "
-                                  "selection: a part year drawn against the "
-                                  "full-year axis reads as a fall in FOI "
-                                  "activity that the data does not show."),
-            "axis_note_raised": ("Axis set to this part-year selection's own "
-                                 "maximum, which sits above the unfiltered "
-                                 "one: the interval grew to fit the selection "
-                                 "rather than being reduced to it."),
-            "axis_note_unchanged": ("Axis set to this part-year selection's own "
-                                    "maximum rather than held at the unfiltered "
-                                    "one: a part year and a full year are not "
-                                    "like windows to compare across."),
+            "axis_note_count_lowered": ("Axis rescaled down to this part-year "
+                                        "selection: a part year drawn against "
+                                        "the full-year axis reads as a fall in "
+                                        "FOI activity that the data does not "
+                                        "show."),
+            "axis_note_count_raised": ("Axis set to this part-year selection's "
+                                       "own maximum, which sits above the "
+                                       "unfiltered one: the interval grew to "
+                                       "fit the selection rather than being "
+                                       "reduced to it."),
+            "axis_note_count_unchanged": ("Axis set to this part-year "
+                                          "selection's own maximum rather than "
+                                          "held at the unfiltered one: a part "
+                                          "year and a full year are not like "
+                                          "windows to compare across."),
+            "axis_note_ratio_lowered": ("Axis rescaled down to this part-year "
+                                        "selection: the top of the axis is "
+                                        "this selection's own highest rate, so "
+                                        "heights on this chart are not "
+                                        "comparable with the unfiltered one. "
+                                        "The rates themselves are unaffected "
+                                        "by the rescale; read them from the "
+                                        "axis labels."),
+            "axis_note_ratio_raised": ("Axis set to this part-year selection's "
+                                       "own maximum, which sits above the "
+                                       "unfiltered one: this selection reaches "
+                                       "a higher rate than any year on the "
+                                       "unfiltered chart, so the interval grew "
+                                       "to fit it."),
+            "axis_note_ratio_unchanged": ("Axis set to this part-year "
+                                          "selection's own maximum rather than "
+                                          "held at the unfiltered one: a "
+                                          "part-year rate and a full-year rate "
+                                          "are measured over different windows "
+                                          "and are not read off a shared "
+                                          "scale."),
         }
     return out
 

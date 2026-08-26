@@ -1044,8 +1044,9 @@ def test_page_data_ships_the_part_year_disclosure():
         # and the axis notes explain the rescale rather than leaving the reader
         # to compare nine months against a full-year interval
         assert all("scale" in entry[k] or "Axis" in entry[k]
-                   for k in ("axis_note_lowered", "axis_note_raised",
-                             "axis_note_unchanged"))
+                   for k in entry if k.startswith("axis_note_"))
+        assert len([k for k in entry if k.startswith("axis_note_")]) == 6, \
+            "one axis sentence per (figure kind x direction the pin moved)"
         assert LATEST_COMPLETE_FY not in partial, \
             "the latest COMPLETE year must never be flagged as partial"
 
@@ -1334,9 +1335,12 @@ def test_part_year_note_says_what_kind_of_figure_it_is_qualifying():
     for page_key in ("key-agency-contributions-received", "requests-received",
                      "change-timeliness", "change-decision-outcomes"):
         entry = _chart_page_data(page_key)["partial_fys"]["2025-26"]
-        assert set(entry) == {"basis", "count_note", "ratio_note",
-                              "axis_note_lowered", "axis_note_raised",
-                              "axis_note_unchanged"}, entry
+        assert set(entry) == {
+            "basis", "count_note", "ratio_note",
+            "axis_note_count_lowered", "axis_note_count_raised",
+            "axis_note_count_unchanged",
+            "axis_note_ratio_lowered", "axis_note_ratio_raised",
+            "axis_note_ratio_unchanged"}, entry
         # both notes still name the year and say what the file actually covers
         for note in (entry["count_note"], entry["ratio_note"]):
             assert "2025-26" in note and "July" in note
@@ -1351,37 +1355,181 @@ def test_part_year_note_says_what_kind_of_figure_it_is_qualifying():
         assert "rate" in entry["ratio_note"]
 
 
-def test_part_year_axis_note_only_claims_a_rescale_down_when_the_axis_shrank():
-    # C: the part-year exception pins the axis to the SELECTION's own maximum.
-    # On a count that is below the full-year baseline, so the axis shrinks —
-    # but on a RATE it frequently grows. Measured 2026-08-26 over the two ratio
-    # pages at FY2025-26, portfolio x type: 34 of 90 selections put the axis
-    # ABOVE the unfiltered baseline (change-timeliness, Attorney-General's,
-    # personal: baseline 78.6, axis 99.4) while the note claimed a rescale down.
-    entry = _chart_page_data("change-timeliness")["partial_fys"]["2025-26"]
-    lowered, raised = entry["axis_note_lowered"], entry["axis_note_raised"]
-    unchanged = entry["axis_note_unchanged"]
-    assert "down" in lowered.lower()
-    assert "fall in FOI activity" in lowered, \
-        "the shrink case is the one that rationale belongs to"
-    # the grown case must not claim a reduction, and must not reuse the
-    # count-shaped "reads as a fall in FOI activity" mechanism
-    for note in (raised, unchanged):
-        assert "rescaled down" not in note.lower(), note
-        assert "fall in FOI activity" not in note, note
-    assert "above" in raised.lower() or "higher" in raised.lower(), raised
+def _js_axis_note_dispatch():
+    """(is_ratio, direction) -> the __pageData key, READ OUT of the shipped JS.
 
-    # and the engine must CHOOSE between them from a measured comparison
+    There is no JS runtime here, so the test below cannot call
+    partYearAxisNote. What it CAN refuse to do is hand-write the table it is
+    checking. This parses the three return statements out of the real function
+    body and drives the harness off them, so swapping the ratio and count
+    branches in foi-charts.js swaps this table with them and the enumeration
+    below fails on real data instead of quietly passing.
+
+    The direction each branch belongs to is fixed by the guards, which are
+    asserted here verbatim: the first return sits under the null/equal guard
+    (unchanged), the second under `pin < baseline` (lowered), the third is the
+    fallthrough (raised). Change a guard and these regexes stop matching.
+    """
     js = _charts_js()
-    assert "function partYearAxisNote(" in js, \
-        "the engine must pick the axis sentence that is true for this render"
-    for key in ("axis_note_lowered", "axis_note_raised", "axis_note_unchanged"):
-        assert key in js, f"the engine never reaches for {key}"
-    assert "pin < baseline ? partial.axis_note_lowered" in js, \
-        "the direction must come from a comparison, not from the spec kind"
+    body = re.search(r"function partYearAxisNote\(partial, spec, baseline, pin\)"
+                     r" \{(.*?)\n  \}", js, re.S)
+    assert body, "partYearAxisNote no longer takes (partial, spec, baseline, pin)"
+    body = body.group(1)
+    assert "var ratio = isRatioFigure(spec);" in body, \
+        "the kind must come from the one shared predicate, not a second copy"
+    assert re.search(r"if \(baseline === null \|\| baseline === undefined \|\|\s*"
+                     r"pin === null \|\| pin === undefined \|\| pin === baseline\)",
+                     body), "the unchanged guard is gone"
+    assert re.search(r"if \(pin < baseline\) \{", body), \
+        "the direction must come from a measured comparison, not the spec kind"
+    pairs = re.findall(r"return ratio \? partial\.(\w+)\s*:\s*partial\.(\w+);", body)
+    assert len(pairs) == 3, pairs
+    table = {}
+    for direction, (ratio_key, count_key) in zip(
+            ("unchanged", "lowered", "raised"), pairs):
+        table[(True, direction)] = ratio_key
+        table[(False, direction)] = count_key
+    return table
+
+
+def _axis_direction(baseline, pin):
+    """The JS guard, transliterated. Its shape is pinned by regex above, so
+    this cannot drift from the engine without _js_axis_note_dispatch failing."""
+    if baseline is None or pin is None or pin == baseline:
+        return "unchanged"
+    return "lowered" if pin < baseline else "raised"
+
+
+def _series_max(fig_value):
+    vals = [v for s in fig_value.get("series", [])
+            for v in s.get("values", []) if v is not None]
+    return max(vals) if vals else None
+
+
+def _part_year_rate(facts, spec, fy, bucket, portfolio=None):
+    """The rate a ratio figure draws for one part-year selection, off the same
+    fact slice the client re-derives from: sum(numerators) / sum(denominator)
+    over that year's ANNUAL rows, rounded the way the server rounds."""
+    numerator = denominator = 0.0
+    for f in facts:
+        if f["quarter"] is not None or f["fy"] != fy or f["bucket"] != bucket:
+            continue
+        if portfolio and f.get("portfolio") != portfolio:
+            continue
+        if f["measure"] in spec["numerators"]:
+            numerator += f["value"]
+        elif f["measure"] == spec["denominator"]:
+            denominator += f["value"]
+    return round(100 * numerator / denominator, 1) if denominator else None
+
+
+def test_part_year_axis_note_fits_the_figure_kind_and_what_the_axis_did():
+    # C (round 2): the part-year exception pins the axis to the SELECTION's own
+    # maximum. Dispatching that note on DIRECTION alone fixed half the defect:
+    # the lowered sentence explains the shrink with a count's mechanism ("reads
+    # as a fall in FOI activity that the data does not show"), and re-measured
+    # 2026-08-27 over all 495 publishing part-year selections, 55 of the 90 on
+    # the two ratio pages lowered their axis and drew it — including the DEFAULT
+    # part-year view of change-decision-outcomes, where the reader sees a 73.0%
+    # grant rate against an 85.0% baseline and is told the data shows no fall.
+    # It is false twice there: a grant rate is not FOI activity, and the fall it
+    # denies is what the rate shows. So the note dispatches on kind x direction.
+    table = _js_axis_note_dispatch()
+    from stats.catalog import FIGURE_SPECS
+    pages = _pages()
+
+    def blob(page_key):
+        m = re.search(r"window\.__pageData\s*=\s*(\{.*?\});", pages[page_key], re.S)
+        return json.loads(m.group(1).replace("<\\/", "</")
+                          .replace("\\u002d\\u002d", "--"))
+
+    outcomes, timeliness, received = (blob("change-decision-outcomes"),
+                                      blob("change-timeliness"),
+                                      blob("requests-received"))
+    entry = timeliness["partial_fys"]["2025-26"]
+    assert entry == outcomes["partial_fys"]["2025-26"], \
+        "the disclosure must be the same prose on every page"
+    fy = "2025-26"
+
+    # four cases measured off the REAL frame, one per reachable (kind,
+    # direction) cell — baseline from the server's own unfiltered figure, pin
+    # from the selection the client would re-derive.
+    cases = []
+    grant = FIGURE_SPECS["granted_full_part_change"]
+    grant_fig = outcomes["figures"]["granted_full_part_change"]["value"]
+    cases.append(("granted_full_part_change, no filter", True,
+                  _series_max(grant_fig),
+                  _part_year_rate(outcomes["facts"], grant, fy, "total")))
+    late = FIGURE_SPECS["timeliness_change"]
+    late_fig = timeliness["figures"]["timeliness_change"]["value"]
+    late_baseline = _series_max(late_fig)
+    cases.append(("timeliness_change, type=other", True, late_baseline,
+                  _part_year_rate(timeliness["facts"], late, fy, "other")))
+    cases.append(("timeliness_change, Defence + type=other", True, late_baseline,
+                  _part_year_rate(timeliness["facts"], late, fy, "other",
+                                  portfolio="Defence")))
+    received_fig = received["figures"]["requests_received_trend"]["value"]
+    received_pin = received_fig["series"][0]["values"][
+        received_fig["categories"].index(fy)]
+    cases.append(("requests_received_trend, no filter", False,
+                  _series_max(received_fig), received_pin))
+    # and the two cells no selection reaches on today's frame (0 of the 405
+    # count-shaped selections raised or held the axis), driven with constructed
+    # numbers so the sentence a future frame would print is still checked
+    cases.append(("count, axis grew (synthetic)", False, 100.0, 140.0))
+    cases.append(("count, axis held (synthetic)", False, 100.0, 100.0))
+
+    seen = set()
+    for label, is_ratio, baseline, pin in cases:
+        assert baseline is not None and pin is not None, label
+        direction = _axis_direction(baseline, pin)
+        note = entry[table[(is_ratio, direction)]]
+        seen.add((is_ratio, direction))
+        where = f"{label} (baseline {baseline}, pin {pin}, {direction})"
+        if direction == "lowered":
+            assert "rescaled down" in note.lower(), where
+        else:
+            assert "rescaled down" not in note.lower(), where
+        if direction == "raised":
+            assert "above" in note.lower() or "higher" in note.lower(), where
+        if is_ratio:
+            # a rate is not FOI activity and is not a total, whatever the axis
+            # did. This is the assertion the previous version got backwards.
+            assert "fall in FOI activity" not in note, where
+            assert "activity" not in note.lower(), where
+            assert "total" not in note.lower(), where
+            assert "rate" in note.lower(), where
+        elif direction == "lowered":
+            # the count rationale belongs HERE, and only here
+            assert "fall in FOI activity" in note, where
+
+    # the real frame must actually exercise the discrimination, not just the
+    # synthetic tail: a rate that lowered, a rate that grew and a count that
+    # lowered all have to appear above
+    for expected in ((True, "lowered"), (True, "raised"), (False, "lowered")):
+        assert expected in seen, f"{expected} was never reached on the real frame"
+    # and the two lowered sentences must differ, or the dispatch bought nothing
+    assert entry[table[(True, "lowered")]] != entry[table[(False, "lowered")]]
+
+    js = _charts_js()
+    assert "partYearAxisNote(partial, spec, baselineMax[key], pin)" in js, \
+        "the render path must pass the spec, or the kind can never reach it"
     assert "partial.axis_note;" not in js, "the single axis claim is back"
     assert "function partYearNote(" in js and 'kind === "ratio_trend"' in js, \
         "the note must vary by spec kind"
+
+
+def test_chart_axis_pin_is_applied_on_a_null_test_not_a_truthy_one():
+    # a selection whose maximum is exactly 0 is a real pin, and `if (opts.pinMax)`
+    # would drop it and auto-scale while the note beside the chart claimed a pin.
+    # No such selection exists today (measured 2026-08-27: 0 of the 495
+    # publishing part-year selections have a zero maximum, the smallest is 5),
+    # which is why a truthy test could sit here unnoticed.
+    js = _charts_js()
+    assert not re.search(r"if \(opts\.pinMax\) valAxis\.max", js), \
+        "a zero maximum is a pin, not an absent one"
+    assert re.search(r"if \(opts\.pinMax !== null && opts\.pinMax !== undefined\)",
+                     js), "the pin must be applied on an explicit null test"
 
 
 def test_lone_point_trend_keeps_its_emphasis_and_says_it_is_alone():

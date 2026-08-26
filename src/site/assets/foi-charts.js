@@ -40,6 +40,18 @@
  * personal: baseline 78.6, axis 99.4), 55 lowered it and one landed on it —
  * while a single stored sentence claimed a rescale down in all 90.
  *
+ * The note has to say which KIND as well as which direction, and dispatching on
+ * direction alone left half the defect standing. The lowered sentence explains
+ * the shrink with a count's mechanism ("a part year drawn against the full-year
+ * axis reads as a fall in FOI activity that the data does not show"), which is
+ * false twice about a rate: a grant rate is not FOI activity, and the fall it
+ * denies is exactly what the rate shows. Re-measured 2026-08-27 over all 495
+ * publishing part-year selections (eleven figures x portfolio x type at the
+ * part year): all 405 count-shaped ones lowered, and so did 55 of the 90 rate
+ * ones — including the DEFAULT part-year view of change-decision-outcomes,
+ * a 73.0% grant rate against an 85.0% baseline. So partYearAxisNote picks from
+ * a 2x3 matrix: kind x direction, six sentences, one true of each render.
+ *
  * Category contract: a trend's category axis is the FULL published axis, taken
  * from the unfiltered figure, with null where the selection has no row for a
  * year. It is not rebuilt from the filtered rows: 230 of the 433 agencies with
@@ -108,6 +120,16 @@
     return Object.prototype.hasOwnProperty.call(map, fy) ? map[fy] : null;
   }
 
+  // isRatioFigure — the ONE place the engine decides whether the thing on
+  // screen is a rate or a count. Both part-year sentences (the caveat and the
+  // axis rationale) route through it, so the two dispatches cannot drift: the
+  // axis note used to test only the direction while the caveat tested the kind,
+  // and that mismatch is what left a count-shaped rationale on 55 of the 90
+  // publishing ratio-page part-year selections.
+  function isRatioFigure(spec) {
+    return !!(spec && spec.kind === "ratio_trend");
+  }
+
   // partYearNote — the part-year caveat that fits the KIND of figure on screen.
   // One count-shaped sentence used to fire on every kind, so a reader looking at
   // a 71.1% within-statutory rate was told "these are part-year TOTALS" and
@@ -115,21 +137,40 @@
   // belongs to a count and says nothing true about a rate. The rate's own
   // caveat (shorter period, smaller denominator) is the ratio_note.
   function partYearNote(partial, spec) {
-    return (spec && spec.kind === "ratio_trend")
-      ? partial.ratio_note : partial.count_note;
+    return isRatioFigure(spec) ? partial.ratio_note : partial.count_note;
   }
 
-  // partYearAxisNote — which of the three part-year axis sentences is TRUE of
-  // the chart just drawn. The exception pins the axis to the selection's own
-  // maximum, and that is a rescale DOWN only when the selection's maximum is
-  // below the unfiltered baseline. See the axis contract at the top of this
-  // file for the 34/90 measurement that made the single claim false.
-  function partYearAxisNote(partial, baseline, pin) {
+  // partYearAxisNote — which of the SIX part-year axis sentences is TRUE of the
+  // chart just drawn. Two dimensions, because two things vary.
+  //
+  // Direction: the exception pins the axis to the selection's own maximum, and
+  // that is a rescale DOWN only when the selection's maximum is below the
+  // unfiltered baseline. See the axis contract at the top of this file for the
+  // 34/90 measurement that made the single claim false.
+  //
+  // KIND: dispatching on direction alone fixed only half of it. The lowered
+  // sentence explains the shrink with "a part year drawn against the full-year
+  // axis reads as a fall in FOI ACTIVITY that the data does not show" — the
+  // mechanism of a count, and false twice on a rate. Re-measured 2026-08-27
+  // over all 495 publishing part-year selections (eleven figures x every
+  // portfolio x type at the part year): every one of the 405 count-shaped ones
+  // lowered, and 55 of the 90 rate ones lowered too, so that count rationale
+  // was still firing on rates — including the DEFAULT part-year view of
+  // change-decision-outcomes, where the reader sees a 73.0% grant rate against
+  // an 85.0% baseline and is told the data does not show a fall.
+  function partYearAxisNote(partial, spec, baseline, pin) {
+    var ratio = isRatioFigure(spec);
     if (baseline === null || baseline === undefined ||
         pin === null || pin === undefined || pin === baseline) {
-      return partial.axis_note_unchanged;
+      return ratio ? partial.axis_note_ratio_unchanged
+                   : partial.axis_note_count_unchanged;
     }
-    return pin < baseline ? partial.axis_note_lowered : partial.axis_note_raised;
+    if (pin < baseline) {
+      return ratio ? partial.axis_note_ratio_lowered
+                   : partial.axis_note_count_lowered;
+    }
+    return ratio ? partial.axis_note_ratio_raised
+                 : partial.axis_note_count_raised;
   }
 
   // fyAxis — the FULL published financial-year axis for a figure, taken from
@@ -308,7 +349,15 @@
       splitLine: { lineStyle: { color: PAL.hair } },
       axisLabel: { color: PAL.ink },
     };
-    if (opts.pinMax) valAxis.max = opts.pinMax;
+    // an explicit null/undefined test, not a truthy one: a selection whose
+    // maximum is exactly 0 is a real pin, and `if (opts.pinMax)` would drop it
+    // and auto-scale the axis while the note beside the chart claimed a pin.
+    // No such selection exists today (0 of the 495 publishing part-year
+    // selections have a zero maximum; the smallest is 5), which is precisely
+    // why the truthy test could sit here unnoticed.
+    if (opts.pinMax !== null && opts.pinMax !== undefined) {
+      valAxis.max = opts.pinMax;
+    }
 
     if (horizontal) {
       // top-N: agencies on the y axis, rank 1 on top, room for full names.
@@ -886,9 +935,10 @@
       if (partial) notes.push(partYearNote(partial, spec));
       if (out.note) notes.push(out.note);
       if (active.agency) notes.push("Axis rescaled for the selected agency.");
-      // and the axis sentence that is true of the pin this render just chose
+      // and the axis sentence that is true of the pin this render just chose —
+      // for the KIND of figure it drew it on, not the direction alone
       else if (partial) {
-        notes.push(partYearAxisNote(partial, baselineMax[key], pin));
+        notes.push(partYearAxisNote(partial, spec, baselineMax[key], pin));
       } else if (pin && baselineMax[key] && pin > baselineMax[key]) {
         notes.push("Axis extended past the unfiltered maximum to fit this " +
                    "selection.");
