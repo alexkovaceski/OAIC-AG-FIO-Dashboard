@@ -16,7 +16,7 @@ import json
 import re
 from pathlib import Path
 
-from stats.catalog import foi_stats, FIG_CAPTIONS
+from stats.catalog import foi_stats, FIG_CAPTIONS, FIGURE_SPECS
 from site.templates import chrome, _asset_link
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
@@ -167,10 +167,29 @@ def _filters_bar(frame, page_key) -> str:
             f'role="group" aria-label="Filter the charts">{agency}{typ}{fy}</div>')
 
 
+def _page_spec_measures(page_key) -> set:
+    """Every fact measure the page's figure specs consume (trend measures,
+    ratio numerators + denominator, top-N measure)."""
+    out = set()
+    for fig_key in PAGE_FIGURE_KEYS.get(page_key, []):
+        spec = FIGURE_SPECS.get(fig_key, {})
+        out.update(spec.get("measures", []))
+        out.update(spec.get("numerators", []))
+        if spec.get("denominator"):
+            out.add(spec["denominator"])
+        if spec.get("measure"):
+            out.add(spec["measure"])
+    return out
+
+
 def _page_data_script(frame, page_key) -> str:
     """The window.__pageData blob for one page: the foi_stats results for the
-    page's figure keys, the canonical long-form facts (frame.facts, verbatim),
-    and the platform-derived filter options. PURE frame -> JSON — no fabricated
+    page's figure keys, the page's FIGURE_SPECS subset (spec S2.1 — the
+    declarative vocabulary the client engine interprets), the canonical
+    long-form facts scoped to the measures those specs consume, and the
+    platform-derived filter options (GLOBAL — derived from the full frame, so
+    the dropdowns always list every agency/portfolio/type/FY regardless of
+    which measures the page ships). PURE frame -> JSON — no fabricated
     figures, no new aggregates. The live filters select/re-group
     window.__pageData.facts only; they never sum into a total the platform did
     not derive.
@@ -181,7 +200,12 @@ def _page_data_script(frame, page_key) -> str:
     breakout. "--" is also escaped to \\u002d\\u002d so a source value cannot
     form an HTML comment boundary (<!-- / -->) inside the blob."""
     figures = {k: _stat(frame, k) for k in PAGE_FIGURE_KEYS.get(page_key, [])}
-    blob = {"figures": figures, "facts": frame.facts, "filters": _filters_blob(frame)}
+    specs = {k: FIGURE_SPECS[k] for k in PAGE_FIGURE_KEYS.get(page_key, [])
+             if k in FIGURE_SPECS}
+    measures = _page_spec_measures(page_key)
+    facts = [f for f in frame.facts if f["measure"] in measures]
+    blob = {"figures": figures, "specs": specs, "facts": facts,
+            "filters": _filters_blob(frame)}
     safe = (json.dumps(blob).replace("</", "<\\/")
             .replace("--", "\\u002d\\u002d"))
     return f"<script>window.__pageData = {safe};</script>"
