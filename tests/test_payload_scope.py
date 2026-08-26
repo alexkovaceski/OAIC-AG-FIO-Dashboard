@@ -55,9 +55,47 @@ def test_filters_blob_stays_global():
     assert "2019-20" in blob["filters"]["fys"]
 
 
+# Measured on the published frame (2026-08-26): 54,602 facts across 9 measures,
+# 6,067 facts for every measure but received_transfer (6,066). A page ships one
+# such slice per measure its figure specs consume, so the honest per-page bound
+# scales with the page's measure count — a two-measure page legitimately ships
+# twice what a one-measure page does. 7,000 leaves ~15% headroom for the frame
+# growing a quarter or two without the guard crying wolf.
+MAX_FACTS_PER_MEASURE = 7000
+
+
 def test_payload_shrinks():
-    pages = render_all_pages(Frame(normalise_all()))
-    at_a_glance = _blob(pages["at-a-glance"])
-    # at-a-glance consumes one measure; the slice must be well under a fifth
-    # of the ~54.6k-fact full frame
-    assert len(at_a_glance["facts"]) < 12000, len(at_a_glance["facts"])
+    """Every chart page's payload is bounded, and bounded by what that page
+    actually needs. Two bounds, because neither alone is sufficient:
+
+    1. Per-measure — catches a page widening its slice beyond the measures its
+       specs consume (or a measure's slice ballooning).
+    2. Absolute (half the frame) — catches the original regression this guard
+       exists for: a page declaring so many measures that it ships the whole
+       frame again. A purely per-measure bound would wave that through, since
+       9 measures x 7,000 exceeds the entire 54.6k-fact frame.
+
+    Pages with no figures must ship no blob at all — zero is the only correct
+    payload for a page that renders no chart.
+    """
+    frame = Frame(normalise_all())
+    pages = render_all_pages(frame)
+    total_facts = len(frame.facts)
+
+    for key, fig_keys in PAGE_FIGURE_KEYS.items():
+        if not fig_keys:
+            assert "window.__pageData" not in pages[key], (
+                f"{key}: no figures, so it must ship no __pageData blob")
+            continue
+
+        shipped = len(_blob(pages[key])["facts"])
+        n_measures = len(_spec_measures(key))
+        assert n_measures, f"{key}: charted page with no spec measures"
+
+        per_measure_bound = MAX_FACTS_PER_MEASURE * n_measures
+        assert shipped <= per_measure_bound, (
+            f"{key}: ships {shipped} facts for {n_measures} measure(s); "
+            f"bound is {per_measure_bound}")
+        assert shipped <= total_facts // 2, (
+            f"{key}: ships {shipped} of {total_facts} facts — more than half "
+            f"the frame is not a scoped payload")
