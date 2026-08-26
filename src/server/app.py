@@ -9,9 +9,13 @@ Routes:
   GET  /lineage/{artifact_id}     lineage explainability page
   GET  /dashboards/{artifact_id}  the built dashboard page (rendered from spec_json + transcript)
 
-Boot gate: create_app() builds the frame from normalise_all() and runs
+Boot gates: create_app() builds the frame from normalise_all() and runs
 frame.golden_check() — the data-integrity gate. A mismatch aborts loudly
-(SystemExit) so the app never serves wrong data. The frame and the rendered
+(SystemExit) so the app never serves wrong data. Behind it, validate_registry()
+re-hashes every ingested workbook against the curated provenance registry and
+re-derives its claims about this frame; a drift raises ProvenanceError and the
+service does not start (spec S3.5). Both gates read the corpus and the frame
+only, so both hold with no database. The frame and the rendered
 pages are built once and cached at module scope: re-normalising 7 xlsx files
 per request would make every page load spend ~1.5s on IO the data cannot change
 within a process. The boot also seeds the durable Postgres facts once
@@ -56,6 +60,7 @@ from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 
 import api  # noqa: E402
 from config import STATIC_DIR  # noqa: E402
+from provenance import validate_registry  # noqa: E402
 from ingest.normalise import normalise_all  # noqa: E402
 from storage.frame import Frame  # noqa: E402
 from storage.db import get_conn, ensure_schema  # noqa: E402
@@ -111,17 +116,39 @@ def _get_ledger() -> Ledger:
 
 
 def _boot() -> tuple[Frame, dict[str, str]]:
-    """Build the frame, run the golden data-integrity gate, render the pages.
+    """Build the frame, run the golden data-integrity gate, validate the
+    provenance registry, render the pages.
 
-    The golden check is the hard gate: a mismatch means the normaliser or the
-    source data has drifted from the published Q1 2025-26 figures — the app must
-    not serve wrong data, so it aborts loudly (SystemExit) instead of degrading.
-    Once the frame passes, the durable Postgres facts are seeded (I2/C1).
+    The golden check is the hard gate: it re-sums the single-quarter Q1 2025-26
+    slice of the normalised facts, measure by measure, against
+    config.GOLDEN_Q1_FIGURES, and a mismatch aborts loudly (SystemExit) rather
+    than degrading. Be precise about its reach, because the old wording here
+    ("the normaliser or the SOURCE DATA has drifted") overstated it: the golden
+    rows are emitted FROM those same constants, so the check catches a break in
+    the transcription path (ingest.normalise._GOLDEN_MEASURE, _golden_q1_facts)
+    and anything contaminating that quarter window — a future quarterly ingest
+    landing rows in it, say — but it reads no workbook column. What guards the
+    annual figures is validate_registry below: the per-workbook sha256 pins and
+    the applicant-vs-total re-sum.
+
+    validate_registry (spec S3.5) is the SECOND gate and runs behind the first,
+    because a provenance claim is only worth checking once the figures it
+    describes are known good. It re-hashes every ingested workbook against
+    `data/corpus/provenance/sources.md` and re-derives the registry's claims
+    about this frame; a drift raises ProvenanceError and the service does not
+    start. Stale provenance on a transparency site is worse than none — it is a
+    false claim with a hash beside it. It reads the corpus and the frame only,
+    so it holds with no database.
+
+    Both gates run BEFORE `_FRAME` is cached, so a frame that failed either one
+    is never left behind for a later create_app() to serve. Once the frame
+    passes, the durable Postgres facts are seeded (I2/C1).
     """
     global _FRAME, _PAGES
     if _FRAME is None:
         frame = Frame(normalise_all())
         frame.golden_check()
+        validate_registry(frame)
         _FRAME = frame
         _seed_facts(frame)  # I2/C1: seed the durable facts once at boot
     if _PAGES is None:

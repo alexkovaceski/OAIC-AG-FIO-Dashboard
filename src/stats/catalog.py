@@ -169,15 +169,18 @@ def is_reporting_agency(agency_name: str) -> bool:
     figures in this module apply it — the top-N ranking in _figure and the
     movers row selector (M3, S1).
 
-    NOT a description of stats.dsl, and the claim that it was is what this
-    docstring used to say. Measured 2026-08-26 over the six per-agency ops
-    there: only list_agencies (dsl.py:72) excludes both halves; filter_agencies,
-    summarize_agencies, trend, compare_period and by_portfolio drop "Total" and
-    keep x-prefixed names. This predicate is therefore STRICTER than five of the
-    six. The divergence moves no row on the current frame (0 x-prefixed rows in
-    54,602 facts, so the second half is inert everywhere today), which is why it
-    went unnoticed; aligning those ops is a behaviour change and needs its own
-    review, not a comment here.
+    stats.dsl now applies THIS predicate, not a divergent copy. It used to: five
+    of the six per-agency ops there open-coded only the first half
+    (`agency_name.lower() != "total"`), so filter_agencies, summarize_agencies,
+    trend, compare_period and by_portfolio kept x-prefixed rows that
+    list_agencies and this module dropped. Commit 600d93f aligned them.
+    Re-measured 2026-08-27 against dsl.py: all six ops call is_reporting_agency,
+    and the only remaining `!= "total"` in that file is inside the comment
+    explaining the history. The alignment moved 0 rows — ingest.normalise drops
+    x-prefixed rows, so none of the frame's 54,602 facts can exercise the second
+    half — and it is a strict tightening, which can only drop rows, never invent
+    one. The synthetic-frame test in tests/test_dsl.py is what exercises the
+    x-prefixed half, because the real frame cannot.
 
     What it IS the twin of: foi-charts.js's isReportingAgency, which applies
     both halves exactly as written here. Those two must stay identical, because
@@ -425,18 +428,41 @@ def _figure_source_rows(frame, key) -> list[dict]:
     still adds a category and a trailing None to the figure's series: the value
     moves while rows_hash does not, and replay_verify ticks green over a changed
     figure. That is worse than a false alarm — a false alarm is visible.
-    Measured 2026-08-26 by injecting one annual withdrawn row in a new FY
-    2026-27: requests_received_trend gained the category and a trailing None,
-    source_rows stayed 2022 and rows_hash stayed 3b698fc46826.
+
+    THE BLAST RADIUS IS EIGHT FIGURES, NOT ONE. Re-measured 2026-08-27 by
+    injecting a single annual `withdrawn` row in a new FY 2026-27: 9 of the 13
+    figure keys changed VALUE, and 8 of those 9 kept their rows_hash — every
+    trend, multi_trend and ratio_trend key except decision_outcomes_trend, which
+    reads `withdrawn` and so took the injected row into its own basis (its hash
+    moved too, correctly). requests_received_trend is the representative case:
+    categories gained '2026-27', the series gained a trailing None, source_rows
+    stayed 2022 and rows_hash stayed 3b698fc46826. The three top_n keys are
+    unaffected — they narrow to one FY.
+
+    AND ONE HARD FAILURE ON THE SAME TRIGGER. That same injected row makes
+    timeliness_slippage_corr raise, not drift: `TypeError: unsupported operand
+    type(s) for +: 'int' and 'NoneType'`, because _pearson sums its inputs with
+    no None guard and _fy_series now hands it a series with a hole. So the
+    category-axis gap is not purely a silent-pass class; it takes a stat key
+    down with it.
 
     It is inert on the real frame because the annual/total/reporting table is
     complete — all 9 measures x 7 FYs are populated (2,022 rows per measure), so
     a new annual file enters every figure's basis at once and no FY can exist
     outside one. It becomes reachable the moment that stops holding: a
     partial-measure ingest, an FY present only in non-total buckets, or an FY
-    carried only by non-reporting agencies. Fixing it means changing where
-    _figure derives its categories, which is a behaviour change needing its own
-    review — this docstring records the gap rather than closing it quietly.
+    carried only by non-reporting agencies.
+
+    REMEDIATION IS NOT ONE FUNCTION. _figure is where the axis is consumed, but
+    _fy_series (same file) derives an IDENTICAL whole-frame axis of its own to
+    position its values on. Narrowing only _figure would leave every trend
+    series longer than its own category list, and ratio_trend indexing that
+    longer series positionally against the shorter list — which lines up only
+    while the narrowed axis is a leading prefix of the full one, and attributes
+    values to the wrong year the moment a year goes missing from the middle. The
+    two have to be narrowed together, and _pearson needs the None guard above in
+    the same change. All of it is a behaviour change needing its own review —
+    this docstring records the gap rather than closing it quietly.
     """
     spec = FIGURE_SPECS.get(key)
     if spec is None:
