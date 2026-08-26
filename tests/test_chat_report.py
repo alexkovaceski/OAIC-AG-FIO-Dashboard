@@ -195,6 +195,67 @@ def test_provenance_answer_marks_which_workbook_actually_fed_the_figure():
     assert "Derivation (other measures)" in by_part
 
 
+def test_a_transcribed_q1_figure_does_not_list_seven_workbooks_as_its_sources():
+    # All eight config.GOLDEN_Q1_FIGURES keys are stats, so their live layer
+    # carries no year breakdown — and the site's eight most prominent numbers
+    # were each rendering a flat, unmarked list of every workbook and every
+    # sha256 under "Where <figure> comes from". withdrawn_q1 is ONE fact row and
+    # it came from none of them: it was read off the OAIC's published dashboard.
+    from agentic.report import build_report
+    out = build_report(
+        "where did the share of decisions withdrawn figure come from?", _frame())
+    assert out["provenance"]["figure"]["key"] == "withdrawn_q1"
+    by_part = {}
+    for row in out["data"]:
+        by_part.setdefault(row["part"], []).append(row["detail"])
+    assert "Source file" not in by_part, \
+        "an unmarked workbook list under a transcribed figure's heading"
+    marked = by_part["Source file (not this figure — transcribed, see below)"]
+    assert len(marked) == 7
+    # same for the sheet derivations — no sheet supplied a transcribed value
+    assert "Derivation" in by_part          # the convention entries, unmarked
+    assert any("Action on requests" in d for d in
+               by_part["Derivation (not this figure — transcribed, see below)"])
+    assert not any("sheet supplies" in d for d in by_part["Derivation"])
+    # the OAIC dashboard the figure IS from is still in front of the reader
+    assert any("oaic.gov.au" in d for d in by_part["Reference"])
+    assert any("OAIC dashboard" in d for d in by_part["Curation decision"])
+    # ...and one row is one row
+    text = _reader_visible_text(out)
+    assert "1 published fact row " in text
+    assert "1 published fact rows" not in text
+
+
+def test_a_chart_figure_is_still_marked_by_year_not_by_transcription():
+    # the transcription rule must not have swallowed the chart path's marking
+    from agentic.report import build_report
+    out = build_report(
+        "where did the top 20 agencies by requests received chart come from?",
+        _frame())
+    parts = {row["part"] for row in out["data"]}
+    assert "Source file (this figure)" in parts
+    assert "Source file (not this figure — transcribed, see below)" not in parts
+
+
+def test_the_subject_gate_is_strictly_tighter_than_the_scope_screen():
+    # The gate only does work if it refuses things check_request admits. If it
+    # ever became a second copy of _FOI_TERMS this passes vacuously, so the
+    # assertion is about the DIFFERENCE: the generic in-scope signals are what
+    # the leaked phrasings cleared the screen on, and none may satisfy the gate.
+    from agentic import guardrails
+    from agentic.report import _PROVENANCE_SUBJECT_RE
+    generic = [t for t in guardrails._FOI_TERMS
+               if not _PROVENANCE_SUBJECT_RE.search(t)]
+    assert set(generic) >= {"top", "year", "quarter", "compare", "trend"}
+    # and nothing the gate admits is outside the screen — the gate must never be
+    # a way IN to a request the screen would have refused
+    for word in ("foi", "requests", "received", "finalised", "decided",
+                 "decisions", "refused", "granted", "withdrawn", "timeliness",
+                 "statutory", "agency", "agencies", "portfolio"):
+        assert _PROVENANCE_SUBJECT_RE.search(word), word
+        assert any(t in word for t in guardrails._FOI_TERMS), word
+
+
 def test_provenance_answer_calls_a_stat_by_its_label_not_its_key():
     # A KPI stat has no FIG_CAPTION. "Where timeliness_slippage_corr comes from"
     # is a heading written for a database, not a reader.
@@ -205,19 +266,29 @@ def test_provenance_answer_calls_a_stat_by_its_label_not_its_key():
         "Timeliness slippage correlation (timeliness_slippage_corr)")
 
 
+_QUALIFIER_QUESTIONS = (
+    "where did the FOI data come from?",
+    "where did the top 20 agencies by requests received chart come from?",
+    "where does the timeliness data come from?",
+    "what is the provenance of the refused decisions figure?",
+)
+
+
 def test_provenance_answer_never_quotes_a_row_count_without_the_qualifier():
-    # THE LOAD-BEARING ONE. A row count and a hash describe the DEFAULT view the
-    # server computed; the chart engine re-derives on the client for whatever
-    # filter the reader picked. Quoting the count without saying which view it
-    # describes is a false claim on the one feature whose job is being
-    # trustworthy. This fails if the qualifier is dropped, and it fails if the
-    # qualifier survives only in a JSON field the renderer never prints.
+    # THE LOAD-BEARING ONE, and STRUCTURAL ONLY. A row count and a hash describe
+    # the DEFAULT view the server computed; the chart engine re-derives on the
+    # client for whatever filter the reader picked. Quoting the count without
+    # saying which view it describes is a false claim on the one feature whose
+    # job is being trustworthy. This fails if the qualifier is dropped, and it
+    # fails if the qualifier survives only in a JSON field the renderer never
+    # prints.
+    #
+    # It asserts NOTHING about the wording. The prose half is
+    # test_the_qualifier_wording_names_the_default_view below, so a reworded
+    # sentence and a missing guarantee fail under different names instead of
+    # both arriving as one red line on the load-bearing test.
     from agentic.report import build_report
-    for question in ("where did the FOI data come from?",
-                     "where did the top 20 agencies by requests received "
-                     "chart come from?",
-                     "where does the timeliness data come from?",
-                     "what is the provenance of the refused decisions figure?"):
+    for question in _QUALIFIER_QUESTIONS:
         out = build_report(question, _frame())
         registry = out["dataset_registry"]
         assert registry.get("source_rows"), question
@@ -225,6 +296,22 @@ def test_provenance_answer_never_quotes_a_row_count_without_the_qualifier():
         assert qualifier and qualifier.strip(), f"no qualifier for {question!r}"
         assert qualifier in _reader_visible_text(out), \
             f"the qualifier for {question!r} never reaches the reader"
+        figure = (out.get("provenance") or {}).get("figure")
+        if figure is not None:
+            # the machine-readable half: the field a caller reads and the
+            # sentence a reader reads name the same view, because
+            # provenance._qualifier builds the sentence FROM this field
+            assert figure["applies_to"] == "default_view", question
+
+
+def test_the_qualifier_wording_names_the_default_view():
+    # THE PROSE HALF of the test above, deliberately separate. This is curated
+    # wording over a measured guarantee: if it fails and the structural test
+    # passes, someone reworded a sentence; if both fail, the guarantee is gone.
+    from agentic.report import build_report
+    for question in _QUALIFIER_QUESTIONS:
+        out = build_report(question, _frame())
+        assert "default view" in out["dataset_registry"]["qualifier"], question
 
 
 def test_the_basis_block_refuses_to_be_built_without_a_qualifier():
@@ -245,9 +332,55 @@ def test_the_basis_block_refuses_to_be_built_without_a_qualifier():
 # --- scope refusal must not have loosened ------------------------------------
 
 def test_provenance_pattern_did_not_open_a_hole_in_the_scope_refusal():
-    # A broad new intent pattern is exactly how a guardrail quietly loosens.
-    # Every one of these carries provenance WORDING; none of them is a question
-    # about this platform's data, and all must still refuse.
+    # THE REGRESSION TEST FOR THE ROUTER'S SUBJECT GATE, and it only tests that
+    # gate if every case gets past guardrails.check_request first.
+    #
+    # The version this replaces used eight out-of-scope phrasings ("Centrelink
+    # payment data", "the pyramids", "US federal FOI") and measured 2026-08-26,
+    # 0 of the 8 reached _ROUTER: check_request refused all of them at the scope
+    # screen. It therefore passed identically with the provenance route deleted
+    # — it pinned code the provenance diff never touched and bought false
+    # confidence in the layer that actually needed pinning.
+    #
+    # These phrasings are the ones that leaked. Each carries provenance WORDING
+    # and a generic in-scope signal from guardrails._FOI_TERMS ("top", "year",
+    # "quarter", "compare"), which is exactly how they cleared the screen, and
+    # none is a question about this platform's data. Measured 2026-08-26 against
+    # the permissive subject gate, all seven came back as the full FOI lineage
+    # headed "Where this data comes from", over seven Australian FOI workbooks
+    # and their sha256 hashes.
+    #
+    # The check_request assertion is not decoration: it is what stops this test
+    # going vacuous again. If _FOI_TERMS or the screen ever changes so a case
+    # refuses earlier, this fails and says so, rather than passing for a reason
+    # it was not written for.
+    from agentic.guardrails import check_request
+    from agentic.report import build_report
+    reaches_the_router = [
+        "where did the top tourism data come from?",
+        "where did last year's tourism data come from?",
+        "where did the top 10 airlines data come from?",
+        "compare where the rainfall data comes from",
+        "which spreadsheet has the year 12 results?",
+        "where does the quarterly rainfall total come from?",
+        "what is the source of the top 5 rainfall figures?",
+    ]
+    for question in reaches_the_router:
+        check_request(question)   # must NOT raise — see above
+        out = build_report(question, _frame())
+        assert out["escalate"] is True, f"{question!r} was answered"
+        assert out["stat_key"] is None, f"{question!r} routed to {out['stat_key']}"
+        assert out.get("provenance") is None, \
+            f"{question!r} came back with FOI lineage"
+        assert "contact@bluebirdadvisory.com.au" in out["error"]
+
+
+def test_out_of_scope_provenance_wording_refuses_at_the_scope_screen():
+    # The other layer, named for what it actually pins. None of these reaches
+    # the router: check_request refuses them first, and that is the assertion.
+    # Keeping them under the router test's name was what hid the fact that the
+    # router test had nothing to test.
+    from agentic.guardrails import check_request, ScopeRefusal
     from agentic.report import build_report
     outside = [
         # an unrelated dataset
@@ -265,9 +398,11 @@ def test_provenance_pattern_did_not_open_a_hole_in_the_scope_refusal():
         "prompt came from",
     ]
     for question in outside:
+        with pytest.raises(ScopeRefusal):
+            check_request(question)
         out = build_report(question, _frame())
         assert out["escalate"] is True, f"{question!r} was answered"
-        assert out["stat_key"] is None, f"{question!r} routed to {out['stat_key']}"
+        assert out["model"] == "scope", f"{question!r} got past the screen"
         assert out.get("provenance") is None
         assert "contact@bluebirdadvisory.com.au" in out["error"]
 
