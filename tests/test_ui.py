@@ -663,7 +663,14 @@ def test_top_n_note_discloses_an_ignored_fy_selection():
     js = _charts_js()
     assert "selection is not applied here" in js, \
         "an ignored FY selection must be disclosed"
-    assert "the trend covers every published year" in js
+    # and the disclosure must describe the series that is actually drawn:
+    # trendSeries takes its categories from the FILTERED rows, so a small agency
+    # spans fewer years than the frame (measured: "Aboriginal Benefit Account
+    # Advisory Committee" renders 4 categories in a 7-FY frame). "every
+    # published year" over-claimed.
+    assert "the trend covers every year this agency has published" in js
+    assert "the trend covers every published year" not in js, \
+        "the note claims a span the one-agency trend does not have"
 
 
 def test_dim_filter_docstring_matches_its_call_sites():
@@ -733,6 +740,40 @@ def test_change_pages_survive_a_frame_without_an_fy_pair():
         assert "No movers ranking for this measure" in pages[key], key
         assert '<table class="movers">' not in pages[key], key
         assert "Top 10 of" not in pages[key], f"{key}: a ranking was invented"
+
+
+def test_movers_note_does_not_explain_a_code_bug_as_a_data_limitation():
+    # F3: the try wrapped the whole call, so a KeyError raised while BUILDING
+    # the section (a malformed movers value dict — the real bug shape) was
+    # converted into "the data in this snapshot does not cover two complete
+    # financial years to compare". A code defect must not be published as a
+    # data explanation. The try now covers the catalog lookup only.
+    import pytest
+    from site import pages as pages_mod
+    frame = Frame(normalise_all())
+
+    original = pages_mod._movers_section
+    try:
+        def exploding_section(title, stat, unit="%"):
+            raise KeyError("fy_a")
+        pages_mod._movers_section = exploding_section
+        with pytest.raises(KeyError):
+            pages_mod._movers_or_note(frame, "Refusal rate movers",
+                                      "refusal_rate_movers")
+    finally:
+        pages_mod._movers_section = original
+
+    # and the lookup KeyError still degrades to the honest note
+    def missing_key(frame_arg, key):
+        raise KeyError(key)
+    original_stat = pages_mod._stat
+    try:
+        pages_mod._stat = missing_key
+        out = pages_mod._movers_or_note(frame, "Refusal rate movers",
+                                        "refusal_rate_movers")
+    finally:
+        pages_mod._stat = original_stat
+    assert "No movers ranking for this measure" in out
 
 
 def test_movers_table_says_the_filters_do_not_reach_it():

@@ -130,15 +130,28 @@ def hash_rows(rows: list[dict]) -> str:
 
 
 def is_reporting_agency(agency_name: str) -> bool:
-    """True for a real reporting body. The golden "Total" pseudo-agency is a
-    total-level fact, not an agency, and x-prefixed keys are the normaliser's
-    placeholder rows. Every per-agency op in stats.dsl excludes both; the
-    per-agency figures in this module must agree (M3, S1).
+    """True for a real reporting body. It excludes exactly two things: the
+    golden "Total" pseudo-agency (a national total-level fact, not an agency)
+    and x-prefixed names (the normaliser's placeholder rows). The per-agency
+    figures in this module apply it — the top-N ranking in _figure and the
+    movers row selector (M3, S1).
+
+    NOT a description of stats.dsl, and the claim that it was is what this
+    docstring used to say. Measured 2026-08-26 over the six per-agency ops
+    there: only list_agencies (dsl.py:72) excludes both halves; filter_agencies,
+    summarize_agencies, trend, compare_period and by_portfolio drop "Total" and
+    keep x-prefixed names. This predicate is therefore STRICTER than five of the
+    six. The divergence moves no row on the current frame (0 x-prefixed rows in
+    54,602 facts, so the second half is inert everywhere today), which is why it
+    went unnoticed; aligning those ops is a behaviour change and needs its own
+    review, not a comment here.
+
+    What it IS the twin of: foi-charts.js's isReportingAgency, which applies
+    both halves exactly as written here. Those two must stay identical, because
+    the client re-derives on screen the same rankings this module publishes.
 
     PUBLIC because site.pages needs it for the agency dropdown — it was
-    imported across a module boundary as a private name. foi-charts.js carries
-    the client twin (isReportingAgency); the two predicates must stay
-    identical, both halves of them."""
+    imported across a module boundary as a private name."""
     return agency_name.lower() != "total" and not agency_name.startswith("x")
 
 
@@ -172,6 +185,30 @@ def _fy_series(frame, measure):
         by[f["fy"]] += f["value"]
     cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
     return [round(by[y]) if y in by else None for y in cats]
+
+
+def _fy_series_source_rows(frame, measures) -> list[dict]:
+    """The annual fact rows an FY-series stat reads: quarter is None,
+    bucket="total", one of `measures`, real reporting agencies only.
+
+    This is the hash basis for a stat computed from _fy_series output, so
+    source_rows/rows_hash describe rows the stat actually consumed rather than a
+    sentinel (the same discipline _movers_source_rows applies).
+
+    One honest caveat: _fy_series itself applies NO agency predicate, so this
+    row set is the reporting-agency SUBSET of what the series sums. On the
+    current frame the two are the same rows — measured 2026-08-26, no annual row
+    carries a non-reporting agency name, and the correlation's basis is 4044
+    rows with sha256 65aa3bd3... whether the predicate is applied or not. If an
+    annual "Total" row ever lands, _fy_series would sum it while this basis
+    excluded it; that would be a bug in _fy_series (the top-N path in _figure
+    already excludes it), and the divergence is worth surfacing rather than
+    papering over by hashing rows a per-agency figure would refuse.
+    """
+    return [f for f in frame.facts
+            if f["quarter"] is None and f["bucket"] == "total"
+            and f["measure"] in measures
+            and is_reporting_agency(f["agency_name"])]
 
 
 def _pearson(a, b):
@@ -430,15 +467,29 @@ def foi_stats(frame, key) -> dict:
         # only for a degenerate pair — fewer than two points, mismatched
         # lengths, or zero variance in either series — never a fabricated
         # number. basis is "fy".
-        # KNOWN GAP: source_rows/rows_hash stay on the empty-row sentinel
-        # (hash_rows([])), so replay_verify checks nothing for this key. Left
-        # alone deliberately — the sentinel hash is already stored in published
-        # lineage_ops rows, and recomputing it here would fail replay for every
-        # dataset ingested before today (the same trap the _FACT_KEYS note
-        # describes). Fixing it needs a lineage migration, not a comment.
+        #
+        # source_rows/rows_hash used to be the empty-row sentinel (0 /
+        # hash_rows([])) left over from when this stat returned None. That was
+        # a false provenance claim published beside a real number (the router in
+        # agentic.report ships both fields to the user as dataset_registry), and
+        # it was WORSE than no check: the sentinel string is truthy, so
+        # replay_verify's `bool(stored) and rows_hash == stored` compared the
+        # sentinel to itself and returned a green tick over nothing. Now it
+        # names the 4044 annual rows it consumes (measured 2026-08-26; sha256
+        # 65aa3bd3578c51e75cb208f6bf6834d656564c10cacbea395754a24f947d9ebe).
+        #
+        # Accepted cost: lineage_ops rows recorded BEFORE this change carry the
+        # sentinel and will now fail replay. That is the correct outcome — they
+        # were recorded with no row basis — and it is the precedent the three
+        # movers keys set in this same stage. replay_verify fails closed
+        # (returns False, never raises), and this key is not in
+        # PAGE_FIGURE_KEYS, so only AI-built dashboard panels via
+        # server.app._record_figure_ops ever wrote it.
+        rows = _fy_series_source_rows(frame, ("within_statutory", "received"))
         return {"value": _pearson(_fy_series(frame, "within_statutory"),
                                   _fy_series(frame, "received")),
-                "basis": "fy", "source_rows": 0, "rows_hash": hash_rows([])}
+                "basis": "fy", "source_rows": len(rows),
+                "rows_hash": hash_rows(rows)}
     if key in FIG_KEYS:
         rows = frame.facts
         return {"value": _figure(frame, key), "basis": "fy", "source_rows": len(rows),

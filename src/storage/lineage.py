@@ -10,6 +10,7 @@ fails on an unreachable DB; any other psycopg2.Error raises, so a schema or
 programming error surfaces instead of being silently hidden.
 """
 from __future__ import annotations
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,13 @@ import psycopg2
 
 LINEAGE_EVENTS = ("data_loaded", "request_received", "tool_call", "spec_selected",
                   "build_computed", "output_written", "review_verdict")
+
+# stats.catalog.hash_rows([]) — sha256 over an EMPTY row set. Computed here, not
+# imported, so this module keeps working before the catalog is built (see
+# _replay_default_compute). A stored op carrying this hash has no verifiable row
+# basis, and comparing it to a recomputed copy of itself is a green tick over
+# nothing — replay_verify treats it as UNVERIFIABLE, not as a pass.
+EMPTY_ROWS_HASH = hashlib.sha256(b"").hexdigest()
 
 
 class Ledger:
@@ -192,9 +200,14 @@ def replay_verify(conn, op_row, compute=None) -> bool:
     rows_hash. Never trusts the stored value.
 
     compute(op_row) -> (value, rows_hash); the default recomputes via Task 5's
-    foi_stats (lazy import). On any recompute error, or when the stored hash is
-    empty, replay fails open (returns False) — a lineage replay must never crash
-    a build, and an unverifiable row must not pass.
+    foi_stats (lazy import). On any recompute error, when the stored hash is
+    empty, or when it is EMPTY_ROWS_HASH, replay fails closed (returns False) —
+    a lineage replay must never crash a build, and an unverifiable row must not
+    pass.
+
+    The EMPTY_ROWS_HASH guard is the one that was missing: a stat that recorded
+    hash_rows([]) stored a truthy 64-char string, so both sides of the compare
+    were the same sentinel and the row passed with no row basis behind it.
     """
     compute = compute or _replay_default_compute
     try:
@@ -202,4 +215,6 @@ def replay_verify(conn, op_row, compute=None) -> bool:
         stored = op_row.get("rows_hash")
     except Exception:
         return False
-    return bool(stored) and rows_hash == stored
+    if not stored or stored == EMPTY_ROWS_HASH:
+        return False
+    return rows_hash == stored

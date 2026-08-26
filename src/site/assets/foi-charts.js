@@ -314,8 +314,9 @@
   //     that explains the resulting single point); type is skipped because
   //     those kinds carry the bucket through trendSeries instead.
   //   top_n — {type: true, fy: true}. The ranking loop consumes fy as the
-  //     ranking year, and the degenerate one-agency view plots every published
-  //     year (its note says the FY selection is not applied there).
+  //     ranking year, and the degenerate one-agency view plots every year that
+  //     agency has published rows for (its note says the FY selection is not
+  //     applied there).
   // The agency dimension has no skip: in the degenerate view it is exactly what
   // selects the agency's rows, and in the ranking loop no agency can be
   // selected — the degenerate guard returned before that point.
@@ -334,9 +335,11 @@
   // is_reporting_agency, and it must stay identical to it, BOTH halves.
   // "Total" is a national total-level fact, not an agency; an x-prefixed name
   // is the normaliser's placeholder row. The frame carries no x-prefixed
-  // agency name today, so that half is inert — it is here because the two
-  // engines are documented as mirrors, and a guard that is only inert cannot
-  // be relied on to stay correct when one appears.
+  // agency name today (measured 2026-08-26: 0 of 54,602 facts), so that half is
+  // inert — it is here because catalog.py's per-agency figures apply both
+  // halves, and a guard that is only inert cannot be relied on to stay correct
+  // when one appears. The ops in stats/dsl.py are a different story; see the
+  // is_reporting_agency docstring for which of them are not aligned.
   function isReportingAgency(name) {
     return !!name && name.toLowerCase() !== "total" && name.charAt(0) !== "x";
   }
@@ -463,9 +466,13 @@
         rows = dimFilter(facts, active, { type: true, fy: true });
         trend = trendSeries(rows, spec.measure, bucket);
         if (!trend.cats.length || !anyNumeric(trend.values)) return undefined;
-        // the FY selection is dropped on this path (the trend spans every
-        // published year). Saying so is the same rule the one-year trend note
-        // follows: a select that visibly ignores its input reads as broken.
+        // the FY selection is dropped on this path. Saying so is the same rule
+        // the one-year trend note follows: a select that visibly ignores its
+        // input reads as broken. The note says "every year this agency has
+        // published data for", not "every published year" — trendSeries builds
+        // its categories from the FILTERED rows, so a small agency spans fewer
+        // years than the frame does (measured 2026-08-26: "Aboriginal Benefit
+        // Account Advisory Committee" renders 4 categories in a 7-FY frame).
         return {
           fig: { categories: trend.cats,
                  series: [{ name: spec.measure, values: trend.values.map(
@@ -474,7 +481,8 @@
                 " (a one-agency ranking is not a top-" + spec.n + ")." +
                 (active.fy
                   ? " The FY " + active.fy + " selection is not applied here: " +
-                    "the trend covers every published year."
+                    "the trend covers every year this agency has published " +
+                    "data for."
                   : ""),
           asTrend: true,
         };
@@ -488,9 +496,14 @@
         // The golden Q1 rows are a single-quarter NATIONAL figure published
         // under a "Total" pseudo-agency: left in, it outranks every agency in
         // the latest FY and puts one quarter's number on a bar chart labelled
-        // "basis: financial year". Both guards mirror the platform — the FY
-        // series skip quarter-carrying rows, and isReportingAgency is the twin
-        // of the predicate every per-agency op in stats/ applies.
+        // "basis: financial year". Both guards mirror the SERVER'S RANKING —
+        // stats/catalog.py's top_n branch skips quarter-carrying rows and
+        // applies is_reporting_agency, and isReportingAgency is that
+        // predicate's twin. It is not the predicate "every per-agency op in
+        // stats/ applies": measured 2026-08-26, five of the six ops in
+        // stats/dsl.py drop only the "Total" pseudo-agency and keep x-prefixed
+        // rows, so this client guard is stricter than they are. No row moves
+        // either way on the current frame (0 x-prefixed rows).
         if (row.quarter !== null) continue;
         if (!isReportingAgency(row.agency_name)) continue;
         if (row.fy !== fy || row.measure !== spec.measure ||

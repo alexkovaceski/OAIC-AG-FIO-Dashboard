@@ -11,7 +11,8 @@ from ingest.normalise import normalise_all
 from storage.frame import Frame
 from stats import catalog
 from stats.catalog import (FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY,
-                           MOVERS_MIN_DENOMINATOR, foi_stats,
+                           MOVERS_MIN_DENOMINATOR, STAT_KEYS, foi_stats,
+                           hash_rows, _fy_series_source_rows,
                            _movers_source_rows, _previous_complete_fy)
 
 
@@ -71,6 +72,43 @@ def test_timeliness_caption_and_correlation_describe_what_is_published():
     corr = foi_stats(frame, "timeliness_slippage_corr")
     assert corr["value"] is not None and -1 <= corr["value"] <= 1, \
         "the correlation is a real coefficient over two published FY series"
+
+
+def test_correlation_publishes_the_rows_it_actually_consumed():
+    # F1: the stat computed a real 0.538 and reported source_rows=0 with
+    # rows_hash=hash_rows([]) — a false provenance claim shipped to the user by
+    # agentic/report.py as dataset_registry, and a sentinel that made
+    # replay_verify compare itself to itself and return a green tick.
+    frame = Frame(normalise_all())
+    corr = foi_stats(frame, "timeliness_slippage_corr")
+    empty_sentinel = hash_rows([])
+    assert corr["source_rows"] > 0, "a computed correlation consumed no rows"
+    assert corr["rows_hash"] != empty_sentinel, \
+        "the hash is the empty-row sentinel — nothing to replay against"
+    # and the basis is the exact rows: annual, bucket=total, both correlated
+    # measures, real reporting agencies only
+    expected = _fy_series_source_rows(frame, ("within_statutory", "received"))
+    assert corr["source_rows"] == len(expected)
+    assert corr["rows_hash"] == hash_rows(expected)
+    for row in expected:
+        assert row["quarter"] is None and row["bucket"] == "total"
+        assert row["measure"] in ("within_statutory", "received")
+        assert catalog.is_reporting_agency(row["agency_name"])
+
+
+def test_no_stat_hashes_an_empty_row_set_while_computing_a_value():
+    # the general form of F1: a {value, basis, source_rows, rows_hash} result
+    # that carries a real value must carry a real row basis. hash_rows([]) is
+    # truthy, so a sentinel here is worse than a missing hash.
+    frame = Frame(normalise_all())
+    empty_sentinel = hash_rows([])
+    for key in list(FIG_KEYS) + list(STAT_KEYS):
+        stat = foi_stats(frame, key)
+        if stat["value"] is None:
+            continue
+        assert stat["source_rows"] > 0, f"{key}: real value, zero source rows"
+        assert stat["rows_hash"] != empty_sentinel, \
+            f"{key}: real value, empty-row hash sentinel"
 
 
 def test_top_n_spec_takes_fy_parameter():

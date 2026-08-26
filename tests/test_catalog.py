@@ -69,3 +69,29 @@ def test_published_measures_render_real_series():
     # series — not a fabricated number, not a forced None
     corr = foi_stats(f, "timeliness_slippage_corr")["value"]
     assert corr is not None and -1 <= corr <= 1
+
+
+def test_empty_row_hash_is_not_a_replay_pass():
+    # hash_rows([]) is a truthy 64-char string, so replay_verify's old
+    # `bool(stored) and rows_hash == stored` compared the sentinel to a
+    # recomputed copy of itself and returned True — a green tick over a figure
+    # with no row basis. An empty row set is UNVERIFIABLE, not verified.
+    from storage import lineage
+    sentinel = hash_rows([])
+    assert lineage.EMPTY_ROWS_HASH == sentinel
+    assert bool(sentinel), "the sentinel is truthy — that is the whole trap"
+
+    row = {"dataset_id": 1, "op": "timeliness_slippage_corr", "params": {},
+           "result_value": 0.538, "rows_hash": sentinel}
+    assert lineage.replay_verify(
+        None, row, compute=lambda op_row: (0.538, sentinel)) is False
+
+    # a real row basis still verifies, and a mismatch still fails
+    real = hash_rows([{"agency_key": "a", "agency_name": "A", "fy": "2024-25",
+                       "quarter": None, "measure_group": "g", "measure": "m",
+                       "bucket": "total", "value": 1.0, "derived": False}])
+    good = dict(row, rows_hash=real)
+    assert lineage.replay_verify(
+        None, good, compute=lambda op_row: (0.538, real)) is True
+    assert lineage.replay_verify(
+        None, good, compute=lambda op_row: (0.538, sentinel)) is False

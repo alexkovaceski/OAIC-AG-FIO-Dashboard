@@ -325,9 +325,11 @@ h1 {
 
 /* A horizontal ranking draws every category label (interval: 0), so its 20
    bands need room: at the 320px default they share ~280px — ~14px a band
-   against an 11px font — and the labels collide. foi-charts.js adds .topn to a
-   chartbox it mounts a ranking into, and removes it when the same box falls
-   back to a trend or a placeholder. */
+   against an 11px font — and the labels collide. pages.py (_chart_container)
+   now emits .topn with the markup for a top_n figure, so the tall box is there
+   before any script runs. foi-charts.js re-adds it on mount (a no-op on a
+   server-classed box) and REMOVES it when the same box falls back to a trend or
+   a placeholder — a one-agency selection turns a ranking into a trend. */
 .chartbox.topn { min-height: 560px; }
 
 /* --- no-data placeholders -------------------------------------------------- */

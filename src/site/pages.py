@@ -268,9 +268,16 @@ def _source_for_basis(basis) -> str | None:
 
 
 def _kpi_block(cells: str) -> str:
-    """A KPI block: the tiles, then the scope note that describes them. The note
-    is emitted HERE rather than pasted onto each page, so a page cannot render
-    the tiles without the disclosure that the filters do not reach them."""
+    """A KPI block: the tiles, then the scope note that describes them.
+
+    The guarantee is about this function, not about the pages: tiles emitted
+    THROUGH _kpi_block always carry the disclosure that the filters do not reach
+    them, and the note lives here rather than pasted at each call site so it
+    cannot drift out of position. It is NOT true that a page cannot render tiles
+    without it — _page_at_a_glance hand-builds its first `.kpis` div and only
+    its second block comes through here, so that page's single note sits under
+    both. A new tile block should route through this function rather than repeat
+    that loophole."""
     return f'<div class="kpis">{cells}</div>{_kpi_scope_note()}'
 
 
@@ -420,20 +427,26 @@ def _movers_or_note(frame, title, stat_key) -> str:
     figure is produced at all, and the page says so in the same words every
     other unpublishable figure on the site uses. Nothing is fabricated.
 
-    The except is as narrow as the language allows, and it is still not narrow
-    enough to distinguish the catalog's declared "this frame cannot compute this
-    key" signal from a genuine KeyError raised inside the stat — the same
-    limitation api.figures carries. A missing key mis-typed here would render
-    the note instead of raising; the two literal keys below are covered by
-    test_change_pages_render_movers_tables.
+    The try covers the CATALOG LOOKUP only, and the section is built outside it.
+    Wrapping the whole call meant any KeyError raised while composing the HTML —
+    a movers value dict missing "fy_a", say — was rendered to the reader as "the
+    data in this snapshot does not cover two complete financial years", which is
+    a code defect dressed up as a data limitation. A build error now propagates.
+
+    What the except still cannot do is tell the catalog's declared "this frame
+    cannot compute this key" signal from a genuine KeyError raised inside
+    foi_stats — the same limitation api.figures carries. A mis-typed key here
+    would render the note instead of raising; the two literal keys below are
+    covered by test_change_pages_render_movers_tables.
     """
     try:
-        return _movers_section(title, _stat(frame, stat_key))
+        stat = _stat(frame, stat_key)
     except KeyError:
         return (f'<section class="figure-card"><h2>{html.escape(title)}</h2>'
                 '<p class="note">No movers ranking for this measure: the data '
                 'in this snapshot does not cover two complete financial years '
                 'to compare.</p></section>')
+    return _movers_section(title, stat)
 
 
 def _kpi_scope_note() -> str:
