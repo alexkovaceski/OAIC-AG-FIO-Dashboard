@@ -58,17 +58,22 @@ PUSH = [
 # the algolotl-pg container). Prints role column presence + portfolio column
 # presence + pilot-account count, one per line. No single quotes inside (the
 # shell wraps it in single quotes).
+#
+# Both information_schema lookups are schema-qualified to "horizon", the schema
+# the app's own queries use. Unqualified, they match a same-named table in ANY
+# schema on the instance, so the probe could report "role column: present" for a
+# table the service never reads and pass a --check on an unmigrated horizon.
 _DB_PROBE = (
     'import os, psycopg2\n'
     'c = psycopg2.connect(os.environ["FOI_PG_DSN"])\n'
     'with c.cursor() as cur:\n'
     '    cur.execute("SELECT column_name FROM information_schema.columns "\n'
-    '                "WHERE table_name=%s AND column_name=%s",\n'
-    '                ("foi_chat_users", "role"))\n'
+    '                "WHERE table_schema=%s AND table_name=%s AND column_name=%s",\n'
+    '                ("horizon", "foi_chat_users", "role"))\n'
     '    role = cur.fetchone()\n'
     '    cur.execute("SELECT column_name FROM information_schema.columns "\n'
-    '                "WHERE table_name=%s AND column_name=%s",\n'
-    '                ("foi_facts", "portfolio"))\n'
+    '                "WHERE table_schema=%s AND table_name=%s AND column_name=%s",\n'
+    '                ("horizon", "foi_facts", "portfolio"))\n'
     '    portfolio = cur.fetchone()\n'
     '    cur.execute("SELECT count(*) FROM horizon.foi_chat_users "\n'
     '                "WHERE username IN (%s,%s,%s,%s,%s)",\n'

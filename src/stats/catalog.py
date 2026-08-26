@@ -35,7 +35,7 @@ FIG_CAPTIONS = {
     "received_top20": "Top 20 agencies by requests received",
     "decided_top20": "Top 20 agencies by requests decided",
     "decision_outcomes_trend": "Decision outcomes by FY",
-    "timeliness_trend": "Timeliness of decision-making (within/after)",
+    "timeliness_trend": "Timeliness of decision-making (within statutory)",
     "refused_pct_trend": "Percentage of decisions refused",
     # the two "change" figures plot a LEVEL series (a ratio per FY), not a
     # first difference — the caption says what is actually drawn (B10). The
@@ -103,10 +103,12 @@ FIGURE_SPECS = {
                                  "measures": ["received", "received_transfer"]},
 }
 
-# a fact row the stat consumed -> canonical JSON. NOTE: portfolio is excluded —
-# the foi_facts table does not store it (load_facts returns portfolio=""), so a
-# hash that included portfolio could never be reproduced from a DB reload, which
-# would make the replay comparison always fail.
+# a fact row the stat consumed -> canonical JSON. portfolio is EXCLUDED on
+# purpose and must stay excluded: pre-Stage-1 datasets were stored with
+# portfolio='' and their lineage rows_hash values were computed without it, so
+# including it would make replay_verify fail for every dataset ingested before
+# 2026-08-25. The DB stores portfolio (storage/facts.py) — this hash simply
+# does not consume it.
 _FACT_KEYS = (
     "agency_key", "agency_name", "fy", "quarter", "measure_group", "measure",
     "bucket", "value", "derived",
@@ -127,11 +129,16 @@ def hash_rows(rows: list[dict]) -> str:
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
-def _is_reporting_agency(agency_name: str) -> bool:
+def is_reporting_agency(agency_name: str) -> bool:
     """True for a real reporting body. The golden "Total" pseudo-agency is a
     total-level fact, not an agency, and x-prefixed keys are the normaliser's
     placeholder rows. Every per-agency op in stats.dsl excludes both; the
-    per-agency figures in this module must agree (M3, S1)."""
+    per-agency figures in this module must agree (M3, S1).
+
+    PUBLIC because site.pages needs it for the agency dropdown — it was
+    imported across a module boundary as a private name. foi-charts.js carries
+    the client twin (isReportingAgency); the two predicates must stay
+    identical, both halves of them."""
     return agency_name.lower() != "total" and not agency_name.startswith("x")
 
 
@@ -152,10 +159,9 @@ def _fy_series(frame, measure):
     filters when quarter is not None), so the annual-FY rows are selected by the
     explicit `f["quarter"] is None` test, not by frame.filter.
 
-    Returns [] when the measure has no annual-FY rows at all — the annual files
-    only publish received/finalised, so measures like decided/refused return an
-    EMPTY series, never a fabricated flat zero line. Years missing within a
-    present measure are None, not 0."""
+    Returns [] when the measure has no annual-FY rows at all — an absent measure
+    yields an EMPTY series, never a fabricated flat zero line. Years missing
+    within a present measure are None, not 0."""
     rows = [f for f in frame.facts if f["quarter"] is None
             and f["measure"] == measure and f["bucket"] == "total"]
     if not rows:
@@ -227,7 +233,7 @@ def _movers_source_rows(frame, num_measure, den_measure, fy_a, fy_b) -> list[dic
             if f["fy"] in (fy_a, fy_b) and f["quarter"] is None
             and f["bucket"] == "total"
             and f["measure"] in (num_measure, den_measure)
-            and _is_reporting_agency(f["agency_name"])]
+            and is_reporting_agency(f["agency_name"])]
 
 
 def _rate_movers(frame, num_measure, den_measure, fy_a, fy_b,
@@ -260,10 +266,11 @@ def _rate_movers(frame, num_measure, den_measure, fy_a, fy_b,
 
     def rates_by_agency(fy):
         """agency -> (rate, denominator) for the agencies that clear the floor."""
-        return {agency: (100.0 * m[num_measure] / m[den_measure], m[den_measure])
-                for (row_fy, agency), m in totals.items()
-                if row_fy == fy and m[den_measure] > 0
-                and m[den_measure] >= min_denominator}
+        return {agency: (100.0 * measures[num_measure] / measures[den_measure],
+                         measures[den_measure])
+                for (row_fy, agency), measures in totals.items()
+                if row_fy == fy and measures[den_measure] > 0
+                and measures[den_measure] >= min_denominator}
 
     rates_a, rates_b = rates_by_agency(fy_a), rates_by_agency(fy_b)
     movers = []
@@ -350,7 +357,7 @@ def _figure(frame, key):
         rows = [f for f in frame.facts
                 if f["fy"] == spec["default_fy"] and f["quarter"] is None
                 and f["measure"] == spec["measure"] and f["bucket"] == "total"
-                and _is_reporting_agency(f["agency_name"])]
+                and is_reporting_agency(f["agency_name"])]
         aggs = {}
         for f in rows:
             aggs.setdefault(f["agency_name"], 0.0)
@@ -415,10 +422,20 @@ def foi_stats(frame, key) -> dict:
     if key == "timeliness_movers":
         return _movers_stat(frame, "within_statutory", "decided")
     if key == "timeliness_slippage_corr":
-        # Pearson correlation between within-statutory FY counts and received FY
-        # counts. The within-statutory series is empty (the measure only exists
-        # as single-quarter Q1 facts), so the honest result is None — a
-        # fabricated coefficient would be a made-up number. basis is "fy".
+        # Pearson correlation between the within-statutory FY series and the
+        # received FY series, both computed by _fy_series over the annual files.
+        # Both measures have annual rows (the annual files publish decisions,
+        # outcomes and timeliness since 43fad97), so this is a real coefficient:
+        # 0.538 over the seven FYs in the current frame. _pearson returns None
+        # only for a degenerate pair — fewer than two points, mismatched
+        # lengths, or zero variance in either series — never a fabricated
+        # number. basis is "fy".
+        # KNOWN GAP: source_rows/rows_hash stay on the empty-row sentinel
+        # (hash_rows([])), so replay_verify checks nothing for this key. Left
+        # alone deliberately — the sentinel hash is already stored in published
+        # lineage_ops rows, and recomputing it here would fail replay for every
+        # dataset ingested before today (the same trap the _FACT_KEYS note
+        # describes). Fixing it needs a lineage migration, not a comment.
         return {"value": _pearson(_fy_series(frame, "within_statutory"),
                                   _fy_series(frame, "received")),
                 "basis": "fy", "source_rows": 0, "rows_hash": hash_rows([])}

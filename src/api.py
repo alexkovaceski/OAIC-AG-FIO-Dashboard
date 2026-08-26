@@ -84,9 +84,16 @@ def figures(frame) -> dict:
     signal — an unknown key, or a stat whose FY pair the frame does not contain
     (stats.catalog._previous_complete_fy raises KeyError rather than wrapping to
     the newest year). Such a key stays ABSENT from the payload; every other key
-    still ships. The except stays narrow on purpose: an arithmetic or shape bug
-    inside a stat must surface as a 500, not be laundered into a quietly
-    incomplete payload."""
+    still ships.
+
+    What the narrow except actually guarantees: every NON-KeyError failure
+    inside a stat — a ZeroDivisionError, a TypeError, a shape bug — propagates
+    and surfaces as a 500 rather than being laundered into a quietly incomplete
+    payload. It does NOT distinguish the declared signal from a genuine KeyError
+    raised inside a stat (a missing dict key in the movers code would read as
+    "this frame cannot compute this key" and drop the stat silently). Catching
+    only a dedicated exception type would fix that; until then the guarantee is
+    the one stated here, not a stronger one."""
     out = {}
     for k in STAT_KEYS:
         try:

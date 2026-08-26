@@ -18,7 +18,11 @@
  * and never falls below the selection's own largest value (so no bar or point
  * is ever drawn shorter than the number it represents). ECharts clips a series
  * at axis.max, so those two rules are the same rule: pin to the larger of the
- * two, and say so in the note when the interval had to grow.
+ * two, and say so in the note when the interval had to grow. The UNFILTERED
+ * view is pinned to its own maximum for the same reason — left to auto-scale
+ * it picked a rounded top (7,000 for a 6,228 maximum) and jumped to an exact
+ * one on the first selection. A single-agency view is the deliberate
+ * exception: it auto-scales, and its note says so.
  *
  * Every number the engine prints is rounded the way the server rounds it
  * (half to EVEN, Python's rule) so the chart and the published figure can
@@ -57,19 +61,34 @@
     return (data && data.specs && data.specs[key]) || null;
   }
 
-  // roundTo — round half to EVEN, the rule Python's round() applies to the same
-  // double. The server rounds counts with round(v) and ratios with round(x, 1);
-  // a client rounding half UP disagreed with the published figure by 0.1 on
-  // every selection whose value lands exactly on a half (33 of the 10,452
-  // reachable ratio selections in the current data).
+  // roundTo — a port of Python's round(x, dp) for the same double: round to
+  // nearest on the value the double actually holds, ties to EVEN. The server
+  // rounds counts with round(v) and ratios with round(x, 1), so any other rule
+  // makes the chart and the published figure disagree in the last digit.
+  //
+  // Two traps, both measured (2,003,000 num/den pairs, den <= 2000):
+  //   * Scaling by 10 FIRST invents ties. 100*1009/2000 is held as
+  //     50.450000000000003, which Python rounds UP to 50.5 — but x * 10 lands
+  //     on exactly 504.5, so a tie test after the multiply saw a tie and
+  //     half-to-even gave 50.4. 402 of the 2,003,000 pairs diverged this way.
+  //   * toFixed alone breaks the real ties. It rounds half AWAY from zero
+  //     (ECMA-262: "if there are two such n, pick the larger"), so 6.25 becomes
+  //     6.3 where Python gives 6.2. 17 of the 2,170 operand pairs reachable on
+  //     today's frame sit exactly on such a tie.
+  // So: detect the tie by scaling by a power of TWO (exact, never invents one),
+  // and let toFixed — which reads the double's exact decimal value — do the
+  // rest. Verified identical to Python's round() over all 2,003,000 pairs at
+  // dp=0 and dp=1 (sha256 of the packed results matches).
   function roundTo(x, dp) {
     var f = dp ? Math.pow(10, dp) : 1;
-    var scaled = x * f;
-    var down = Math.floor(scaled);
-    var n = (scaled - down === 0.5)
-      ? (down % 2 === 0 ? down : down + 1)
-      : Math.round(scaled);
-    return n / f;
+    // an exact tie is an odd multiple of 1/2^(dp+1) — the only doubles whose
+    // exact value ends in a 5 one digit past dp
+    var halves = x * Math.pow(2, dp + 1);
+    if (halves === Math.floor(halves) && halves % 2 !== 0) {
+      var down = Math.floor(x * f);
+      return (down % 2 === 0 ? down : down + 1) / f;
+    }
+    return dp ? Number(x.toFixed(dp)) : Math.round(x);
   }
 
   // seriesMax — the largest numeric value across a figure's series (the pinned
@@ -235,7 +254,11 @@
     }
     delete el.dataset.jsNote;
     el.innerHTML = "";
-    // a 20-band ranking needs the taller box or interval:0 stacks its labels
+    // a 20-band ranking needs the taller box or interval:0 stacks its labels.
+    // The server already writes `topn` on a top_n chartbox (pages.py
+    // _chart_container), so this add is normally a no-op — it stays because the
+    // REMOVE is load-bearing: a one-agency selection turns the ranking into a
+    // trend, and the box goes back to 320px.
     if (opts.horizontal) el.classList.add("topn");
     else el.classList.remove("topn");
     el.setAttribute("aria-label", chartLabel(el, key));
@@ -283,19 +306,23 @@
 
   // --- the derivation engine ------------------------------------------------
 
-  // dimFilter — apply the shared row dimensions. Which dimensions apply is the
-  // kind's call, declared by the caller's `skip`:
-  //   trend / ratio_trend — fy IS applied (selecting a year narrows the
-  //     category axis to that year, and the caller emits the note that
-  //     explains the resulting single point); type is skipped here because
+  // dimFilter — apply the shared row dimensions. Agency and portfolio always
+  // apply; which of the other two apply is the kind's call, declared by the
+  // caller's `skip`:
+  //   trend / ratio_trend — {type: true}. fy IS applied (selecting a year
+  //     narrows the category axis to that year, and the caller emits the note
+  //     that explains the resulting single point); type is skipped because
   //     those kinds carry the bucket through trendSeries instead.
-  //   top_n — fy is skipped here because the ranking loop consumes it as the
-  //     ranking year; agency is skipped because the degenerate guard has
-  //     already handled an agency selection before this is reached.
+  //   top_n — {type: true, fy: true}. The ranking loop consumes fy as the
+  //     ranking year, and the degenerate one-agency view plots every published
+  //     year (its note says the FY selection is not applied there).
+  // The agency dimension has no skip: in the degenerate view it is exactly what
+  // selects the agency's rows, and in the ranking loop no agency can be
+  // selected — the degenerate guard returned before that point.
   function dimFilter(facts, active, skip) {
     skip = skip || {};
     return facts.filter(function (f) {
-      if (!skip.agency && active.agency && f.agency_name !== active.agency) return false;
+      if (active.agency && f.agency_name !== active.agency) return false;
       if (active.portfolio && f.portfolio !== active.portfolio) return false;
       if (!skip.type && active.type && f.bucket !== active.type) return false;
       if (!skip.fy && active.fy && f.fy !== active.fy) return false;
@@ -303,23 +330,34 @@
     });
   }
 
+  // isReportingAgency — the client twin of stats/catalog.py's
+  // is_reporting_agency, and it must stay identical to it, BOTH halves.
+  // "Total" is a national total-level fact, not an agency; an x-prefixed name
+  // is the normaliser's placeholder row. The frame carries no x-prefixed
+  // agency name today, so that half is inert — it is here because the two
+  // engines are documented as mirrors, and a guard that is only inert cannot
+  // be relied on to stay correct when one appears.
+  function isReportingAgency(name) {
+    return !!name && name.toLowerCase() !== "total" && name.charAt(0) !== "x";
+  }
+
   // trendSeries — per-FY sums of one measure over annual rows for one bucket.
   // Returns {cats, values} with null for FYs the selection has no rows for.
   function trendSeries(facts, measure, bucket) {
-    var by = {}, cats = [], i, row;
-    for (i = 0; i < facts.length; i++) {
-      row = facts[i];
+    var totalsByFy = {}, cats = [], idx, row;
+    for (idx = 0; idx < facts.length; idx++) {
+      row = facts[idx];
       if (row.quarter !== null) continue;
       if (cats.indexOf(row.fy) === -1) cats.push(row.fy);
       if (row.measure === measure && row.bucket === bucket) {
-        by[row.fy] = (by[row.fy] || 0) + row.value;
+        totalsByFy[row.fy] = (totalsByFy[row.fy] || 0) + row.value;
       }
     }
     cats.sort();
     return {
       cats: cats,
-      values: cats.map(function (y) {
-        return by[y] !== undefined ? by[y] : null;
+      values: cats.map(function (fy) {
+        return totalsByFy[fy] !== undefined ? totalsByFy[fy] : null;
       }),
     };
   }
@@ -360,13 +398,14 @@
   //   undefined            — no published rows for this selection (honest note)
   function rederiveFigure(key, spec, facts, active) {
     var bucket = active.type || "total";
-    var rows, t, i, series, den, values, parts, fy, by, ranked, reported;
+    var rows, trend, idx, series, den, values, parts, fy, totalsByAgency,
+        ranked, reported;
 
     if (spec.kind === "trend" || spec.kind === "multi_trend") {
       rows = dimFilter(facts, active, { type: true });
-      series = spec.measures.map(function (m) {
-        t = trendSeries(rows, m, bucket);
-        return { name: m, values: t.values, _cats: t.cats };
+      series = spec.measures.map(function (measure) {
+        trend = trendSeries(rows, measure, bucket);
+        return { name: measure, values: trend.values, _cats: trend.cats };
       });
       if (!series.length || !series[0]._cats.length) return undefined;
       var cats = series[0]._cats;
@@ -387,23 +426,25 @@
 
     if (spec.kind === "ratio_trend") {
       rows = dimFilter(facts, active, { type: true });
-      var numT = spec.numerators.map(function (m) {
-        return trendSeries(rows, m, bucket);
+      var numeratorTrends = spec.numerators.map(function (measure) {
+        return trendSeries(rows, measure, bucket);
       });
       den = trendSeries(rows, spec.denominator, bucket);
       if (!den.cats.length) return undefined;
       values = [];
-      for (i = 0; i < den.cats.length; i++) {
-        parts = numT.map(function (t2) { return t2.values[i]; });
-        var d = den.values[i];
-        if (parts.some(function (p) { return p === null; }) || !d) {
+      for (idx = 0; idx < den.cats.length; idx++) {
+        parts = numeratorTrends.map(function (numeratorTrend) {
+          return numeratorTrend.values[idx];
+        });
+        var denominator = den.values[idx];
+        if (parts.some(function (p) { return p === null; }) || !denominator) {
           values.push(null);
         } else {
           // the server computes round(100 * sum(parts) / d, 1) — same operand
           // order, same rounding rule, so the two views agree to the digit
-          values.push(roundTo(100 * parts.reduce(function (a, b) {
-            return a + b;
-          }, 0) / d, 1));
+          values.push(roundTo(100 * parts.reduce(function (sum, part) {
+            return sum + part;
+          }, 0) / denominator, 1));
         }
       }
       if (!anyNumeric(values)) return undefined;
@@ -420,46 +461,56 @@
       // yields no annual rows and falls through to the honest no-data note.
       if (active.agency) {
         rows = dimFilter(facts, active, { type: true, fy: true });
-        t = trendSeries(rows, spec.measure, bucket);
-        if (!t.cats.length || !anyNumeric(t.values)) return undefined;
+        trend = trendSeries(rows, spec.measure, bucket);
+        if (!trend.cats.length || !anyNumeric(trend.values)) return undefined;
+        // the FY selection is dropped on this path (the trend spans every
+        // published year). Saying so is the same rule the one-year trend note
+        // follows: a select that visibly ignores its input reads as broken.
         return {
-          fig: { categories: t.cats,
-                 series: [{ name: spec.measure, values: t.values.map(
+          fig: { categories: trend.cats,
+                 series: [{ name: spec.measure, values: trend.values.map(
                    function (v) { return v === null ? null : roundTo(v, 0); }) }] },
           note: "Showing the FY trend for " + active.agency +
-                " (a one-agency ranking is not a top-" + spec.n + ").",
+                " (a one-agency ranking is not a top-" + spec.n + ")." +
+                (active.fy
+                  ? " The FY " + active.fy + " selection is not applied here: " +
+                    "the trend covers every published year."
+                  : ""),
           asTrend: true,
         };
       }
       fy = active.fy || spec.default_fy;
       rows = dimFilter(facts, active, { type: true, fy: true });
-      by = {};
-      for (i = 0; i < rows.length; i++) {
-        var r = rows[i];
+      totalsByAgency = {};
+      for (idx = 0; idx < rows.length; idx++) {
+        var row = rows[idx];
         // An FY ranking sums ANNUAL rows only and ranks real agencies only.
         // The golden Q1 rows are a single-quarter NATIONAL figure published
         // under a "Total" pseudo-agency: left in, it outranks every agency in
         // the latest FY and puts one quarter's number on a bar chart labelled
         // "basis: financial year". Both guards mirror the platform — the FY
-        // series skip quarter-carrying rows, and every per-agency op in
-        // stats/dsl.py excludes the "Total" pseudo-agency the same way.
-        if (r.quarter !== null) continue;
-        if (!r.agency_name || r.agency_name.toLowerCase() === "total") continue;
-        if (r.fy !== fy || r.measure !== spec.measure ||
-            r.bucket !== bucket) continue;
-        by[r.agency_name] = (by[r.agency_name] || 0) + r.value;
+        // series skip quarter-carrying rows, and isReportingAgency is the twin
+        // of the predicate every per-agency op in stats/ applies.
+        if (row.quarter !== null) continue;
+        if (!isReportingAgency(row.agency_name)) continue;
+        if (row.fy !== fy || row.measure !== spec.measure ||
+            row.bucket !== bucket) continue;
+        totalsByAgency[row.agency_name] =
+          (totalsByAgency[row.agency_name] || 0) + row.value;
       }
-      ranked = Object.keys(by).map(function (a) {
-        return { name: a, v: by[a] };
-      }).sort(function (a, b) { return b.v - a.v; }).slice(0, spec.n);
+      ranked = Object.keys(totalsByAgency).map(function (agency) {
+        return { name: agency, total: totalsByAgency[agency] };
+      }).sort(function (left, right) {
+        return right.total - left.total;
+      }).slice(0, spec.n);
       if (!ranked.length) return undefined;
       // B8 footnote: the ranking pool, on the same rows the ranking used
-      reported = Object.keys(by).length;
+      reported = Object.keys(totalsByAgency).length;
       return {
         fig: {
-          categories: ranked.map(function (x) { return x.name; }),
-          series: [{ name: spec.measure, values: ranked.map(function (x) {
-            return roundTo(x.v, 0);
+          categories: ranked.map(function (entry) { return entry.name; }),
+          series: [{ name: spec.measure, values: ranked.map(function (entry) {
+            return roundTo(entry.total, 0);
           }) }],
         },
         note: rankingPoolNote(reported, fy, active),
@@ -499,7 +550,10 @@
           baselineMax[key] = seriesMax(fig.value);
         }
         var isTopN = spec && spec.kind === "top_n";
-        mountChart(el, key, fig.value, { horizontal: isTopN, pinMax: null });
+        // pin the default view to its own maximum, so the interval a reader
+        // starts from is the one every filtered view is compared against
+        mountChart(el, key, fig.value,
+                   { horizontal: isTopN, pinMax: baselineMax[key] });
         if (isTopN) {
           // the ranking-pool footnote applies to the default view too
           var derived = rederiveFigure(key, spec, data.facts, {});

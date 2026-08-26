@@ -448,7 +448,11 @@ def test_filters_blob_exposes_portfolios():
     page = _pages()["requests-received"]
     m = re.search(r"window\.__pageData = (.*?);</script>", page, re.S)
     assert m, "no __pageData blob"
-    blob = json.loads(m.group(1).replace("<\\/", "</").replace("\\u002d\\u002d", "--"))
+    # the blob escapes the script-close sequence and the HTML-comment sequence
+    # (pages._page_data_script), and BOTH escapes are ordinary JSON — json.loads
+    # reverses them itself. The manual replace() this test used to run was a
+    # second, redundant unescape; every other blob test here just loads it.
+    blob = json.loads(m.group(1))
     portfolios = blob["filters"].get("portfolios")
     assert portfolios and len(portfolios) >= 10, portfolios
     assert all(p for p in portfolios)
@@ -619,6 +623,130 @@ def test_kpi_tiles_carry_national_scope_note():
         assert "KPI tiles show national totals" in pages[key], key
 
 
+def test_gated_page_scripts_carry_content_hash():
+    # the gated pages are rendered on demand, so they never pass through
+    # render_all_pages — their script tags need the same ?v= content hash the
+    # static pages assert, or a behaviour change outlives a deploy in a cache
+    from site.templates import _asset_link
+    for name in ("chat.js", "report.js"):
+        tag = _asset_link(name)
+        assert re.search(rf'src="/assets/{re.escape(name)}\?v=[0-9a-f]{{12}}"', tag), \
+            f"{name} script tag is unversioned"
+
+
+def test_top_n_chartbox_is_already_the_tall_box_before_any_js_runs():
+    # G: .chartbox is 320px and .chartbox.topn is 560px. The class was added by
+    # foi-charts.js at mount time only, so every top-N page grew ~240px the
+    # moment ECharts initialised. The spec kind is known server-side — emit the
+    # class with the markup.
+    pages = _pages()
+    for key in ("key-agency-contributions-received",
+                "key-agency-contributions-decided"):
+        assert re.search(r'<div class="chartbox topn" id="chart-\w+"', pages[key]), \
+            f"{key}: the ranking box must ship the taller class server-side"
+    # a trend page keeps the plain box — the tall one would be 240px of padding
+    for key in ("requests-received", "timeliness", "change-timeliness"):
+        assert "chartbox topn" not in pages[key], \
+            f"{key}: only a top_n figure gets the taller box"
+    # and the JS must keep the toggle: a one-agency selection turns a ranking
+    # into a trend and the box has to shrink back
+    js = _charts_js()
+    assert 'classList.remove("topn")' in js, \
+        "the engine must still drop the class when the ranking becomes a trend"
+
+
+def test_top_n_note_discloses_an_ignored_fy_selection():
+    # J: on a top-N page, selecting an agency AND an FY silently dropped the FY
+    # (the degenerate one-agency view plots every year). A select that visibly
+    # ignores its input reads as broken — the composed note says so, exactly as
+    # the one-year trend note does.
+    js = _charts_js()
+    assert "selection is not applied here" in js, \
+        "an ignored FY selection must be disclosed"
+    assert "the trend covers every published year" in js
+
+
+def test_dim_filter_docstring_matches_its_call_sites():
+    # I: the docstring claimed top_n skips the agency dimension ("the
+    # degenerate guard has already handled an agency selection"), but neither
+    # top_n call site passes skip.agency — it was a supported-but-never-passed
+    # parameter documented as if it were used.
+    js = _charts_js()
+    assert "skip.agency" not in js, \
+        "an unused skip dimension is back"
+    assert "degenerate guard has already handled an agency selection" not in js, \
+        "the docstring still describes a skip no call site passes"
+    calls = re.findall(r"dimFilter\(facts, active, \{([^}]*)\}\)", js)
+    assert calls, "no dimFilter call sites found"
+    for call in calls:
+        assert "agency" not in call, \
+            f"a call site passes an agency skip the docstring denies: {call}"
+
+
+def test_default_chart_view_pins_the_same_kind_of_axis_a_filtered_view_does():
+    # N: the unfiltered branch mounted with pinMax: null, so ECharts chose a
+    # rounded top (7,000 for a 6,228 maximum) while every filtered view pins an
+    # exact number — the axis jumped on the first selection and the file's own
+    # comparability claim did not hold for the view a reader starts from.
+    js = _charts_js()
+    assert not re.search(r"horizontal:\s*isTopN,\s*pinMax:\s*null", js), \
+        "the default view is unpinned again"
+    assert re.search(r"horizontal:\s*isTopN,\s*pinMax:\s*baselineMax\[key\]", js), \
+        "the default view must pin to its own maximum"
+
+
+def test_kpi_scope_note_is_emitted_beside_the_tiles_not_pasted_per_page():
+    # K: the note was pasted at six call sites, drifted out of position, and a
+    # new KPI page would have shipped the tiles with no disclosure at all. The
+    # function that renders the tiles emits it.
+    from site.pages import _kpis, _kpi_scope_note
+    frame = Frame(normalise_all())
+    assert _kpi_scope_note() in _kpis(frame, ["requests_received_q1"]), \
+        "_kpis must emit the scope note with its tiles"
+    glued = '</div>' + _kpi_scope_note()
+    for key, page in _pages().items():
+        if 'class="kpis"' not in page:
+            continue
+        assert glued in page, \
+            f"{key}: KPI tiles render without the note that scopes them"
+        assert page.count("KPI tiles show national totals") == 1, \
+            f"{key}: the scope note is duplicated"
+
+
+def test_change_pages_survive_a_frame_without_an_fy_pair():
+    # P: _previous_complete_fy raises KeyError for a frame whose annual years do
+    # not straddle LATEST_COMPLETE_FY, and server.app._boot renders EVERY page
+    # at boot — so one unformable FY pair would have failed the boot of all
+    # thirteen pages, eleven of which have nothing to do with movers.
+    # api.figures and the kpis op in stats.dsl already drop such a key rather
+    # than take their payload down; the page path now degrades the same way,
+    # with the house no-data note. Nothing is fabricated either way.
+    import pytest
+    from stats.catalog import LATEST_COMPLETE_FY, _previous_complete_fy
+    # FY labels sort lexicographically, so no year literal is needed here
+    frame = Frame([f for f in normalise_all() if f["fy"] >= LATEST_COMPLETE_FY])
+    with pytest.raises(KeyError):
+        _previous_complete_fy(frame)
+    pages = render_all_pages(frame)                     # must not raise
+    assert set(pages) == set(PAGE_KEYS), "a page dropped out of the render"
+    for key in ("change-decision-outcomes", "change-timeliness"):
+        assert "No movers ranking for this measure" in pages[key], key
+        assert '<table class="movers">' not in pages[key], key
+        assert "Top 10 of" not in pages[key], f"{key}: a ranking was invented"
+
+
+def test_movers_table_says_the_filters_do_not_reach_it():
+    # L: the change pages' filter bar re-derives the CHART; the movers table is
+    # static server-rendered HTML. The tiles disclose that; the table sat under
+    # the same filter bar saying nothing.
+    pages = _pages()
+    for key in ("change-decision-outcomes", "change-timeliness"):
+        table = re.search(r'<table class="movers">.*?</section>', pages[key], re.S)
+        assert table, f"{key}: no movers table"
+        assert "The filters apply to the chart above" in table.group(0), key
+        assert "does not change with a filter selection" in table.group(0), key
+
+
 def test_foi_charts_js_has_no_hardcoded_fy_or_measure_maps():
     from pathlib import Path
     src = Path("src/site/assets/foi-charts.js").read_text(encoding="utf-8")
@@ -744,10 +872,34 @@ def test_ranking_excludes_the_total_pseudo_agency_and_quarter_rows():
     assert all(f["quarter"] is not None for f in golden), \
         "a 'Total' row without a quarter would slip past the annual-rows guard"
     js = _charts_js()
-    assert re.search(r'agency_name\.toLowerCase\(\)\s*===\s*"total"', js), \
+    assert re.search(r'toLowerCase\(\)\s*!==\s*"total"', js), \
         "the ranking must exclude the 'Total' pseudo-agency"
-    assert re.search(r"r\.quarter\s*!==\s*null", js), \
+    assert re.search(r"row\.quarter\s*!==\s*null", js), \
         "an FY ranking must sum annual rows only"
+    assert "isReportingAgency(row.agency_name)" in js, \
+        "the ranking must apply the whole reporting-agency predicate"
+
+
+def test_client_and_server_agency_predicates_are_the_same_rule():
+    # O: catalog.is_reporting_agency excludes the "Total" pseudo-agency AND
+    # x-prefixed normaliser placeholder rows; the JS ranking guard excluded only
+    # "total". Zero x-prefixed agency names in the frame today, so it is inert —
+    # but the two engines are documented as mirrors, and an inert guard is
+    # exactly the kind that is never noticed when it starts mattering.
+    from stats.catalog import is_reporting_agency
+    assert is_reporting_agency("Department of Home Affairs")
+    assert not is_reporting_agency("Total") and not is_reporting_agency("total")
+    assert not is_reporting_agency("xplaceholder")
+    js = _charts_js()
+    body = re.search(r"function isReportingAgency\(name\) \{(.*?)\n  \}", js, re.S)
+    assert body, "the client twin of is_reporting_agency is missing"
+    assert 'charAt(0) !== "x"' in body.group(1), \
+        "the client predicate drops the x-prefixed half"
+    # measured: the guard is inert on today's frame, which is why only a test
+    # keeps the two halves together
+    frame = Frame(normalise_all())
+    assert not [f for f in frame.facts if f["agency_name"].startswith("x")], \
+        "an x-prefixed agency row appeared — the client guard is now live"
 
 
 def test_chart_engine_keeps_an_honest_placeholder_honest():
@@ -772,3 +924,30 @@ def test_chart_engine_rounds_the_way_the_server_rounds():
     assert "Math.round(1000" not in js, "half-up ratio rounding is back"
     assert "roundTo(" in js and "down % 2 === 0" in js, \
         "the engine must round half to even, as Python's round() does"
+
+
+def test_round_to_does_not_scale_by_ten_before_testing_for_a_tie():
+    # H: the half-to-even test used to run AFTER multiplying by 10^dp, which
+    # invents ties. 100*1009/2000 is held as 50.450000000000003 (Python rounds
+    # it UP to 50.5) but x * 10 lands on exactly 504.5, so the tie test fired
+    # and half-to-even gave 50.4. Measured over 2,003,000 num/den pairs
+    # (den <= 2000): 402 diverged from Python's round(x, 1). The tie test must
+    # scale by a power of TWO, which is exact and cannot invent a tie, and the
+    # rounding itself goes through toFixed, which reads the double's exact
+    # decimal value. Verified identical to Python over all 2,003,000 pairs at
+    # dp=0 and dp=1 (sha256 over the packed doubles matched).
+    js = _charts_js()
+    body = re.search(r"function roundTo\(x, dp\) \{(.*?)\n  \}", js, re.S)
+    assert body, "roundTo is gone"
+    body = body.group(1)
+    assert "Math.pow(2, dp + 1)" in body, \
+        "the tie test must scale by a power of two, not by 10^dp"
+    assert "toFixed(dp)" in body, \
+        "the non-tie branch must round on the double's exact decimal value"
+    assert not re.search(r"var scaled = x \* f", body), \
+        "the pre-multiplied tie test is back"
+    # and the true ties must still round half to EVEN — toFixed alone rounds
+    # half AWAY from zero (6.25 -> 6.3 where Python gives 6.2), and 17 of the
+    # 2,170 operand pairs reachable on today's frame sit exactly on such a tie
+    assert "down % 2 === 0 ? down : down + 1" in body, \
+        "an exact tie must still round half to even"

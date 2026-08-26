@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 
 from stats.catalog import (foi_stats, FIG_CAPTIONS, FIGURE_SPECS,
-                           _is_reporting_agency)
+                           is_reporting_agency)
 from site.templates import chrome, _asset_link
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
@@ -98,13 +98,25 @@ def _chart_container(chart_key, fig) -> str:
     A figure with no published data keeps the honest server-rendered
     placeholder inside the same chartbox — so the page reads as "no data",
     not broken, even before any JS runs. The placeholder text matches the old
-    inline `_chart` no-data copy verbatim."""
+    inline `_chart` no-data copy verbatim.
+
+    A top_n figure ships the `topn` class from HERE, derived from its spec
+    kind, because that class carries the taller box (.chartbox.topn is 560px
+    against the 320px default). foi-charts.js also adds it at mount time, and
+    adding it only there meant every top-N page grew 240px the moment ECharts
+    initialised. The JS toggle still runs: classList.add on a class the server
+    already wrote is a no-op, and the JS still REMOVES it when the same box
+    falls back to a one-agency trend or an honest placeholder — which is why a
+    figure with no data keeps the plain box here too."""
     inner = ""
-    if not _figure_has_data(fig):
+    has_data = _figure_has_data(fig)
+    if not has_data:
         inner = ('<div class="nodata">No published data for this measure. '
                  'The source files do not report this breakdown for the '
                  'financial years covered.</div>')
-    return (f'<div class="chartbox" id="chart-{chart_key}" '
+    is_top_n = FIGURE_SPECS.get(chart_key, {}).get("kind") == "top_n"
+    css_class = "chartbox topn" if (is_top_n and has_data) else "chartbox"
+    return (f'<div class="{css_class}" id="chart-{chart_key}" '
             f'data-figure="{chart_key}">{inner}</div>')
 
 
@@ -124,7 +136,7 @@ def _filters_blob(frame) -> dict:
     agency promised a slice the charts will never draw."""
     return {
         "agencies": sorted({f["agency_name"] for f in frame.facts
-                            if _is_reporting_agency(f["agency_name"])}),
+                            if is_reporting_agency(f["agency_name"])}),
         "types": sorted({f["bucket"] for f in frame.facts}),
         "fys": sorted({f["fy"] for f in frame.facts}),
         "portfolios": sorted({f["portfolio"] for f in frame.facts if f["portfolio"]}),
@@ -246,6 +258,22 @@ def _kpi(label, value_html, basis=None, title=None, source=None) -> str:
             f'<span class="value">{value_html}</span>{basis_html}{source_html}</div>')
 
 
+def _source_for_basis(basis) -> str | None:
+    """The provenance caption a basis implies. Every single-quarter figure on
+    the site is a transcribed golden Q1 number (S1.4) — it is not derivable
+    from the cumulative workbook, so every tile carrying that basis carries the
+    same citation. One definition, every use: _kpis derives it per tile and
+    _page_at_a_glance derives it once for its whole block."""
+    return GOLDEN_SOURCE if (basis and "single quarter" in str(basis)) else None
+
+
+def _kpi_block(cells: str) -> str:
+    """A KPI block: the tiles, then the scope note that describes them. The note
+    is emitted HERE rather than pasted onto each page, so a page cannot render
+    the tiles without the disclosure that the filters do not reach them."""
+    return f'<div class="kpis">{cells}</div>{_kpi_scope_note()}'
+
+
 def _kpis(frame, keys) -> str:
     cells = []
     for key in keys:
@@ -260,10 +288,9 @@ def _kpis(frame, keys) -> str:
         else:
             value_html = html.escape(str(value))
             basis = _basis_label(stat)
-        source = GOLDEN_SOURCE if (basis and "single quarter" in str(basis)) else None
         cells.append(_kpi(_STAT_LABELS.get(key, key.replace("_", " ")),
-                          value_html, basis, source=source))
-    return f'<div class="kpis">{chr(10).join(cells)}</div>'
+                          value_html, basis, source=_source_for_basis(basis)))
+    return _kpi_block(chr(10).join(cells))
 
 
 def _trend_section(title, fig, chart_key, source=None) -> str:
@@ -306,6 +333,14 @@ _MOVERS_DENOMINATOR_NOUN = {"decided": "decisions", "finalised": "finalisations"
 
 MOVERS_TOP_N = 10
 
+# The filter bar on a change page re-derives the CHARTS from the page's fact
+# slice; the movers table is server-rendered HTML and a selection cannot reach
+# it. Say so beside the table, exactly as the KPI tiles say it beside the tiles
+# — a table sitting under a filter bar that cannot move it reads as broken.
+_MOVERS_SCOPE_NOTE = ("The filters apply to the chart above; this ranking is "
+                      "drawn from every qualifying agency nationally and does "
+                      "not change with a filter selection.")
+
 
 def _movers_section(title, stat, unit="%") -> str:
     """A ranked movers table: agency, rate and denominator in each FY, and the
@@ -322,12 +357,18 @@ def _movers_section(title, stat, unit="%") -> str:
     Denominators (C1): each row shows the two denominator counts, so a reader
     can judge the row without leaving the table — a rate that moved 100 points
     on two decisions is visibly different from one that moved 30 points on 457.
+
+    Scope: this table is server-rendered from the whole frame and the filter bar
+    never touches it — foi-charts.js re-derives the chartboxes and nothing else.
+    The tiles got that disclosure in B11; the table says the same thing in its
+    footnote rather than sitting silently under a filter bar that cannot move
+    it.
     """
-    v = stat["value"]
-    rows = v["movers"][:MOVERS_TOP_N]
-    floor = v.get("min_denominator") or 0
-    noun = _MOVERS_DENOMINATOR_NOUN.get(v.get("denominator"),
-                                        f'{v.get("denominator", "source")} rows')
+    value = stat["value"]
+    rows = value["movers"][:MOVERS_TOP_N]
+    floor = value.get("min_denominator") or 0
+    noun = _MOVERS_DENOMINATOR_NOUN.get(value.get("denominator"),
+                                        f'{value.get("denominator", "source")} rows')
     head = (f'<section class="figure-card"><h2>{html.escape(title)}</h2>'
             f'<p class="basis">{_basis_label(stat)}</p>')
     if not rows:
@@ -336,34 +377,73 @@ def _movers_section(title, stat, unit="%") -> str:
         floor_clause = (f' with at least {floor} {html.escape(noun)}'
                         if floor else '')
         return (head + '<p class="note">No agency has a computable rate in both '
-                f'{html.escape(v["fy_a"])} and {html.escape(v["fy_b"])}'
+                f'{html.escape(value["fy_a"])} and {html.escape(value["fy_b"])}'
                 f'{floor_clause}, so there is no movers ranking for this '
                 'measure.</p></section>')
     head += (f'<table class="movers"><thead><tr><th>Agency</th>'
-             f'<th>{html.escape(v["fy_a"])} rate</th>'
-             f'<th>{html.escape(v["fy_a"])} {html.escape(noun)}</th>'
-             f'<th>{html.escape(v["fy_b"])} rate</th>'
-             f'<th>{html.escape(v["fy_b"])} {html.escape(noun)}</th>'
+             f'<th>{html.escape(value["fy_a"])} rate</th>'
+             f'<th>{html.escape(value["fy_a"])} {html.escape(noun)}</th>'
+             f'<th>{html.escape(value["fy_b"])} rate</th>'
+             f'<th>{html.escape(value["fy_b"])} {html.escape(noun)}</th>'
              f'<th>Change (pp)</th></tr></thead><tbody>')
     body = "".join(
-        f'<tr><td>{html.escape(m["agency"])}</td>'
-        f'<td>{m["fy_a_rate"]}{unit}</td><td>{_num(m["fy_a_denominator"])}</td>'
-        f'<td>{m["fy_b_rate"]}{unit}</td><td>{_num(m["fy_b_denominator"])}</td>'
-        f'<td>{"+" if m["change"] > 0 else ""}{m["change"]} pp</td></tr>'
-        for m in rows)
+        f'<tr><td>{html.escape(mover["agency"])}</td>'
+        f'<td>{mover["fy_a_rate"]}{unit}</td>'
+        f'<td>{_num(mover["fy_a_denominator"])}</td>'
+        f'<td>{mover["fy_b_rate"]}{unit}</td>'
+        f'<td>{_num(mover["fy_b_denominator"])}</td>'
+        f'<td>{"+" if mover["change"] > 0 else ""}{mover["change"]} pp</td></tr>'
+        for mover in rows)
     qualified = (f'agencies with at least {floor} {noun} in both years' if floor
                  else 'agencies with a computable rate in both years')
     foot = (f'</tbody></table><p class="fignote">Top {len(rows)} of '
-            f'{len(v["movers"])} {html.escape(qualified)}. Change is in '
+            f'{len(value["movers"])} {html.escape(qualified)}. Change is in '
             f'percentage points (the difference between the two rates), not '
-            f'per cent.</p></section>')
+            f'per cent. {_MOVERS_SCOPE_NOTE}</p></section>')
     return head + body + foot
+
+
+def _movers_or_note(frame, title, stat_key) -> str:
+    """The movers section, or the house no-data note when this frame cannot
+    form the FY pair the stat needs.
+
+    stats.catalog._previous_complete_fy raises KeyError for a frame whose
+    annual years do not straddle LATEST_COMPLETE_FY (it refuses to wrap to the
+    newest year and invert every comparison). api.figures and the kpis op in
+    stats.dsl both drop such a key rather than take their payload down; this
+    page path did not, and server.app._boot renders EVERY page at boot — so one
+    unformable FY pair would have failed the boot of all thirteen pages, eleven
+    of which have nothing to do with movers.
+
+    Degrading rather than failing loud is deliberate, and it is not the golden
+    gate's territory: that gate aborts because a figure would be WRONG. Here no
+    figure is produced at all, and the page says so in the same words every
+    other unpublishable figure on the site uses. Nothing is fabricated.
+
+    The except is as narrow as the language allows, and it is still not narrow
+    enough to distinguish the catalog's declared "this frame cannot compute this
+    key" signal from a genuine KeyError raised inside the stat — the same
+    limitation api.figures carries. A missing key mis-typed here would render
+    the note instead of raising; the two literal keys below are covered by
+    test_change_pages_render_movers_tables.
+    """
+    try:
+        return _movers_section(title, _stat(frame, stat_key))
+    except KeyError:
+        return (f'<section class="figure-card"><h2>{html.escape(title)}</h2>'
+                '<p class="note">No movers ranking for this measure: the data '
+                'in this snapshot does not cover two complete financial years '
+                'to compare.</p></section>')
 
 
 def _kpi_scope_note() -> str:
     """B11 (decision 2026-08-25): the golden Q1 tiles are national figures with
     no per-agency breakdown in any source, so the agency filter cannot reach
-    them. Say so rather than let the tiles look unresponsive."""
+    them. Say so rather than let the tiles look unresponsive.
+
+    Call it through _kpi_block, not from a page body: pasted at six call sites
+    it drifted out of position and a new KPI page would have shipped without
+    it."""
     return ('<p class="fignote">KPI tiles show national totals for the '
             'published quarter; the filters apply to the charts below.</p>')
 
@@ -386,38 +466,42 @@ def _q1_total(frame, measure) -> str:
 def _page_at_a_glance(frame) -> str:
     g = lambda k: _stat(frame, k)
     basis_sq = _basis_label(g("requests_received_q1"))
+    # every tile in this block is a single-quarter golden figure (basis_sq), so
+    # the provenance follows from the basis exactly as it does in _kpis — one
+    # definition here, nine tiles below
+    src_sq = _source_for_basis(basis_sq)
     share = lambda k: f"{g(k)['value']}% of decisions"
     kpis = ("<div class=\"kpis\">"
             + _kpi("Requests received", _q1_total(frame, "received"), basis_sq,
-                   source=GOLDEN_SOURCE)
+                   source=src_sq)
             + _kpi("Requests finalised", _q1_total(frame, "finalised"), basis_sq,
-                   source=GOLDEN_SOURCE)
+                   source=src_sq)
             + _kpi("Requests decided", _q1_total(frame, "decided"), basis_sq,
-                   source=GOLDEN_SOURCE)
+                   source=src_sq)
             + _kpi("Decided within statutory", _q1_total(frame, "within_statutory"),
                    basis_sq, title=share("within_statutory_pct_q1"),
-                   source=GOLDEN_SOURCE)
+                   source=src_sq)
             + _kpi("Granted in full", _q1_total(frame, "granted_full"), basis_sq,
-                   title=share("granted_full_share_q1"), source=GOLDEN_SOURCE)
+                   title=share("granted_full_share_q1"), source=src_sq)
             + _kpi("Granted in part", _q1_total(frame, "granted_part"), basis_sq,
-                   title=share("granted_part_share_q1"), source=GOLDEN_SOURCE)
+                   title=share("granted_part_share_q1"), source=src_sq)
             + _kpi("Refused", _q1_total(frame, "refused"), basis_sq,
-                   title=share("refused_share_q1"), source=GOLDEN_SOURCE)
+                   title=share("refused_share_q1"), source=src_sq)
             + _kpi("Withdrawn", _q1_total(frame, "withdrawn"), basis_sq,
-                   source=GOLDEN_SOURCE)
+                   source=src_sq)
             + "</div>")
-    kpis += ("<div class=\"kpis\">"
-             + _kpi("Granted full / part / refused (share of decisions)",
-                    f"{g('granted_full_share_q1')['value']}/{g('granted_part_share_q1')['value']}/{g('refused_share_q1')['value']}%",
-                    _basis_label(g('granted_full_share_q1')), source=GOLDEN_SOURCE)
-             + "</div>")
+    # the second block closes the tiles, so it is the one that carries the scope
+    # note — _kpi_block emits both together
+    kpis += _kpi_block(
+        _kpi("Granted full / part / refused (share of decisions)",
+             f"{g('granted_full_share_q1')['value']}/{g('granted_part_share_q1')['value']}/{g('refused_share_q1')['value']}%",
+             _basis_label(g('granted_full_share_q1')), source=src_sq))
     body = f"""
     <h1>FOI at a glance</h1>
     <p class="intro">Freedom of Information (FOI) activity by Australian
     Government agencies and ministers — latest published quarter (Q1
     2025-26). All figures are computed from the source data.</p>
     {kpis}
-    {_kpi_scope_note()}
     {_filters_bar(frame, "at-a-glance")}
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
@@ -438,7 +522,6 @@ def _page_requests_received(frame) -> str:
     ministers, by financial year.</p>
     {_filters_bar(frame, "requests-received")}
     {_kpis(frame, ["requests_received_q1"])}
-    {_kpi_scope_note()}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
                     "requests_received_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -479,7 +562,6 @@ def _page_requests_finalised(frame) -> str:
     and ministers, by financial year.</p>
     {_filters_bar(frame, "requests-finalised")}
     {_kpis(frame, ["requests_finalised_q1"])}
-    {_kpi_scope_note()}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
                     "requests_finalised_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -498,7 +580,6 @@ def _page_requests_decided(frame) -> str:
     ministers, by financial year, alongside the latest published quarter.</p>
     {_filters_bar(frame, "requests-decided")}
     {_kpis(frame, ["decided_q1"])}
-    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -535,7 +616,6 @@ def _page_decision_outcomes(frame) -> str:
     {_filters_bar(frame, "decision-outcomes")}
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
-    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
                     "decision_outcomes_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -560,7 +640,7 @@ def _page_change_decision_outcomes(frame) -> str:
                     "granted_full_part_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
-    {_movers_section("Refusal-rate movers", _stat(frame, "refusal_rate_movers"))}
+    {_movers_or_note(frame, "Refusal-rate movers", "refusal_rate_movers")}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
     return chrome("Change in decision outcomes", body,
@@ -577,7 +657,6 @@ def _page_timeliness(frame) -> str:
     after-statutory buckets are not ingested.</p>
     {_filters_bar(frame, "timeliness")}
     {_kpis(frame, ["within_statutory_pct_q1"])}
-    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
@@ -601,7 +680,7 @@ def _page_change_timeliness(frame) -> str:
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
-    {_movers_section("Timeliness movers", _stat(frame, "timeliness_movers"))}
+    {_movers_or_note(frame, "Timeliness movers", "timeliness_movers")}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""
     return chrome("Change in timeliness", body,

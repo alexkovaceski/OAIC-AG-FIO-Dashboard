@@ -56,6 +56,23 @@ def test_generic_figure_reproduces_legacy_outputs():
     assert top["series"][0]["values"][0] == 17120
 
 
+def test_timeliness_caption_and_correlation_describe_what_is_published():
+    # Stale-record sweep: the annual files have published decisions, outcomes
+    # and timeliness since 43fad97. The caption still promised a within/after
+    # split that is not ingested, and the correlation's comment still claimed a
+    # degenerate None it no longer returns.
+    from stats.catalog import FIG_CAPTIONS
+    assert FIG_CAPTIONS["timeliness_trend"] == \
+        "Timeliness of decision-making (within statutory)"
+    frame = Frame(normalise_all())
+    within = catalog._fy_series(frame, "within_statutory")
+    assert within and all(v is not None for v in within), \
+        "within_statutory has an annual series — the caption/comment must agree"
+    corr = foi_stats(frame, "timeliness_slippage_corr")
+    assert corr["value"] is not None and -1 <= corr["value"] <= 1, \
+        "the correlation is a real coefficient over two published FY series"
+
+
 def test_top_n_spec_takes_fy_parameter():
     # the server default uses LATEST_COMPLETE_FY; the spec carries it so the
     # client can override with the FY filter (B6/B7 fix)

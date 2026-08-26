@@ -162,7 +162,13 @@ def query_dataset(frame, op: str, params: dict) -> dict:
             try:
                 stat = foi_stats(frame, key)
             except KeyError:
-                continue  # a key this frame can't compute stays absent (no fabrication)
+                # the catalog's declared "this frame cannot compute this key"
+                # signal — the key stays absent, nothing is fabricated. Note
+                # what this does NOT guarantee: a genuine KeyError raised inside
+                # a stat is indistinguishable from the signal and would drop the
+                # key just as quietly. Every other exception type still
+                # propagates. Same limitation as api.figures.
+                continue
             if isinstance(stat["value"], (list, dict)):
                 continue
             out[key] = {"value": stat["value"], "basis": stat["basis"]}
