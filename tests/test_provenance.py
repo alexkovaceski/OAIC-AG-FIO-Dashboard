@@ -506,19 +506,82 @@ def test_a_transcribed_q1_stat_names_its_transcription_not_a_filter_caveat():
     for key in _GOLDEN_Q1_KEYS:
         q = provenance.describe(frame, key=key)["figure"]["qualifier"]
         assert "transcribed" in q.lower(), key
-        # it points at the registry entries that travel in the same payload
-        assert "oaic-dashboard" in q, key
-        assert "golden-q1-transcription" in q, key
+        # it points at the entries that travel in the same payload, by the words
+        # the renderer actually prints for them (see the id test below)
+        assert "reference source" in q, key
+        assert "curation decisions" in q, key
         # and it does NOT offer a browser re-derivation that cannot happen
         assert "in the browser" not in q, key
 
 
-def test_the_entries_a_transcribed_qualifier_names_travel_with_it():
-    """A qualifier that cites `oaic-dashboard` and `golden-q1-transcription` is
-    only useful if a reader gets those entries in the same answer."""
+def test_no_qualifier_cites_a_registry_id_the_renderer_never_prints():
+    """M3. The transcribed qualifier used to tell a reader that "the source
+    entry `oaic-dashboard` and the curation decision `golden-q1-transcription`
+    below record what was read and when". Measured 2026-08-27 across all 25
+    reader-visible rows of a `decided_q1` answer, those two literals appeared in
+    exactly ONE row: the qualifier itself. `report._registry_rows` composes
+    every row from `title`, `url`, `covers`, `sha256`, `ingested_as` and `date`
+    — never `id` — so the reader was told to look for a label that is not on the
+    page.
+
+    Asserted over every id in the registry and every key in the catalog rather
+    than over the two literals, because the defect is the shape, not those two
+    strings. Registry ids are hyphenated and catalog keys use underscores, so no
+    key can collide with an id and make this pass by accident."""
+    frame = _real_frame()
+    from stats.catalog import FIG_KEYS, STAT_KEYS
+    reg = provenance.load_registry()
+    ids = [e["id"] for kind in ("sources", "derivations", "decisions")
+           for e in reg[kind]]
+    assert "oaic-dashboard" in ids and "golden-q1-transcription" in ids
+    for key in FIG_KEYS + STAT_KEYS:
+        q = provenance.describe(frame, key=key)["figure"]["qualifier"]
+        for entry_id in ids:
+            assert entry_id not in q, (key, entry_id)
+
+
+def test_the_entries_a_transcribed_qualifier_points_at_travel_with_it():
+    """A qualifier that sends a reader to "the reference source below" and "the
+    curation decisions" is only useful if those entries are in the same answer.
+    Named here by id, which is how the payload identifies them, even though the
+    qualifier no longer quotes the ids at a reader."""
     payload = provenance.describe(_real_frame(), key="decided_q1")
     assert any(s["id"] == "oaic-dashboard" for s in payload["sources"])
     assert any(d["id"] == "golden-q1-transcription" for d in payload["decisions"])
+
+
+def test_the_transcribed_qualifier_states_what_the_boot_check_compares():
+    """I1. The qualifier said the service "re-sums those rows against the
+    published figures", two sentences after naming "the OAIC's own published FOI
+    dashboard" — so a member of the public read it as a re-verification against
+    the OAIC at every boot.
+
+    It is not. `Frame.golden_check` sums the frame's fy=2025-26 / quarter=1 /
+    bucket=total rows per measure and compares each to
+    `config.GOLDEN_Q1_FIGURES`; `normalise._golden_q1_facts` emits those rows
+    FROM `GOLDEN_Q1_FIGURES`, one `_fact` per constant with value = the
+    constant. This test measures that identity rather than asserting it, then
+    requires the sentence to say what the check is against and to disclaim the
+    re-read."""
+    from config import GOLDEN_Q1_FIGURES
+    from ingest.normalise import _golden_q1_facts, _GOLDEN_MEASURE
+    # BOTH SIDES ARE THE SAME EIGHT NUMBERS — measured, not assumed
+    emitted = {f["measure"]: f["value"] for f in _golden_q1_facts()}
+    expected = {_GOLDEN_MEASURE[k]: float(v)
+                for k, v in GOLDEN_Q1_FIGURES.items()}
+    assert emitted == expected
+    assert len(emitted) == 8
+
+    frame = _real_frame()
+    for key in _GOLDEN_Q1_KEYS:
+        q = provenance.describe(frame, key=key)["figure"]["qualifier"]
+        # says what it compares against
+        assert "its own configuration" in q, key
+        # and says, in the same breath, what it is NOT
+        assert "not against the OAIC" in q, key
+        assert "nothing here re-reads the dashboard" in q, key
+        # the reintroduced overstatement, gone
+        assert "against the published figures" not in q, key
 
 
 def test_a_server_rendered_stat_does_not_promise_a_filter_that_cannot_reach_it():
@@ -547,6 +610,134 @@ def test_a_chart_figure_keeps_the_default_view_wording():
                             key="requests_received_trend")["figure"]["qualifier"]
     assert "default view" in q.lower()
     assert "in the browser" in q
+
+
+def test_only_a_figure_some_page_ships_promises_browser_re_derivation():
+    """M2. `FIG_KEYS` is not the set of figures a reader has a filter for.
+    Measured 2026-08-27, three of the thirteen — refused_pct_trend,
+    agency_contributions_received, agency_contributions_decided — are in no
+    page's PAGE_FIGURE_KEYS, so no page ships them into
+    window.__pageData.figures and nothing re-derives them in the browser. They
+    are reachable only through the model-driven `provenance` op in stats.dsl,
+    and there they still said "Any filter a reader sets re-derives the chart in
+    the browser". Under-claiming rather than over-claiming, which is why a round
+    hunting over-claims walked past it, but the same defect: a promise about a
+    control that does not exist.
+
+    The predicate is `key in shipped`, so this test dispatches the same way
+    rather than listing the three keys, and a key added to a page flips its
+    branch here without an edit."""
+    from stats.catalog import FIG_KEYS
+    frame = _real_frame()
+    shipped = provenance._shipped_figure_keys()
+    unshipped = sorted(set(FIG_KEYS) - shipped)
+    assert unshipped, "if every figure key now ships, revisit the branch"
+    for key in FIG_KEYS:
+        q = provenance.describe(frame, key=key)["figure"]["qualifier"]
+        if key in shipped:
+            assert "in the browser" in q, key
+        else:
+            assert "in the browser" not in q, key
+            assert "no filter re-derives it" in q, key
+        # the guarantee that holds for every class, whichever branch ran
+        assert "the default view" in q, key
+
+
+def test_an_unshipped_figure_key_reaches_no_rendered_page():
+    """The premise under the sentence above, measured against the rendered HTML
+    rather than against PAGE_FIGURE_KEYS alone. A chart container is mounted by
+    a hand-written per-page section carrying a LITERAL chart key, so a key could
+    in principle reach a page without reaching that dict, and the branch would
+    then withhold a filter caveat from a figure that has one."""
+    from site.pages import render_all_pages
+    from stats.catalog import FIG_KEYS
+    frame = _real_frame()
+    html = "\n".join(str(p) for p in render_all_pages(frame).values())
+    for key in sorted(set(FIG_KEYS) - provenance._shipped_figure_keys()):
+        assert key not in html, key
+
+
+def test_two_unshipped_keys_are_aliases_of_a_chart_that_is_on_a_page():
+    """Why the unshipped sentence says "no page ships this figure" and not "this
+    chart is on no page". agency_contributions_received and _decided are
+    spec-identical to received_top20 and decided_top20 — same kind, measure, n
+    and default_fy, and the same rows_hash — and those two ARE drawn, so the
+    stronger sentence would have been a fresh false claim in the fix for one.
+    Only refused_pct_trend is drawn nowhere."""
+    from stats.catalog import FIGURE_SPECS, foi_stats
+    frame = _real_frame()
+    shipped = provenance._shipped_figure_keys()
+    for alias, real in (("agency_contributions_received", "received_top20"),
+                        ("agency_contributions_decided", "decided_top20")):
+        assert alias not in shipped and real in shipped
+        assert FIGURE_SPECS[alias] == FIGURE_SPECS[real]
+        assert (foi_stats(frame, alias)["rows_hash"]
+                == foi_stats(frame, real)["rows_hash"])
+    q = provenance.describe(frame,
+                            key="agency_contributions_received")["figure"]["qualifier"]
+    assert "on no page" not in q
+    assert "not drawn on any page" not in q
+
+
+def test_an_unshipped_figure_still_carries_its_measured_default_view():
+    """The measured detail and the sentence split on DIFFERENT predicates, and
+    that is deliberate. `report._registry_rows` marks which of the seven
+    workbooks feed a figure using `default_view["financial_years"]` and
+    `["measures"]`; without them it falls back to an unmarked list of all seven,
+    which is the over-claim it exists to prevent. So moving the unshipped keys
+    to the stat branch wholesale would have fixed the sentence and broken the
+    rows. Only the closing clause dispatches on `shipped`."""
+    fig = provenance.describe(_real_frame(),
+                              key="agency_contributions_received")["figure"]
+    view = fig["default_view"]
+    assert view["financial_years"] == ["2024-25"]
+    assert view["measures"] == ["received"]
+    assert view["buckets"] == ["total"]
+    assert view["distinct_agencies"] == 303
+    assert fig["kind"] == "top_n"
+
+
+def test_a_brace_in_a_template_cannot_break_a_qualifier():
+    """M4. `_qualifier` substitutes with `str.replace`, not `str.format`, so a
+    brace anywhere else in a template is copied through instead of being read as
+    a field name. Correct and cheap — and until this test, UNCOVERED: swapping
+    `replace` for `format` left the whole suite green, because every template
+    `_live_layer` builds today happens to contain `{view}` and nothing else.
+
+    That is the reason to pin it. The property is about the next template, not
+    this one: every template here is an f-string over measured text, and the day
+    one interpolates something less controlled, `format` turns a stray brace
+    into a KeyError on a provenance answer while `replace` degrades it to a
+    literal brace. Under `template.format(view=view)` the call below raises
+    KeyError('n')."""
+    out = provenance._qualifier(
+        "default_view", "A basis of {n} rows describes {view}.")
+    assert out == "A basis of {n} rows describes the default view."
+    # a doubled brace is not an escape either — replace leaves it alone, where
+    # format would collapse it to a single one
+    assert (provenance._qualifier("default_view", "{{literal}} in {view}.")
+            == "{{literal}} in the default view.")
+
+
+def test_the_transcribed_basis_predicate_and_the_page_citation_agree():
+    """M5. The module docstring used to call these "the same rule". They are
+    not: this module dispatches on the basis ENUM (`stat["basis"] ==
+    "single_quarter"`), while `pages._source_for_basis` tests for the substring
+    "single quarter" inside a DISPLAY label produced by `pages._basis_label`.
+    They coincide only because `_BASIS_LABEL` happens to map that one enum value
+    to a label containing that substring; reword the label and the citation
+    beside the tile detaches from the qualifier in this file, silently.
+
+    So pin them. Over `config.WINDOW_MODES` rather than over the 25 catalog
+    keys, because the enum is the whole domain both predicates read from — a
+    basis value no key currently produces would still have to agree."""
+    from config import WINDOW_MODES
+    from site.pages import _basis_label, _source_for_basis
+    assert "single_quarter" in WINDOW_MODES
+    for mode in WINDOW_MODES:
+        enum_says = mode == "single_quarter"
+        label_says = _source_for_basis(_basis_label({"basis": mode})) is not None
+        assert enum_says == label_says, (mode, _basis_label({"basis": mode}))
 
 
 # ----------------------------------------------- what the scope sentence says ---

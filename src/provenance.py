@@ -56,19 +56,37 @@ that stashed copy, so a registry edited after boot cannot be handed to a reader
 wearing a validation it never passed. See `_validated_registry` for what
 happens when `describe` runs before any validation has.
 
-WHAT THE LIVE LAYER MAY AND MAY NOT SAY. There are three classes of key and
-they do not share a caveat; the qualifier is chosen per class in `_live_layer`.
+WHAT THE LIVE LAYER MAY AND MAY NOT SAY. There are four classes of key and they
+do not share a caveat; the qualifier is chosen per class in `_live_layer`.
 
-  CHART FIGURES (`FIG_KEYS`). Each chart page ships the whole `foi_stats`
-  result for its figures into `window.__pageData.figures[key]`, including
-  `source_rows` and `rows_hash`, while shipping facts for EVERY financial year;
-  the chart engine then re-derives the chart in the browser for whatever filter
-  the reader picks. So the hash that travels with a figure describes the
-  DEFAULT view and not the one a filtered reader is looking at, and the
-  qualifier says exactly that. The layer does NOT attempt to recompute a basis
-  for a client-side filter state: the server never sees that state, and a count
-  derived from a state it cannot observe would be the same class of false claim
-  in a new place.
+  CHART FIGURES A PAGE SHIPS (`_shipped_figure_keys`). Each chart page ships
+  the whole `foi_stats` result for its figures into
+  `window.__pageData.figures[key]`, including `source_rows` and `rows_hash`,
+  while shipping facts for EVERY financial year (`pages._page_data_script`
+  filters its fact blob by measure only, never by year); the chart engine then
+  re-derives the chart in the browser for whatever filter the reader picks. So
+  the hash that travels with a figure describes the DEFAULT view and not the
+  one a filtered reader is looking at, and the qualifier says so. The layer
+  does NOT attempt to recompute a basis for a client-side filter state: the
+  server never sees that state, and a count derived from a state it cannot
+  observe would be the same class of false claim in a new place.
+
+  CHART FIGURES NO PAGE SHIPS. `FIG_KEYS` is not that set. Measured 2026-08-27,
+  `refused_pct_trend`, `agency_contributions_received` and
+  `agency_contributions_decided` are in no page's `PAGE_FIGURE_KEYS` and in no
+  rendered page, so nothing re-derives them under a filter; they are reachable
+  only through the `provenance` op in `stats.dsl`, which takes a key from the
+  model. Handing them the chart caveat promised a filter control that does not
+  exist — the same defect as promising one to a stat, in the direction that
+  under-claims, which is why it survived a round that was looking for
+  over-claims.
+
+  Their sentence says only that no page SHIPS the figure, not that no page
+  draws such a chart. Two of the three are spec-identical to a chart that is
+  drawn: `agency_contributions_received` matches `received_top20` and
+  `agency_contributions_decided` matches `decided_top20` on kind, measure, n,
+  default_fy and `rows_hash`. Only `refused_pct_trend` is drawn nowhere, so the
+  stronger sentence would have put a fresh false claim inside the fix for one.
 
   SERVER-RENDERED STATS. No stat key appears in `site.pages.PAGE_FIGURE_KEYS`,
   so no stat reaches `window.__pageData.figures` and `foi-charts.js` never
@@ -80,11 +98,28 @@ they do not share a caveat; the qualifier is chosen per class in `_live_layer`.
   TRANSCRIBED Q1 FIGURES. The eight single-quarter keys are the one place on
   this platform where a value was READ OFF the OAIC's published dashboard
   rather than computed from a workbook, and that — not a filter caveat — is the
-  provenance fact a reader needs. Their qualifier names the `oaic-dashboard`
-  source and the `golden-q1-transcription` decision, both of which travel in
-  the same payload. They are recognised by their `single_quarter` basis, the
-  same rule `pages._source_for_basis` uses to attach `GOLDEN_SOURCE`, rather
-  than by a second list of eight key names to fall out of step with the first.
+  provenance fact a reader needs. Their qualifier points at the OAIC dashboard
+  reference and the transcription decision, both of which travel in the same
+  payload, and describes them as the answer renders them rather than by their
+  registry ids, which the renderer never prints. It states what the boot check
+  compares (this service's own recorded values) and what it does not (anything
+  the OAIC publishes); see the comment on that branch for the measurement.
+
+  They are recognised by their `single_quarter` basis rather than by a second
+  list of eight key names to fall out of step with the first.
+  `pages._source_for_basis` attaches `GOLDEN_SOURCE` to the same eight tiles,
+  but NOT BY THE SAME RULE, and an earlier version of this docstring said it
+  was. This module compares the basis ENUM (`stat["basis"] ==
+  "single_quarter"`); that function tests for the substring "single quarter"
+  inside a DISPLAY label produced by `pages._basis_label`, which maps the enum
+  through `_BASIS_LABEL` to "basis: single quarter". They coincide because that
+  is the only one of the three labels containing the substring — measured
+  2026-08-27 they agree on all 25 catalog keys and on all three
+  `config.WINDOW_MODES`. Nothing enforces the coincidence: reword the label and
+  the citation beside the tile detaches from the qualifier in this file,
+  silently. `tests/test_provenance.py` pins the two predicates against each
+  other over the whole basis enum, which is what makes them one rule rather
+  than two that happen to agree.
 """
 from __future__ import annotations
 
@@ -563,6 +598,32 @@ def _default_view_sentence(spec, financial_years: list[str],
 _APPLIES_TO_PROSE = {"default_view": "the default view"}
 
 
+def _shipped_figure_keys() -> frozenset:
+    """The figure keys some page actually ships into `window.__pageData.figures`
+    — the only keys a reader has a filter control for.
+
+    NOT `FIG_KEYS`. Measured 2026-08-27, three of the thirteen catalog figure
+    keys (`refused_pct_trend`, `agency_contributions_received`,
+    `agency_contributions_decided`) are in no page's `PAGE_FIGURE_KEYS` and
+    appear in no rendered page, so no filter re-derives them; they are reachable
+    only through the model-driven `provenance` op in `stats.dsl`. Telling a
+    reader of one of those answers that "any filter you set re-derives the chart
+    in the browser" points at a control that does not exist — the same defect
+    class as promising a filter to a server-rendered stat, in the opposite
+    direction.
+
+    Imported lazily and deliberately NOT cached. Lazily because `site.pages`
+    only resolves as `site.*` once `site_shim.install()` has run (CPython
+    freezes the stdlib `site`), and `import provenance` must not acquire that
+    ordering constraint — `server.app` installs the shim first, but `stats.dsl`
+    and `agentic.report` import this module too. Not cached because
+    PAGE_FIGURE_KEYS is the single statement of what a page ships, and a stale
+    copy taken at import time is exactly the drift this module exists to stop.
+    """
+    from site.pages import PAGE_FIGURE_KEYS
+    return frozenset(k for keys in PAGE_FIGURE_KEYS.values() for k in keys)
+
+
 def _qualifier(applies_to: str, template: str) -> str:
     """The ONLY constructor of a `qualifier`, and it cannot build one that does
     not name the view the count and hash describe.
@@ -582,9 +643,25 @@ def _qualifier(applies_to: str, template: str) -> str:
     field the same payload carries. The sentence a reader sees and the field a
     machine reads cannot disagree, because there is one source for both.
 
-    Substitution is `replace`, not `format`: the templates carry measured text
-    (agency names, bucket names, financial years) and a stray brace in a
-    published value must not turn a provenance answer into a KeyError.
+    Substitution is `replace`, not `format`, so that a brace anywhere else in a
+    template is copied through as a brace rather than read as a field name.
+
+    The earlier justification named "agency names" as the exposure, and that is
+    wrong: no agency name reaches a template. Measured 2026-08-27, what
+    `_live_layer` interpolates is the catalog key, the bucket names and
+    financial-year labels taken off the figure's own source rows, `spec['n']`
+    for a top_n, and — where `_BASIS_PROSE` has no entry — the raw basis token.
+    Every one of those is fixed by code today (the normaliser writes the bucket
+    and FY strings from literals, the keys and `n` are catalog constants), so
+    there is no live path by which a published value carries a brace.
+
+    It stays `replace` anyway, because the property worth having is about the
+    NEXT template, not this one. Every template here is an f-string built over
+    measured text; the day one of them interpolates something less controlled,
+    `format` would turn a stray brace into a KeyError and a provenance answer
+    into a 500, while `replace` degrades it to a literal brace a reader can see.
+    A test holds this, because the swap is otherwise invisible: with `format`
+    substituted in, every other test in the suite still passes.
     """
     view = _APPLIES_TO_PROSE.get(applies_to)
     if view is None:
@@ -605,19 +682,29 @@ def _live_layer(frame, key: str) -> dict:
     contract), so an unknown key can never come back as an empty-looking answer.
 
     `applies_to` is always "default_view". The QUALIFIER is not always the same
-    sentence, because the three classes of key are not true of the same things —
+    sentence, because the four classes of key are not true of the same things —
     see the module docstring for the class split and the evidence behind it. In
-    short: a chart figure really is re-derived in the browser under the reader's
-    filter, so its basis has to be labelled as the default view; a stat is
-    server-rendered HTML the filters never touch, so promising a reader they can
-    re-derive it is an invitation to a path that does not exist; and a
-    transcribed Q1 figure's one load-bearing provenance fact is that it was read
-    off the OAIC's dashboard rather than computed, which no filter caveat says.
+    short: a chart a page ships really is re-derived in the browser under the
+    reader's filter, so its basis has to be labelled as the default view; a
+    figure NO page ships has no filter control at all, so it may not be offered
+    one; a stat is server-rendered HTML the filters never touch, so promising a
+    reader they can re-derive it is an invitation to a path that does not exist;
+    and a transcribed Q1 figure's one load-bearing provenance fact is that it
+    was read off the OAIC's dashboard rather than computed, which no filter
+    caveat says.
 
-    What the three DO share is enforced rather than repeated: every one goes
+    The MEASURED DETAIL and the SENTENCE split on different predicates, on
+    purpose. Every catalog figure key gets the full measured `default_view`
+    (years, buckets, measures, agency count) because `report._registry_rows`
+    marks which workbooks feed the figure from those fields, and without them it
+    falls back to an unmarked list of all seven — the over-claim it exists to
+    prevent. Only the closing clause of the sentence dispatches on whether a
+    page ships the key, because that is what decides whether a filter exists.
+
+    What all four DO share is enforced rather than repeated: every one goes
     through `_qualifier`, which will not emit a sentence that does not name the
     view, and takes the wording of that view from this layer's own `applies_to`.
-    Three sentences, one guarantee, and no way to reword a class out of it.
+    Four sentences, one guarantee, and no way to reword a class out of it.
     """
     stat = foi_stats(frame, key)
     spec = FIGURE_SPECS.get(key)
@@ -650,17 +737,38 @@ def _live_layer(frame, key: str) -> dict:
         multi_year = "" if len(financial_years) < 2 else (
             " The agency count is the number of distinct agency names appearing "
             "anywhere in that basis, not the number reporting in any one year.")
+        if key in _shipped_figure_keys():
+            # A page ships this key into window.__pageData.figures, so the
+            # reader really does have a filter that re-draws it client-side.
+            filters = (" Any filter a reader sets re-derives the chart in the "
+                       "browser from the same published facts, so this basis "
+                       "describes {view} and not a filtered one.")
+        else:
+            # No page ships it, so there is no filter control to point at.
+            #
+            # The sentence claims only that, and deliberately does NOT say "this
+            # chart is on no page of the site". Measured 2026-08-27,
+            # agency_contributions_received is spec-identical to received_top20
+            # and agency_contributions_decided to decided_top20 (same kind,
+            # measure, n and default_fy; same rows_hash), and those two ARE
+            # drawn, on key-agency-contributions-received and -decided. A reader
+            # told "not on any page" who then finds what looks like the same
+            # chart has been misled about a smaller thing than the one this
+            # branch fixes. Only refused_pct_trend is drawn nowhere.
+            filters = (" No page of this site ships this figure to a browser, "
+                       "so no filter re-derives it; the basis above is the one "
+                       "the server computed for this answer.")
         layer["qualifier"] = _qualifier(layer["applies_to"], (
             f"This row count and hash describe {{view}} of {key} as the server "
             f"computed it: "
             f"{_default_view_sentence(spec, financial_years, buckets)}."
-            f"{multi_year} Any filter a reader sets re-derives the chart in the "
-            f"browser from the same published facts, so this basis describes "
-            f"{{view}} and not a filtered one."))
+            f"{multi_year}{filters}"))
     elif stat["basis"] == "single_quarter":
-        # The transcribed Q1 2025-26 headline figures. Recognised by basis, the
-        # same rule pages._source_for_basis uses to attach GOLDEN_SOURCE, so
-        # there is no second list of eight key names to drift.
+        # The transcribed Q1 2025-26 headline figures, recognised by the basis
+        # ENUM so there is no second list of eight key names to drift.
+        # pages._source_for_basis reaches the same eight tiles, but NOT by the
+        # same rule — it matches a substring of a display label. See the module
+        # docstring; a test pins the two predicates against each other.
         layer["default_view"] = {"basis": stat["basis"]}
         # "rests on values transcribed", not "is transcribed": measured
         # 2026-08-27, four of the eight keys ARE the published count (1 source
@@ -669,6 +777,42 @@ def _live_layer(frame, key: str) -> dict:
         # figure is transcribed" would be false for those four, and the whole
         # point of this branch is to stop saying something weaker and less true
         # than the page already says.
+        #
+        # WHAT THE BOOT CHECK ACTUALLY COMPARES, because a reader will take the
+        # sentence at face value. Frame.golden_check re-sums the frame's
+        # fy=2025-26 / quarter=1 / bucket=total rows per measure and compares
+        # each total to config.GOLDEN_Q1_FIGURES. Those rows are emitted FROM
+        # GOLDEN_Q1_FIGURES by normalise._golden_q1_facts — one _fact per
+        # constant, value = the constant — so both sides of the comparison are
+        # the same eight numbers.
+        #
+        # It is a real gate, and worth stating truthfully rather than deleting.
+        # It catches: a dropped or partial emission (the slice sums to 0);
+        # fy/quarter/bucket stamping that moves a row out of the window it is
+        # looked up in; a collision in _GOLDEN_MEASURE, where two golden keys
+        # map to one measure and the slice doubles; any value transformation
+        # between the constant and the fact; and contamination of the window by
+        # some other ingest landing rows in fy=2025-26 quarter=1. It does NOT
+        # catch a mistyped constant, because the constants are both sides. And
+        # it compares nothing against anything the OAIC publishes: the boot path
+        # makes no network call at all.
+        #
+        # An earlier wording here said "re-sums those rows against the published
+        # figures" two sentences after naming the OAIC dashboard, which a
+        # member of the public reads as a per-boot re-verification against the
+        # OAIC. server/app.py had already caught and corrected that same
+        # overstatement in its own docstring (see _boot, "the old wording here
+        # ... overstated it"); this round reintroduced it in reader-facing
+        # prose, on the eight keys the round existed to make honest.
+        #
+        # It cites no registry ids either. Measured 2026-08-27 across all 25
+        # reader-visible rows of a decided_q1 answer, `oaic-dashboard` and
+        # `golden-q1-transcription` appeared in exactly one row — this qualifier
+        # itself. report._registry_rows prints titles, urls and dates, never
+        # ids, so naming them told a reader to look for labels not on the page.
+        # The entries are described by how they render instead, and not by
+        # quoting their curated titles, which would put a second copy of curated
+        # text here to drift from the registry.
         layer["qualifier"] = _qualifier(layer["applies_to"], (
             "This figure rests on values transcribed from the OAIC's own "
             "published FOI dashboard, not computed from the workbooks: the "
@@ -676,13 +820,19 @@ def _live_layer(frame, key: str) -> dict:
             "quarter cannot be recovered from it. Its row count says how many "
             "transcribed values it uses — one where the figure is a published "
             "count, two where it is one published count as a percentage of "
-            "another. The source entry `oaic-dashboard` and the curation "
-            "decision `golden-q1-transcription` below record what was read and "
-            "when, and every start of this service re-sums those rows against "
-            "the published figures before it will serve a page. The tile is "
-            "rendered by the server: the filters apply to the charts below it, "
-            "so {view}, which is what this count and hash describe, is the only "
-            "view of it there is."))
+            "another. The transcription was read off the dashboard once, by a "
+            "person. The OAIC dashboard is listed as a reference source below, "
+            "and the decision to transcribe these eight figures sits among the "
+            "curation decisions with the date it was made. Every start of this "
+            "service re-sums those rows against the eight values written down "
+            "in its own configuration and will not serve a page if they "
+            "disagree, so a break in the transcription path stops the service "
+            "rather than reaching a reader. That check is against this "
+            "service's own record of what was transcribed, not against the "
+            "OAIC: nothing here re-reads the dashboard. The tile is rendered by "
+            "the server: the filters apply to the charts below it, so {view}, "
+            "which is what this count and hash describe, is the only view of it "
+            "there is."))
     else:
         layer["default_view"] = {"basis": stat["basis"]}
         layer["qualifier"] = _qualifier(layer["applies_to"], (

@@ -20,9 +20,19 @@ answers whether the file has changed since it was registered, and that is the
 check the service runs at boot. Whether the local file is still byte-identical
 to what data.gov.au serves is a different question, and the answer differs by
 workbook. data.gov.au publishes its own content hash for exactly one of the
-seven resources, the 2020-21 workbook, and the copy here reproduces it. For the
-other six there is no published hash, so the correspondence rests on the byte
-count, which matches the published `size` field for all seven.
+seven resources, the 2020-21 workbook, and the copy here reproduced it when
+these entries were written. For the other six there is no published hash, so
+the correspondence rests on the byte count, which matched the `size` data.gov.au
+records in each resource's metadata when these entries were written on
+2026-08-26.
+
+Both of those are dated statements, not live ones, and the difference matters
+because the byte count is all that stands behind six of the seven files. Boot
+re-reads the local file and compares it to the `sha256` and `bytes` recorded
+here, so a change on this side stops the service. Nothing re-reads data.gov.au:
+the service makes no network call at start-up, by design, so a resource
+replaced upstream would not be noticed here. Re-checking against what
+data.gov.au serves is a person's job, and 2026-08-26 is when it was last done.
 
 ## data.gov.au — Freedom of information statistics
 
@@ -89,10 +99,13 @@ verified: 2026-08-26
 Full financial year, July 2020 to June 2021. 21 sheets, three read, 7,587 facts.
 
 This is the one resource for which data.gov.au publishes its own content hash
-(an MD5, `887306f8e5b3fb53f8563d7454d5bbe5`). The copy in this repository
-reproduces it exactly, which pins the local file to the published one byte for
-byte rather than by size alone. What that leaves for the other six is set out
-in the preamble above.
+(an MD5, `887306f8e5b3fb53f8563d7454d5bbe5`), read from the resource metadata on
+2026-08-26. The copy in this repository still hashes to that MD5, checked on
+2026-08-27, which pins the local file to the published one byte for byte rather
+than by size alone — for as long as the published resource is the one that was
+read on 2026-08-26. Nothing on this platform recomputes that MD5 at boot or
+re-reads the published value; the boot check is the `sha256` above, against the
+local file. What that leaves for the other six is set out in the preamble.
 
 ## Agency FOI data 2021-22
 
