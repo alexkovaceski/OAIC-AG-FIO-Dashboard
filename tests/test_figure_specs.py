@@ -59,6 +59,42 @@ def test_top_n_spec_takes_fy_parameter():
         assert FIGURE_SPECS[key]["n"] == 20
 
 
+def test_movers_stats_default_to_latest_complete_pair():
+    frame = Frame(normalise_all())
+    out = foi_stats(frame, "refusal_rate_movers")
+    assert out["basis"] == "fy"
+    assert out["value"]["fy_a"] == "2023-24" and out["value"]["fy_b"] == "2024-25"
+    assert out["value"]["movers"], "no movers computed"
+    top = out["value"]["movers"][0]
+    assert set(top) == {"agency", "fy_a_rate", "fy_b_rate", "change"}
+
+    t = foi_stats(frame, "timeliness_movers")
+    assert t["value"]["movers"], "no timeliness movers"
+
+
+def test_legacy_movers_key_still_works():
+    # src/agentic/report.py routes "refusal rate" to this key and renders
+    # stat["value"] directly — it must stay a bare LIST, not the new dict
+    frame = Frame(normalise_all())
+    out = foi_stats(frame, "refusal_rate_change_fy23_fy24")
+    assert out["value"], "legacy key must keep returning movers"
+    assert isinstance(out["value"], list), "legacy key must stay a bare list"
+    assert set(out["value"][0]) == {"agency", "fy_a_rate", "fy_b_rate", "change"}
+
+
+def test_received_channel_trend_is_spec_driven():
+    # B5 (spec S2.2): the Stage-1 received_transfer measure gets a figure with
+    # zero new engine code — a plain multi_trend spec
+    assert "received_channel_trend" in FIG_KEYS
+    spec = FIGURE_SPECS["received_channel_trend"]
+    assert spec["kind"] == "multi_trend"
+    assert spec["measures"] == ["received", "received_transfer"]
+    fig = foi_stats(Frame(normalise_all()), "received_channel_trend")["value"]
+    assert [s["name"] for s in fig["series"]] == ["received", "received_transfer"]
+    for s in fig["series"]:
+        assert any(v is not None for v in s["values"]), "channel series is all None"
+
+
 def test_ratio_trend_with_empty_operand_yields_empty_values():
     # legacy zip shape: an absent measure truncates the ratio to [], which is
     # what keeps _figure_has_data honest (a [None,...] list would ghost-render)

@@ -215,6 +215,21 @@ h1 {
   font-size: 0.78rem; color: var(--muted); margin: 6px 0 0;
 }
 
+/* --- movers tables (the FY-pair change analysis beside each change chart) --- */
+
+.movers { width: 100%; border-collapse: collapse; margin: 0.75rem 0 0; }
+.movers th, .movers td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+.movers th { font-size: 0.78rem; color: var(--ink-2); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em; }
+.movers th:not(:first-child), .movers td:not(:first-child) {
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.movers tbody tr:last-child td { border-bottom: none; }
+
 /* --- figure cards ---------------------------------------------------------- */
 
 .figure-card {

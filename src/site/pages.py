@@ -35,7 +35,7 @@ GOLDEN_SOURCE = ("Transcribed from the OAIC Power BI report, Q1 2025-26 "
 # page's window.__pageData blob ships). Pages without charts ship no figures.
 PAGE_FIGURE_KEYS = {
     "at-a-glance": ["requests_received_trend"],
-    "requests-received": ["requests_received_trend"],
+    "requests-received": ["requests_received_trend", "received_channel_trend"],
     "key-agency-contributions-received": ["received_top20"],
     "requests-finalised": ["requests_finalised_trend"],
     "requests-decided": ["requests_decided_trend"],
@@ -62,6 +62,8 @@ _STAT_LABELS = {
     "withdrawn_q1": "Withdrawn",
     "refusal_rate_change_fy23_fy24": "Refusal rate, top movers",
     "timeliness_slippage_corr": "Timeliness slippage correlation",
+    "refusal_rate_movers": "Refusal-rate movers",
+    "timeliness_movers": "Timeliness movers",
 }
 
 # human-readable basis labels — printed beside every figure
@@ -289,6 +291,37 @@ def _notes_section(title, fig, chart_key, source=None) -> str:
             f'{note}{_chart_container(chart_key, fig)}</section>')
 
 
+def _movers_section(title, stat, unit="%") -> str:
+    """A ranked movers table: agency, rate in each FY, change. Top 10 by
+    absolute change; the count of qualifying agencies is disclosed.
+
+    This is the real change analysis (B10) — the chart beside it plots the
+    national level series, which is a different question."""
+    v = stat["value"]
+    rows = v["movers"][:10]
+    head = (f'<section class="figure-card"><h2>{html.escape(title)}</h2>'
+            f'<p class="basis">{_basis_label(stat)}</p>'
+            f'<table class="movers"><thead><tr><th>Agency</th>'
+            f'<th>{html.escape(v["fy_a"])}</th><th>{html.escape(v["fy_b"])}</th>'
+            f'<th>Change</th></tr></thead><tbody>')
+    body = "".join(
+        f'<tr><td>{html.escape(m["agency"])}</td>'
+        f'<td>{m["fy_a_rate"]}{unit}</td><td>{m["fy_b_rate"]}{unit}</td>'
+        f'<td>{"+" if m["change"] > 0 else ""}{m["change"]}{unit}</td></tr>'
+        for m in rows)
+    foot = (f'</tbody></table><p class="fignote">Top 10 of {len(v["movers"])} '
+            f'agencies with a computable rate in both years.</p></section>')
+    return head + body + foot
+
+
+def _kpi_scope_note() -> str:
+    """B11 (decision 2026-08-25): the golden Q1 tiles are national figures with
+    no per-agency breakdown in any source, so the agency filter cannot reach
+    them. Say so rather than let the tiles look unresponsive."""
+    return ('<p class="fignote">KPI tiles show national totals for the '
+            'published quarter; the filters apply to the charts below.</p>')
+
+
 def _lineage_panel(artifact) -> str:
     return (f'<p class="lineage"><a href="/lineage/{artifact}">'
             f'View lineage for this dashboard</a></p>')
@@ -338,6 +371,7 @@ def _page_at_a_glance(frame) -> str:
     Government agencies and ministers — latest published quarter (Q1
     2025-26). All figures are computed from the source data.</p>
     {kpis}
+    {_kpi_scope_note()}
     {_filters_bar(frame, "at-a-glance")}
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
@@ -358,8 +392,14 @@ def _page_requests_received(frame) -> str:
     ministers, by financial year.</p>
     {_filters_bar(frame, "requests-received")}
     {_kpis(frame, ["requests_received_q1"])}
+    {_kpi_scope_note()}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
                     "requests_received_trend",
+                    source="Source: data.gov.au FOI statistics workbooks, "
+                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+    {_trend_section(FIG_CAPTIONS["received_channel_trend"],
+                    _stat(frame, "received_channel_trend")["value"],
+                    "received_channel_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
     {_lineage_panel("requests-received")}
@@ -393,6 +433,7 @@ def _page_requests_finalised(frame) -> str:
     and ministers, by financial year.</p>
     {_filters_bar(frame, "requests-finalised")}
     {_kpis(frame, ["requests_finalised_q1"])}
+    {_kpi_scope_note()}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
                     "requests_finalised_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -411,6 +452,7 @@ def _page_requests_decided(frame) -> str:
     ministers, by financial year, alongside the latest published quarter.</p>
     {_filters_bar(frame, "requests-decided")}
     {_kpis(frame, ["decided_q1"])}
+    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -447,6 +489,7 @@ def _page_decision_outcomes(frame) -> str:
     {_filters_bar(frame, "decision-outcomes")}
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
+    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
                     "decision_outcomes_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -461,13 +504,15 @@ def _page_change_decision_outcomes(frame) -> str:
     fig = _stat(frame, "granted_full_part_change")["value"]
     body = f"""
     <h1>Change in decision outcomes</h1>
-    <p class="intro">Change in the percentage of decisions granted in full or
-    in part, by financial year.</p>
+    <p class="intro">The national share of decisions granted in full or in part
+    for each financial year, and the agencies whose refusal rate moved most
+    between the two latest complete years.</p>
     {_filters_bar(frame, "change-decision-outcomes")}
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
                     "granted_full_part_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+    {_movers_section("Refusal-rate movers", _stat(frame, "refusal_rate_movers"))}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
     return chrome("Change in decision outcomes", body,
@@ -484,6 +529,7 @@ def _page_timeliness(frame) -> str:
     after-statutory buckets are not ingested.</p>
     {_filters_bar(frame, "timeliness")}
     {_kpis(frame, ["within_statutory_pct_q1"])}
+    {_kpi_scope_note()}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
@@ -497,12 +543,14 @@ def _page_change_timeliness(frame) -> str:
     fig = _stat(frame, "timeliness_change")["value"]
     body = f"""
     <h1>Change in timeliness</h1>
-    <p class="intro">Change in the percentage of decisions within the statutory
-    time period, by financial year.</p>
+    <p class="intro">The national share of decisions made within the statutory
+    time period for each financial year, and the agencies whose within-statutory
+    rate moved most between the two latest complete years.</p>
     {_filters_bar(frame, "change-timeliness")}
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+    {_movers_section("Timeliness movers", _stat(frame, "timeliness_movers"))}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""
     return chrome("Change in timeliness", body,
@@ -526,7 +574,8 @@ def _page_data_notes() -> str:
         'applicants</em> (34,418 for FY2025-26 Q1&ndash;Q3). The source '
         'workbook\'s "Total requests received" (34,810) additionally includes '
         '392 requests received on transfer from another agency; the transfer '
-        'channel is ingested as its own measure.</li>'
+        'channel is ingested as its own measure and charted on the Requests '
+        'received page.</li>'
         '<li><strong>Agency renames.</strong> Renamed agencies appear under '
         'their most recent name for all periods (e.g. DISR, IHACPA, ASSEA, '
         'Health, Disability and Ageing, Net Zero Economy Authority).</li>'
@@ -571,8 +620,8 @@ def _page_how_to_use() -> str:
     after-statutory timeliness buckets), the page shows
     <em>No published data for this measure</em> — a flat zero line would be a
     fabricated number. A year without a figure in a series renders as "—". The
-    on-transfer request channel is published and ingested as its own measure;
-    it is not yet charted.</p>
+    on-transfer request channel is published, ingested as its own measure and
+    charted on the Requests received page.</p>
     <h2>Filters</h2>
     <p>The filters row (agency &middot; type (personal/other) &middot; FY) is
     live on the chart pages: selections re-derive the charts from the

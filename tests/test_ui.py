@@ -486,6 +486,52 @@ def test_chart_pages_ship_specs_for_their_figures():
             assert fig_key in blob["specs"], f"{key}: {fig_key} unspecced"
 
 
+def test_change_pages_render_movers_tables():
+    # B10 (spec S2.3): real change analysis, not just level series
+    pages = _pages()
+    cdo = pages["change-decision-outcomes"]
+    assert 'class="movers"' in cdo and "Refusal-rate movers" in cdo
+    assert "2023-24" in cdo and "2024-25" in cdo
+    ct = pages["change-timeliness"]
+    assert 'class="movers"' in ct and "Timeliness movers" in ct
+
+
+def test_change_page_captions_describe_what_is_plotted():
+    # B10: the two "Change in..." figures plot LEVEL series; the caption must
+    # say so, and the movers tables carry the actual change analysis
+    pages = _pages()
+    cdo = pages["change-decision-outcomes"]
+    assert "% of decisions granted in full or part, by FY" in cdo
+    assert "Change in % granted in full or part" not in cdo
+    ct = pages["change-timeliness"]
+    assert "% decided within statutory time, by FY" in ct
+    assert "Change in % within statutory time period" not in ct
+
+
+def test_requests_received_page_has_channel_visual():
+    # B5 (spec S2.2): applicant vs on-transfer, from the Stage-1 measure
+    page = _pages()["requests-received"]
+    assert 'data-figure="received_channel_trend"' in page
+    assert "on transfer" in page
+
+
+def test_no_page_claims_the_transfer_channel_is_uncharted():
+    # the channel visual landed, so the "not yet charted" copy is now false
+    pages = _pages()
+    for key, html in pages.items():
+        assert "not yet charted" not in html, f"{key}: stale uncharted claim"
+    assert "charted on the Requests received page" in pages["how-to-use"]
+    assert "charted on the Requests received page" in pages["data-notes"]
+
+
+def test_kpi_tiles_carry_national_scope_note():
+    # B11 (decision 2026-08-25): tiles are static national figures; the note
+    # says so instead of pretending the agency filter reaches them
+    pages = _pages()
+    for key in ("at-a-glance", "requests-received", "decision-outcomes"):
+        assert "KPI tiles show national totals" in pages[key], key
+
+
 def test_foi_charts_js_has_no_hardcoded_fy_or_measure_maps():
     from pathlib import Path
     src = Path("src/site/assets/foi-charts.js").read_text(encoding="utf-8")

@@ -19,13 +19,14 @@ FIG_KEYS = (
     "decided_top20", "received_top20", "decision_outcomes_trend",
     "timeliness_trend", "refused_pct_trend", "granted_full_part_change",
     "timeliness_change", "agency_contributions_received", "agency_contributions_decided",
+    "received_channel_trend",
 )
 # stat keys (KPI tiles) — the model may cite these
 STAT_KEYS = (
     "requests_received_q1", "requests_finalised_q1", "decided_q1",
     "within_statutory_pct_q1", "granted_full_share_q1", "granted_part_share_q1",
     "refused_share_q1", "withdrawn_q1", "refusal_rate_change_fy23_fy24",
-    "timeliness_slippage_corr",
+    "timeliness_slippage_corr", "refusal_rate_movers", "timeliness_movers",
 )
 FIG_CAPTIONS = {
     "requests_received_trend": "Requests received, FY trend",
@@ -36,8 +37,12 @@ FIG_CAPTIONS = {
     "decision_outcomes_trend": "Decision outcomes by FY",
     "timeliness_trend": "Timeliness of decision-making (within/after)",
     "refused_pct_trend": "Percentage of decisions refused",
-    "granted_full_part_change": "Change in % granted in full or part",
-    "timeliness_change": "Change in % within statutory time period",
+    # the two "change" figures plot a LEVEL series (a ratio per FY), not a
+    # first difference — the caption says what is actually drawn (B10). The
+    # change analysis itself is the movers table beside each chart.
+    "granted_full_part_change": "% of decisions granted in full or part, by FY",
+    "timeliness_change": "% decided within statutory time, by FY",
+    "received_channel_trend": "Requests received by channel (applicant vs on transfer)",
 }
 
 # The latest complete financial year in the annual files. The 2025-26 file is
@@ -80,6 +85,11 @@ FIGURE_SPECS = {
                                       "n": 20, "default_fy": LATEST_COMPLETE_FY},
     "agency_contributions_decided":  {"kind": "top_n", "measure": "decided",
                                       "n": 20, "default_fy": LATEST_COMPLETE_FY},
+    # B5: how requests arrived — direct from an applicant vs on transfer from
+    # another agency. Both measures are ingested by Stage 1, so the generic
+    # multi_trend renderer draws this with no new engine code.
+    "received_channel_trend":   {"kind": "multi_trend",
+                                 "measures": ["received", "received_transfer"]},
 }
 
 # a fact row the stat consumed -> canonical JSON. NOTE: portfolio is excluded —
@@ -152,39 +162,61 @@ def _pearson(a, b):
     return round(cov / (va * vb) ** 0.5, 3)
 
 
-def _refusal_rate_movers(frame, fy_a: str, fy_b: str) -> list[dict]:
-    """Per-agency refusal rate (refused/decided) change between two FYs, top movers.
+def _previous_complete_fy(frame):
+    """The FY before LATEST_COMPLETE_FY among the annual categories."""
+    cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
+    i = cats.index(LATEST_COMPLETE_FY)
+    return cats[i - 1]
+
+
+def _rate_movers(frame, num_measure, den_measure, fy_a, fy_b) -> list[dict]:
+    """Per-agency rate (num/den) change between two FYs — the generalised form
+    of the refusal-rate movers. Agencies without a positive denominator in
+    either FY are skipped (no fabricated rate).
 
     Each agency's rate for both FYs is computed from its own bucket="total"
-    rows; agencies without a decided total in either FY are skipped (no
-    division by zero / no fabricated rate). Sorted by absolute change, largest
-    first. The rate is the share of decisions refused (0-100), rounded to a
-    tenth; the golden refused/decided totals only exist as single-quarter Q1
-    2025-26 facts, so the FY series uses the published annual files' agency
-    rows (both totals present -> a real, verifiable rate).
+    rows, so both totals are published figures and the rate is verifiable.
+    Rates are shares (0-100) rounded to a tenth; the list is sorted by absolute
+    change, largest first. Callers take the head of the list — the full list is
+    returned so the count of qualifying agencies can be disclosed.
     """
     def rate(fy):
         rows = frame.filter(fy=fy, bucket="total")
         by = {}
         for f in rows:
-            if f["measure"] in ("refused", "decided"):
-                by.setdefault(f["agency_name"], {"refused": 0.0, "decided": 0.0})
+            if f["measure"] in (num_measure, den_measure):
+                by.setdefault(f["agency_name"], {num_measure: 0.0, den_measure: 0.0})
                 by[f["agency_name"]][f["measure"]] += f["value"]
-        out = {}
-        for name, m in by.items():
-            if m["decided"] > 0:
-                out[name] = 100.0 * m["refused"] / m["decided"]
-        return out
+        return {name: 100.0 * m[num_measure] / m[den_measure]
+                for name, m in by.items() if m[den_measure] > 0}
 
     ra, rb = rate(fy_a), rate(fy_b)
-    movers = []
-    for name in ra:
-        if name in rb:
-            movers.append({"agency": name, "fy_a_rate": round(ra[name], 1),
-                           "fy_b_rate": round(rb[name], 1),
-                           "change": round(rb[name] - ra[name], 1)})
+    movers = [{"agency": n, "fy_a_rate": round(ra[n], 1),
+               "fy_b_rate": round(rb[n], 1), "change": round(rb[n] - ra[n], 1)}
+              for n in ra if n in rb]
     movers.sort(key=lambda m: abs(m["change"]), reverse=True)
     return movers
+
+
+def _refusal_rate_movers(frame, fy_a: str, fy_b: str) -> list[dict]:
+    """Per-agency refusal rate (refused/decided) change between two FYs, top
+    movers. Kept as a named wrapper because the legacy
+    `refusal_rate_change_fy23_fy24` stat key routes through it with its fixed
+    FY pair and must keep returning the bare LIST (agentic/report.py renders
+    stat["value"] directly)."""
+    return _rate_movers(frame, "refused", "decided", fy_a, fy_b)
+
+
+def _movers_stat(frame, num_measure, den_measure) -> dict:
+    """The standard result contract for an FY-pair movers stat: the two latest
+    complete FYs, their movers, and the exact source rows both years consumed
+    (so replay_verify can recompute the hash)."""
+    fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
+    rows = frame.filter(fy=fy_a, bucket="total") + frame.filter(fy=fy_b, bucket="total")
+    return {"value": {"fy_a": fy_a, "fy_b": fy_b,
+                      "movers": _rate_movers(frame, num_measure, den_measure,
+                                             fy_a, fy_b)},
+            "basis": "fy", "source_rows": len(rows), "rows_hash": hash_rows(rows)}
 
 
 def _figure(frame, key):
@@ -279,8 +311,15 @@ def foi_stats(frame, key) -> dict:
         # compare_period: refusal share FY23 vs FY24, per agency (top movers)
         rows = frame.filter(fy="2023-24", bucket="total") \
             + frame.filter(fy="2022-23", bucket="total")
+        # NOTE: value stays a BARE LIST — agentic/report.py routes "refusal
+        # rate" here and renders stat["value"] directly. The FY-pair dict shape
+        # belongs to the newer refusal_rate_movers key.
         return {"value": _refusal_rate_movers(frame, "2022-23", "2023-24"), "basis": "fy",
                 "source_rows": len(rows), "rows_hash": hash_rows(rows)}
+    if key == "refusal_rate_movers":
+        return _movers_stat(frame, "refused", "decided")
+    if key == "timeliness_movers":
+        return _movers_stat(frame, "within_statutory", "decided")
     if key == "timeliness_slippage_corr":
         # Pearson correlation between within-statutory FY counts and received FY
         # counts. The within-statutory series is empty (the measure only exists
