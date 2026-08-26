@@ -78,7 +78,15 @@ def dataset_info(frame) -> dict:
 
 def figures(frame) -> dict:
     """Every platform-computed figure/stat, with basis, from the SAME catalog
-    the visualisations use. Never a model number."""
+    the visualisations use. Never a model number.
+
+    KeyError is the catalog's declared "this frame cannot compute this key"
+    signal — an unknown key, or a stat whose FY pair the frame does not contain
+    (stats.catalog._previous_complete_fy raises KeyError rather than wrapping to
+    the newest year). Such a key stays ABSENT from the payload; every other key
+    still ships. The except stays narrow on purpose: an arithmetic or shape bug
+    inside a stat must surface as a 500, not be laundered into a quietly
+    incomplete payload."""
     out = {}
     for k in STAT_KEYS:
         try:

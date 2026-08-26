@@ -487,13 +487,100 @@ def test_chart_pages_ship_specs_for_their_figures():
 
 
 def test_change_pages_render_movers_tables():
-    # B10 (spec S2.3): real change analysis, not just level series
-    pages = _pages()
+    # B10 (spec S2.3): real change analysis, not just level series.
+    # N6: the FY pair comes from the catalog constant, not from literals here —
+    # bumping LATEST_COMPLETE_FY must not fail two test files at once.
+    from stats.catalog import LATEST_COMPLETE_FY, _previous_complete_fy
+    frame = Frame(normalise_all())
+    fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
+    pages = render_all_pages(frame)
     cdo = pages["change-decision-outcomes"]
     assert 'class="movers"' in cdo and "Refusal-rate movers" in cdo
-    assert "2023-24" in cdo and "2024-25" in cdo
+    assert fy_a in cdo and fy_b in cdo
     ct = pages["change-timeliness"]
     assert 'class="movers"' in ct and "Timeliness movers" in ct
+
+
+def test_movers_tables_show_the_denominator_behind_every_rate():
+    # C1: every one of the ten rendered refusal-rate rows had a `decided`
+    # denominator of 1-5 and the page sold them as the agencies that "moved
+    # most". The floor keeps them out; the denominator columns let a reader
+    # check each remaining row without leaving the table.
+    from stats.catalog import (LATEST_COMPLETE_FY, MOVERS_MIN_DENOMINATOR,
+                               _previous_complete_fy, foi_stats)
+    frame = Frame(normalise_all())
+    fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
+    pages = render_all_pages(frame)
+    for page_key, stat_key in (("change-decision-outcomes", "refusal_rate_movers"),
+                               ("change-timeliness", "timeliness_movers")):
+        page = pages[page_key]
+        assert f"<th>{fy_a} decisions</th>" in page, page_key
+        assert f"<th>{fy_b} decisions</th>" in page, page_key
+        movers = foi_stats(frame, stat_key)["value"]["movers"][:10]
+        for mover in movers:
+            assert min(mover["fy_a_denominator"],
+                       mover["fy_b_denominator"]) >= MOVERS_MIN_DENOMINATOR
+            assert f"<td>{mover['fy_a_denominator']:,}</td>" in page or \
+                   f"<td>{mover['fy_a_denominator']}</td>" in page, mover
+
+
+def test_movers_change_column_is_percentage_points_not_per_cent():
+    # N3: "+100.0%" for a move from 0.0% to 100.0% reads as a doubling. The
+    # quantity is a DIFFERENCE of two percentages — percentage points.
+    page = _pages()["change-decision-outcomes"]
+    table = re.search(r'<table class="movers">.*?</table>', page, re.S).group(0)
+    assert "<th>Change (pp)</th>" in table
+    assert re.search(r"<td>[+-][\d.]+ pp</td>", table), \
+        "the change cells must carry the pp unit"
+    assert not re.search(r"<td>[+-][\d.]+%</td>", table), \
+        "a percentage-point difference is being printed as a per cent"
+    assert "percentage points" in page
+
+
+def test_movers_footnote_discloses_the_floor_and_counts_the_rendered_rows():
+    # C1 (the floor must be published, not silent) + N5 (the footnote said
+    # "Top 10 of 7 agencies" above a 7-row table).
+    from site.pages import _movers_section
+    from stats.catalog import MOVERS_MIN_DENOMINATOR
+    page = _pages()["change-decision-outcomes"]
+    assert f"with at least {MOVERS_MIN_DENOMINATOR} decisions in both years" in page
+
+    short = {"basis": "fy", "value": {
+        "fy_a": "2000-01", "fy_b": "2001-02", "denominator": "decided",
+        "min_denominator": MOVERS_MIN_DENOMINATOR,
+        "movers": [{"agency": f"Agency {i}", "fy_a_rate": 10.0, "fy_b_rate": 20.0,
+                    "change": 10.0, "fy_a_denominator": 40,
+                    "fy_b_denominator": 50} for i in range(3)]}}
+    html_out = _movers_section("Short movers", short)
+    assert "Top 3 of 3 agencies" in html_out, html_out
+    assert "Top 10 of" not in html_out
+
+
+def test_movers_section_has_an_empty_state():
+    # M1: an empty movers list rendered a header-only table above "Top 10 of 0
+    # agencies". Everywhere else the site prints an explicit no-data note.
+    from site.pages import _movers_section
+    empty = {"basis": "fy", "value": {"fy_a": "2000-01", "fy_b": "2001-02",
+                                      "denominator": "decided",
+                                      "min_denominator": 30, "movers": []}}
+    html_out = _movers_section("Empty movers", empty)
+    assert '<table class="movers">' not in html_out
+    assert '<p class="note">' in html_out
+    assert "No agency has a computable rate" in html_out
+    assert "Top 10 of 0" not in html_out
+
+
+def test_agency_dropdown_excludes_the_total_pseudo_agency():
+    # S2: every per-agency op filters "Total" out; the dropdown offered it as a
+    # selectable agency, promising a slice the charts will never draw.
+    frame = Frame(normalise_all())
+    assert any(f["agency_name"].lower() == "total" for f in frame.facts), \
+        "the golden national rows moved — retarget this guard"
+    from site.pages import _filters_blob
+    assert "Total" not in _filters_blob(frame)["agencies"]
+    pages = render_all_pages(frame)
+    for key in ("change-decision-outcomes", "requests-received"):
+        assert '<option value="Total">' not in pages[key]
 
 
 def test_change_page_captions_describe_what_is_plotted():

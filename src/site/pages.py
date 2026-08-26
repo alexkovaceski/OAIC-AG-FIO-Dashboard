@@ -16,7 +16,8 @@ import json
 import re
 from pathlib import Path
 
-from stats.catalog import foi_stats, FIG_CAPTIONS, FIGURE_SPECS
+from stats.catalog import (foi_stats, FIG_CAPTIONS, FIGURE_SPECS,
+                           _is_reporting_agency)
 from site.templates import chrome, _asset_link
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
@@ -115,9 +116,15 @@ def _figure_has_data(fig) -> bool:
 def _filters_blob(frame) -> dict:
     """Platform-derived filter options, straight off the Frame — no new
     aggregates. Task 4 wires the real filter behaviour; this ships only what
-    the source data itself distinguishes."""
+    the source data itself distinguishes.
+
+    The Agency list excludes the golden "Total" pseudo-agency (S2): it is a
+    national total-level fact, not an agency, and every per-agency op in
+    stats.dsl and stats.catalog filters it out — so offering it as a selectable
+    agency promised a slice the charts will never draw."""
     return {
-        "agencies": sorted({f["agency_name"] for f in frame.facts}),
+        "agencies": sorted({f["agency_name"] for f in frame.facts
+                            if _is_reporting_agency(f["agency_name"])}),
         "types": sorted({f["bucket"] for f in frame.facts}),
         "fys": sorted({f["fy"] for f in frame.facts}),
         "portfolios": sorted({f["portfolio"] for f in frame.facts if f["portfolio"]}),
@@ -291,26 +298,65 @@ def _notes_section(title, fig, chart_key, source=None) -> str:
             f'{note}{_chart_container(chart_key, fig)}</section>')
 
 
+# the plural noun for a movers denominator measure — the footnote says what the
+# floor counts ("at least 30 decisions"), so the reader knows what qualified an
+# agency for the ranking
+_MOVERS_DENOMINATOR_NOUN = {"decided": "decisions", "finalised": "finalisations",
+                            "received": "requests received"}
+
+MOVERS_TOP_N = 10
+
+
 def _movers_section(title, stat, unit="%") -> str:
-    """A ranked movers table: agency, rate in each FY, change. Top 10 by
-    absolute change; the count of qualifying agencies is disclosed.
+    """A ranked movers table: agency, rate and denominator in each FY, and the
+    change between them. Top 10 by absolute change; the denominator floor and
+    the count of qualifying agencies are both disclosed.
 
     This is the real change analysis (B10) — the chart beside it plots the
-    national level series, which is a different question."""
+    national level series, which is a different question.
+
+    Units (N3): fy_a_rate/fy_b_rate are percentages and carry `unit`; `change`
+    is their DIFFERENCE and is therefore in percentage POINTS. Printing it as
+    "+100.0%" read as a doubling, so it is labelled and suffixed "pp".
+
+    Denominators (C1): each row shows the two denominator counts, so a reader
+    can judge the row without leaving the table — a rate that moved 100 points
+    on two decisions is visibly different from one that moved 30 points on 457.
+    """
     v = stat["value"]
-    rows = v["movers"][:10]
+    rows = v["movers"][:MOVERS_TOP_N]
+    floor = v.get("min_denominator") or 0
+    noun = _MOVERS_DENOMINATOR_NOUN.get(v.get("denominator"),
+                                        f'{v.get("denominator", "source")} rows')
     head = (f'<section class="figure-card"><h2>{html.escape(title)}</h2>'
-            f'<p class="basis">{_basis_label(stat)}</p>'
-            f'<table class="movers"><thead><tr><th>Agency</th>'
-            f'<th>{html.escape(v["fy_a"])}</th><th>{html.escape(v["fy_b"])}</th>'
-            f'<th>Change</th></tr></thead><tbody>')
+            f'<p class="basis">{_basis_label(stat)}</p>')
+    if not rows:
+        # the house no-data pattern (see _notes_section) — a header-only table
+        # above "Top 10 of 0 agencies" reads as broken, not as honest (M1)
+        floor_clause = (f' with at least {floor} {html.escape(noun)}'
+                        if floor else '')
+        return (head + '<p class="note">No agency has a computable rate in both '
+                f'{html.escape(v["fy_a"])} and {html.escape(v["fy_b"])}'
+                f'{floor_clause}, so there is no movers ranking for this '
+                'measure.</p></section>')
+    head += (f'<table class="movers"><thead><tr><th>Agency</th>'
+             f'<th>{html.escape(v["fy_a"])} rate</th>'
+             f'<th>{html.escape(v["fy_a"])} {html.escape(noun)}</th>'
+             f'<th>{html.escape(v["fy_b"])} rate</th>'
+             f'<th>{html.escape(v["fy_b"])} {html.escape(noun)}</th>'
+             f'<th>Change (pp)</th></tr></thead><tbody>')
     body = "".join(
         f'<tr><td>{html.escape(m["agency"])}</td>'
-        f'<td>{m["fy_a_rate"]}{unit}</td><td>{m["fy_b_rate"]}{unit}</td>'
-        f'<td>{"+" if m["change"] > 0 else ""}{m["change"]}{unit}</td></tr>'
+        f'<td>{m["fy_a_rate"]}{unit}</td><td>{_num(m["fy_a_denominator"])}</td>'
+        f'<td>{m["fy_b_rate"]}{unit}</td><td>{_num(m["fy_b_denominator"])}</td>'
+        f'<td>{"+" if m["change"] > 0 else ""}{m["change"]} pp</td></tr>'
         for m in rows)
-    foot = (f'</tbody></table><p class="fignote">Top 10 of {len(v["movers"])} '
-            f'agencies with a computable rate in both years.</p></section>')
+    qualified = (f'agencies with at least {floor} {noun} in both years' if floor
+                 else 'agencies with a computable rate in both years')
+    foot = (f'</tbody></table><p class="fignote">Top {len(rows)} of '
+            f'{len(v["movers"])} {html.escape(qualified)}. Change is in '
+            f'percentage points (the difference between the two rates), not '
+            f'per cent.</p></section>')
     return head + body + foot
 
 
@@ -506,7 +552,9 @@ def _page_change_decision_outcomes(frame) -> str:
     <h1>Change in decision outcomes</h1>
     <p class="intro">The national share of decisions granted in full or in part
     for each financial year, and the agencies whose refusal rate moved most
-    between the two latest complete years.</p>
+    between the two latest complete years. Only agencies that decided enough
+    requests for a rate to mean anything are ranked; the note under the table
+    gives the threshold and the number of agencies that met it.</p>
     {_filters_bar(frame, "change-decision-outcomes")}
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
                     "granted_full_part_change",
@@ -545,7 +593,10 @@ def _page_change_timeliness(frame) -> str:
     <h1>Change in timeliness</h1>
     <p class="intro">The national share of decisions made within the statutory
     time period for each financial year, and the agencies whose within-statutory
-    rate moved most between the two latest complete years.</p>
+    rate moved most between the two latest complete years. Only agencies that
+    decided enough requests for a rate to mean anything are ranked; the note
+    under the table gives the threshold and the number of agencies that met
+    it.</p>
     {_filters_bar(frame, "change-timeliness")}
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
                     source="Source: data.gov.au FOI statistics workbooks, "

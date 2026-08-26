@@ -51,6 +51,17 @@ FIG_CAPTIONS = {
 # the year is written — specs and pages reference the constant.
 LATEST_COMPLETE_FY = "2024-25"
 
+# Movers floor: an agency needs at least this many denominator events (decided
+# requests) in BOTH compared years before its rate change is ranked. Without a
+# floor the top-10s are pure sampling noise — measured on the real frame
+# 2026-08-26, all ten rendered refusal-rate rows had denominators of 1-5
+# ("Asbestos and Silica Safety and Eradication Agency 0.0% -> 100.0%" is one
+# refused request out of two decisions), and 65 of the 182 agencies with a
+# computable rate decided fewer than 5 requests in a year. At 30, 53 agencies
+# qualify — ample for a top 10 — and the table shows movement a reader can act
+# on (Office of the eSafety Commissioner +32.7pp on 69 -> 457 decisions).
+MOVERS_MIN_DENOMINATOR = 30
+
 # FIGURE_SPECS — the declarative engine (spec S2.1). Each chartable figure is
 # declared once; the server's generic _figure and the client's rederivation
 # both interpret the same vocabulary:
@@ -116,6 +127,14 @@ def hash_rows(rows: list[dict]) -> str:
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
+def _is_reporting_agency(agency_name: str) -> bool:
+    """True for a real reporting body. The golden "Total" pseudo-agency is a
+    total-level fact, not an agency, and x-prefixed keys are the normaliser's
+    placeholder rows. Every per-agency op in stats.dsl excludes both; the
+    per-agency figures in this module must agree (M3, S1)."""
+    return agency_name.lower() != "total" and not agency_name.startswith("x")
+
+
 def _q1_value(frame, measure):
     q1 = frame.filter(fy="2025-26", quarter=1, measure=measure, bucket="total")
     return round(sum(f["value"] for f in q1), 0)
@@ -163,38 +182,102 @@ def _pearson(a, b):
 
 
 def _previous_complete_fy(frame):
-    """The FY before LATEST_COMPLETE_FY among the annual categories."""
-    cats = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
-    i = cats.index(LATEST_COMPLETE_FY)
-    return cats[i - 1]
+    """The FY immediately before LATEST_COMPLETE_FY among the annual categories.
 
+    Raises KeyError when LATEST_COMPLETE_FY is absent from the frame, or when it
+    is the EARLIEST annual category: `cats[i - 1]` would then wrap to `cats[-1]`
+    — the NEWEST year — and silently invert every FY-pair comparison (measured
+    on a frame trimmed to ['2024-25', '2025-26']: the old code returned 2025-26
+    as the "previous complete FY", flipping the sign of every change with no
+    exception raised).
 
-def _rate_movers(frame, num_measure, den_measure, fy_a, fy_b) -> list[dict]:
-    """Per-agency rate (num/den) change between two FYs — the generalised form
-    of the refusal-rate movers. Agencies without a positive denominator in
-    either FY are skipped (no fabricated rate).
-
-    Each agency's rate for both FYs is computed from its own bucket="total"
-    rows, so both totals are published figures and the rate is verifiable.
-    Rates are shares (0-100) rounded to a tenth; the list is sorted by absolute
-    change, largest first. Callers take the head of the list — the full list is
-    returned so the count of qualifying agencies can be disclosed.
+    KeyError (not ValueError) is deliberate: api.figures and the kpis op in
+    stats.dsl both treat KeyError as "a key this frame cannot compute stays
+    absent", so a frame the constant does not fit drops the two movers keys
+    instead of 500-ing the whole /api/figures payload.
     """
-    def rate(fy):
-        rows = frame.filter(fy=fy, bucket="total")
-        by = {}
-        for f in rows:
-            if f["measure"] in (num_measure, den_measure):
-                by.setdefault(f["agency_name"], {num_measure: 0.0, den_measure: 0.0})
-                by[f["agency_name"]][f["measure"]] += f["value"]
-        return {name: 100.0 * m[num_measure] / m[den_measure]
-                for name, m in by.items() if m[den_measure] > 0}
+    annual_fys = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
+    if LATEST_COMPLETE_FY not in annual_fys:
+        raise KeyError(f"LATEST_COMPLETE_FY {LATEST_COMPLETE_FY!r} has no annual "
+                       f"rows in this frame ({annual_fys!r}) — no FY pair")
+    i = annual_fys.index(LATEST_COMPLETE_FY)
+    if i == 0:
+        raise KeyError(f"no financial year precedes {LATEST_COMPLETE_FY!r} in this "
+                       f"frame ({annual_fys!r}) — no FY pair")
+    return annual_fys[i - 1]
 
-    ra, rb = rate(fy_a), rate(fy_b)
-    movers = [{"agency": n, "fy_a_rate": round(ra[n], 1),
-               "fy_b_rate": round(rb[n], 1), "change": round(rb[n] - ra[n], 1)}
-              for n in ra if n in rb]
-    movers.sort(key=lambda m: abs(m["change"]), reverse=True)
+
+def _movers_source_rows(frame, num_measure, den_measure, fy_a, fy_b) -> list[dict]:
+    """The exact fact rows a rate-movers computation reads: the two FYs, the two
+    measures, bucket="total", ANNUAL rows only, real reporting agencies only.
+
+    This is both the input to _rate_movers and the hash basis of the stat, so
+    `source_rows` / `rows_hash` describe what the stat actually consumed (I2).
+    Hashing every bucket="total" row of both years instead (5247 rows, of which
+    only 1166 are read) made refusal_rate_movers and timeliness_movers return
+    the IDENTICAL hash despite computing different values — replay could not
+    tell them apart, and an unrelated measure changing false-alarmed both.
+
+    quarter: Frame.filter(quarter=None) means "no quarter constraint" (see
+    _fy_series), so the annual rows are selected by the explicit
+    `f["quarter"] is None` test. Without it the golden single-quarter rows would
+    join the FY sums the moment LATEST_COMPLETE_FY reaches the partial year (I4).
+    """
+    return [f for f in frame.facts
+            if f["fy"] in (fy_a, fy_b) and f["quarter"] is None
+            and f["bucket"] == "total"
+            and f["measure"] in (num_measure, den_measure)
+            and _is_reporting_agency(f["agency_name"])]
+
+
+def _rate_movers(frame, num_measure, den_measure, fy_a, fy_b,
+                 min_denominator: float = 0) -> list[dict]:
+    """Per-agency rate (num/den) change between two FYs — the generalised form
+    of the refusal-rate movers.
+
+    Each agency's rate for both FYs is computed from its own annual
+    bucket="total" rows, so both totals are published figures and the rate is
+    verifiable. Rates are shares (0-100) rounded to a tenth; `change` is their
+    difference and is therefore in PERCENTAGE POINTS, not percent (N3 — the
+    renderer must not print it with a "%"). Each row carries the two
+    denominators so a reader can judge the row without leaving the table.
+
+    min_denominator is the floor the denominator must clear in BOTH years for
+    the agency to be ranked at all. An agency that decided two requests can move
+    from 0% to 100% on one decision; at min_denominator=0 those rows monopolise
+    every top 10 (see MOVERS_MIN_DENOMINATOR). 0 means "any positive
+    denominator" — the legacy refusal_rate_change_fy23_fy24 key keeps that,
+    since agentic/report.py ships its list verbatim.
+
+    The list is sorted by absolute change, largest first. Callers take the head
+    — the full list is returned so the count of qualifying agencies can be
+    disclosed."""
+    totals = {}
+    for f in _movers_source_rows(frame, num_measure, den_measure, fy_a, fy_b):
+        agency_measures = totals.setdefault(
+            (f["fy"], f["agency_name"]), {num_measure: 0.0, den_measure: 0.0})
+        agency_measures[f["measure"]] += f["value"]
+
+    def rates_by_agency(fy):
+        """agency -> (rate, denominator) for the agencies that clear the floor."""
+        return {agency: (100.0 * m[num_measure] / m[den_measure], m[den_measure])
+                for (row_fy, agency), m in totals.items()
+                if row_fy == fy and m[den_measure] > 0
+                and m[den_measure] >= min_denominator}
+
+    rates_a, rates_b = rates_by_agency(fy_a), rates_by_agency(fy_b)
+    movers = []
+    for agency, (rate_a, denominator_a) in rates_a.items():
+        if agency not in rates_b:
+            continue
+        rate_b, denominator_b = rates_b[agency]
+        movers.append({"agency": agency,
+                       "fy_a_rate": round(rate_a, 1),
+                       "fy_b_rate": round(rate_b, 1),
+                       "change": round(rate_b - rate_a, 1),
+                       "fy_a_denominator": round(denominator_a),
+                       "fy_b_denominator": round(denominator_b)})
+    movers.sort(key=lambda mover: abs(mover["change"]), reverse=True)
     return movers
 
 
@@ -203,19 +286,23 @@ def _refusal_rate_movers(frame, fy_a: str, fy_b: str) -> list[dict]:
     movers. Kept as a named wrapper because the legacy
     `refusal_rate_change_fy23_fy24` stat key routes through it with its fixed
     FY pair and must keep returning the bare LIST (agentic/report.py renders
-    stat["value"] directly)."""
+    stat["value"] directly). No denominator floor here — see _rate_movers."""
     return _rate_movers(frame, "refused", "decided", fy_a, fy_b)
 
 
-def _movers_stat(frame, num_measure, den_measure) -> dict:
+def _movers_stat(frame, num_measure, den_measure,
+                 min_denominator: float = MOVERS_MIN_DENOMINATOR) -> dict:
     """The standard result contract for an FY-pair movers stat: the two latest
-    complete FYs, their movers, and the exact source rows both years consumed
+    complete FYs, the denominator floor that was applied (so the renderer can
+    disclose it), their movers, and the exact source rows both years consumed
     (so replay_verify can recompute the hash)."""
     fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
-    rows = frame.filter(fy=fy_a, bucket="total") + frame.filter(fy=fy_b, bucket="total")
+    rows = _movers_source_rows(frame, num_measure, den_measure, fy_a, fy_b)
     return {"value": {"fy_a": fy_a, "fy_b": fy_b,
+                      "denominator": den_measure,
+                      "min_denominator": min_denominator,
                       "movers": _rate_movers(frame, num_measure, den_measure,
-                                             fy_a, fy_b)},
+                                             fy_a, fy_b, min_denominator)},
             "basis": "fy", "source_rows": len(rows), "rows_hash": hash_rows(rows)}
 
 
@@ -255,8 +342,15 @@ def _figure(frame, key):
         return {"categories": cats, "series": [{"name": spec["name"], "values": values}]}
 
     if spec["kind"] == "top_n":
-        rows = frame.filter(measure=spec["measure"], bucket="total",
-                            fy=spec["default_fy"])
+        # ANNUAL rows only, real reporting agencies only (S1). frame.filter
+        # applies no quarter constraint, so a single-quarter row and the golden
+        # "Total" pseudo-agency would both enter the ranking — and "Total" would
+        # out-rank every real agency — the moment default_fy reaches the partial
+        # year. The client-side engine applies the same two guards.
+        rows = [f for f in frame.facts
+                if f["fy"] == spec["default_fy"] and f["quarter"] is None
+                and f["measure"] == spec["measure"] and f["bucket"] == "total"
+                and _is_reporting_agency(f["agency_name"])]
         aggs = {}
         for f in rows:
             aggs.setdefault(f["agency_name"], 0.0)
@@ -309,11 +403,11 @@ def foi_stats(frame, key) -> dict:
                 "source_rows": len(rows), "rows_hash": hash_rows(rows)}
     if key == "refusal_rate_change_fy23_fy24":
         # compare_period: refusal share FY23 vs FY24, per agency (top movers)
-        rows = frame.filter(fy="2023-24", bucket="total") \
-            + frame.filter(fy="2022-23", bucket="total")
+        rows = _movers_source_rows(frame, "refused", "decided", "2022-23", "2023-24")
         # NOTE: value stays a BARE LIST — agentic/report.py routes "refusal
         # rate" here and renders stat["value"] directly. The FY-pair dict shape
-        # belongs to the newer refusal_rate_movers key.
+        # belongs to the newer refusal_rate_movers key, and so does the
+        # denominator floor: this key keeps min_denominator=0.
         return {"value": _refusal_rate_movers(frame, "2022-23", "2023-24"), "basis": "fy",
                 "source_rows": len(rows), "rows_hash": hash_rows(rows)}
     if key == "refusal_rate_movers":

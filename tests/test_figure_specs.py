@@ -4,10 +4,15 @@ The generic _figure must reproduce the legacy per-key outputs exactly;
 these tests pin the spec vocabulary and the output-identity property.
 """
 import sys; sys.path.insert(0, "src")
+import pytest
+
+import api
 from ingest.normalise import normalise_all
 from storage.frame import Frame
 from stats import catalog
-from stats.catalog import FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY, foi_stats
+from stats.catalog import (FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY,
+                           MOVERS_MIN_DENOMINATOR, foi_stats,
+                           _movers_source_rows, _previous_complete_fy)
 
 
 def test_every_fig_key_has_a_spec():
@@ -59,27 +64,179 @@ def test_top_n_spec_takes_fy_parameter():
         assert FIGURE_SPECS[key]["n"] == 20
 
 
+MOVER_ROW_KEYS = {"agency", "fy_a_rate", "fy_b_rate", "change",
+                  "fy_a_denominator", "fy_b_denominator"}
+
+
 def test_movers_stats_default_to_latest_complete_pair():
+    # the FY pair comes from the single-sourced constant, never from literals
+    # here — bumping LATEST_COMPLETE_FY must not break this file (N6)
     frame = Frame(normalise_all())
     out = foi_stats(frame, "refusal_rate_movers")
     assert out["basis"] == "fy"
-    assert out["value"]["fy_a"] == "2023-24" and out["value"]["fy_b"] == "2024-25"
+    assert out["value"]["fy_a"] == _previous_complete_fy(frame)
+    assert out["value"]["fy_b"] == LATEST_COMPLETE_FY
     assert out["value"]["movers"], "no movers computed"
     top = out["value"]["movers"][0]
-    assert set(top) == {"agency", "fy_a_rate", "fy_b_rate", "change"}
+    assert set(top) == MOVER_ROW_KEYS
 
     t = foi_stats(frame, "timeliness_movers")
     assert t["value"]["movers"], "no timeliness movers"
 
 
+def test_movers_floor_excludes_small_denominator_agencies():
+    # C1: the page-facing movers ranked pure sampling noise. Measured on the
+    # real frame before the floor, all ten rendered refusal-rate rows had a
+    # `decided` denominator of 1-5 and the largest denominator anywhere in
+    # either table was 20 ("Asbestos and Silica Safety and Eradication Agency
+    # 0.0% -> 100.0%" was one refused request out of two decisions).
+    frame = Frame(normalise_all())
+    assert MOVERS_MIN_DENOMINATOR >= 30, "the floor is the whole point"
+    for key in ("refusal_rate_movers", "timeliness_movers"):
+        value = foi_stats(frame, key)["value"]
+        assert value["min_denominator"] == MOVERS_MIN_DENOMINATOR
+        assert value["denominator"] == "decided"
+        assert len(value["movers"]) >= 10, \
+            f"{key}: the floor left too few agencies for a top 10"
+        for mover in value["movers"]:
+            assert mover["fy_a_denominator"] >= MOVERS_MIN_DENOMINATOR, mover
+            assert mover["fy_b_denominator"] >= MOVERS_MIN_DENOMINATOR, mover
+
+    # and the floor genuinely bites: the unfloored list is much longer
+    unfloored = catalog._rate_movers(frame, "refused", "decided",
+                                     _previous_complete_fy(frame),
+                                     LATEST_COMPLETE_FY)
+    floored = foi_stats(frame, "refusal_rate_movers")["value"]["movers"]
+    assert len(unfloored) > len(floored) * 2, \
+        f"{len(unfloored)} unfloored vs {len(floored)} floored — floor is inert"
+
+
+def test_movers_stats_hash_only_the_rows_they_read():
+    # I2: the stat hashed every bucket="total" row of both FYs (5247) when it
+    # read only the two measures (1166), so both stats returned the IDENTICAL
+    # rows_hash despite computing different values — replay could not tell them
+    # apart and an unrelated measure changing false-alarmed both.
+    frame = Frame(normalise_all())
+    refusal = foi_stats(frame, "refusal_rate_movers")
+    timeliness = foi_stats(frame, "timeliness_movers")
+    assert refusal["rows_hash"] != timeliness["rows_hash"], \
+        "two stats over different measures must not share a hash"
+
+    every_total_row = len(frame.filter(fy=_previous_complete_fy(frame), bucket="total")) \
+        + len(frame.filter(fy=LATEST_COMPLETE_FY, bucket="total"))
+    assert refusal["source_rows"] < every_total_row, \
+        "source_rows still counts rows the stat never read"
+    expected = _movers_source_rows(frame, "refused", "decided",
+                                   _previous_complete_fy(frame), LATEST_COMPLETE_FY)
+    assert refusal["source_rows"] == len(expected)
+    assert refusal["rows_hash"] == catalog.hash_rows(expected)
+
+
+def test_movers_source_rows_are_annual_real_agency_rows_only():
+    # I4 + M3: frame.filter applies NO quarter constraint, and _rate_movers
+    # excluded neither the golden "Total" pseudo-agency nor x-prefixed rows.
+    # Inert only while LATEST_COMPLETE_FY predates the golden rows.
+    frame = Frame(normalise_all())
+    rows = _movers_source_rows(frame, "refused", "decided",
+                               _previous_complete_fy(frame), LATEST_COMPLETE_FY)
+    assert rows
+    assert all(f["quarter"] is None for f in rows), "a quarter row entered an FY sum"
+    assert all(f["bucket"] == "total" for f in rows)
+    assert all(f["measure"] in ("refused", "decided") for f in rows)
+    assert all(f["agency_name"].lower() != "total" for f in rows)
+
+    # a synthetic frame that actually carries both traps
+    annual = {"agency_key": "a", "agency_name": "Agency A", "fy": LATEST_COMPLETE_FY,
+              "quarter": None, "measure_group": "decisions", "measure": "decided",
+              "bucket": "total", "value": 10.0, "derived": False, "portfolio": ""}
+    trapped = Frame([
+        annual,
+        dict(annual, agency_name="Total", agency_key="total"),
+        dict(annual, agency_key="q", quarter=1, value=99.0),
+        dict(annual, agency_key="xplaceholder", agency_name="xplaceholder"),
+    ])
+    kept = _movers_source_rows(trapped, "refused", "decided",
+                               "2000-01", LATEST_COMPLETE_FY)
+    assert [f["agency_name"] for f in kept] == ["Agency A"]
+
+
+def test_previous_complete_fy_raises_instead_of_wrapping():
+    # I1: cats.index() returns 0 when LATEST_COMPLETE_FY is the FIRST category,
+    # so cats[i - 1] wrapped to cats[-1] — the NEWEST year — and every change
+    # silently flipped sign. Measured on a frame trimmed to the two latest FYs,
+    # the old code returned the newer year as the "previous complete FY".
+    row = {"agency_key": "a", "agency_name": "Agency A", "quarter": None,
+           "measure_group": "decisions", "measure": "decided", "bucket": "total",
+           "value": 10.0, "derived": False, "portfolio": ""}
+    first_of_the_frame = Frame([dict(row, fy=LATEST_COMPLETE_FY),
+                                dict(row, fy="2999-00")])
+    with pytest.raises(KeyError):
+        _previous_complete_fy(first_of_the_frame)
+
+    absent = Frame([dict(row, fy="2999-00")])
+    with pytest.raises(KeyError):
+        _previous_complete_fy(absent)
+
+    # and the stats surface the same KeyError rather than an inverted answer
+    for key in ("refusal_rate_movers", "timeliness_movers"):
+        with pytest.raises(KeyError):
+            foi_stats(first_of_the_frame, key)
+
+
+def test_api_figures_survives_a_frame_without_an_fy_pair():
+    # I1's blast radius: api.figures catches only KeyError, and dsl's kpis op
+    # caught nothing. A stat that cannot form its FY pair must drop out, never
+    # take the whole /api/figures payload down with it.
+    # the real frame trimmed so LATEST_COMPLETE_FY is its EARLIEST annual year
+    # (FY labels sort lexicographically, so no year literal is needed here)
+    frame = Frame([f for f in normalise_all() if f["fy"] >= LATEST_COMPLETE_FY])
+    with pytest.raises(KeyError):
+        _previous_complete_fy(frame)
+    out = api.figures(frame)                       # must not raise
+    assert "refusal_rate_movers" not in out and "timeliness_movers" not in out
+    assert "requests_received_trend" in out, "one bad key took the payload down"
+
+    from stats.dsl import query_dataset
+    kpis = query_dataset(frame, "kpis", {})        # must not raise either
+    assert isinstance(kpis, dict)
+
+
 def test_legacy_movers_key_still_works():
     # src/agentic/report.py routes "refusal rate" to this key and renders
-    # stat["value"] directly — it must stay a bare LIST, not the new dict
+    # stat["value"] directly — it must stay a bare LIST, not the new dict, and
+    # it must keep min_denominator=0 (its rows are what the AI report ships).
     frame = Frame(normalise_all())
     out = foi_stats(frame, "refusal_rate_change_fy23_fy24")
     assert out["value"], "legacy key must keep returning movers"
     assert isinstance(out["value"], list), "legacy key must stay a bare list"
-    assert set(out["value"][0]) == {"agency", "fy_a_rate", "fy_b_rate", "change"}
+    assert set(out["value"][0]) == MOVER_ROW_KEYS
+    # no floor here: small-denominator agencies are still ranked, and now the
+    # denominator columns make that visible rather than hiding it
+    assert min(m["fy_a_denominator"] for m in out["value"]) < MOVERS_MIN_DENOMINATOR
+
+
+def test_top_n_ranks_annual_rows_of_real_agencies_only():
+    # S1 (server twin of the client-side C3 fix): frame.filter applies no
+    # quarter constraint and the golden "Total" pseudo-agency is not an agency.
+    # Inert only while LATEST_COMPLETE_FY predates the golden rows.
+    annual = {"agency_key": "a", "agency_name": "Agency A",
+              "fy": FIGURE_SPECS["received_top20"]["default_fy"], "quarter": None,
+              "measure_group": "requests", "measure": "received", "bucket": "total",
+              "value": 10.0, "derived": False, "portfolio": ""}
+    frame = Frame([
+        annual,
+        dict(annual, agency_key="total", agency_name="Total", value=9999.0),
+        dict(annual, agency_key="q", quarter=1, value=5000.0),
+        dict(annual, agency_key="xplaceholder", agency_name="xplaceholder"),
+    ])
+    fig = foi_stats(frame, "received_top20")["value"]
+    assert fig["categories"] == ["Agency A"], fig["categories"]
+    assert fig["series"][0]["values"] == [10], "a quarter row entered an FY total"
+
+    # and the real frame's ranking is unchanged by the guards
+    real = foi_stats(Frame(normalise_all()), "received_top20")["value"]
+    assert real["categories"][0] == "Department of Home Affairs"
+    assert real["series"][0]["values"][0] == 17120
 
 
 def test_received_channel_trend_is_spec_driven():

@@ -101,11 +101,34 @@ def test_by_portfolio_excludes_total():
 
 
 def test_kpis_op_carries_basis():
+    # SCALAR-ONLY (review I3, 2026-08-26). A KPI is one number. The ranked
+    # movers TABLES took the payload to 42.6KB while agentic/builder.py
+    # truncates the model-facing tool result at 4000 chars — the model saw none
+    # of them, and the 167-row legacy refusal_rate_change_fy23_fy24 list (key 9
+    # of 12) ate the whole truncation budget before timeliness_slippage_corr
+    # was reached. Every excluded key is still reachable via foi_stats and
+    # GET /api/figures. The shape of the keys that remain is unchanged.
     f = Frame(normalise_all())
     r = query_dataset(f, "kpis", {})
-    assert set(r) == set(STAT_KEYS)
+    scalar_keys = {k for k in STAT_KEYS
+                   if not isinstance(foi_stats(f, k)["value"], (list, dict))}
+    assert set(r) == scalar_keys
+    assert set(r) < set(STAT_KEYS), "nothing was excluded — the op is unchanged"
+    assert "refusal_rate_movers" not in r and "timeliness_movers" not in r
+    assert "timeliness_slippage_corr" in r, \
+        "the scalar the tables used to crowd out must survive"
     for k, v in r.items():
         assert isinstance(v, dict) and "value" in v and "basis" in v
+        assert not isinstance(v["value"], (list, dict))
+
+
+def test_kpis_op_payload_stays_small_enough_for_the_model_to_see():
+    # I3: builder.py truncates the tool result at 4000 chars. A kpis payload
+    # bigger than that is cost the model provably cannot read.
+    import json
+    f = Frame(normalise_all())
+    blob = json.dumps(query_dataset(f, "kpis", {}))
+    assert len(blob) < 4000, f"{len(blob)} chars — truncated before the model sees it"
 
 
 def test_div_by_zero_raises():

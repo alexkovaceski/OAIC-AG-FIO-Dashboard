@@ -142,9 +142,31 @@ def query_dataset(frame, op: str, params: dict) -> dict:
                 "portfolios": [{"portfolio": p, "value": round(v)}
                                for p, v in sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)]}
     if op == "kpis":
-        # every KPI tile carries its basis — basis is a field of the output
-        return {k: {"value": foi_stats(frame, k)["value"],
-                    "basis": foi_stats(frame, k)["basis"]} for k in STAT_KEYS}
+        # every KPI tile carries its basis — basis is a field of the output.
+        #
+        # SCALAR-ONLY (I3). A KPI is one number. The ranked movers TABLES
+        # (list/dict values) ballooned this payload 17.6KB -> 56.3KB while
+        # agentic/builder.py truncates the model-facing tool result at 4000
+        # chars — so the model saw none of them, and the legacy
+        # refusal_rate_change_fy23_fy24 list (167 rows, ~19KB, key 9 of 12) ate
+        # the truncation budget before timeliness_slippage_corr was even
+        # reached. Every excluded key stays reachable via foi_stats directly and
+        # via GET /api/figures, which carries all of them; the shape of the keys
+        # that remain is unchanged ({value, basis}).
+        #
+        # foi_stats is called ONCE per key — the old comprehension called it
+        # twice, so each movers stat (which hashes thousands of rows) was
+        # computed four times per kpis call.
+        out = {}
+        for key in STAT_KEYS:
+            try:
+                stat = foi_stats(frame, key)
+            except KeyError:
+                continue  # a key this frame can't compute stays absent (no fabrication)
+            if isinstance(stat["value"], (list, dict)):
+                continue
+            out[key] = {"value": stat["value"], "basis": stat["basis"]}
+        return out
     if op == "gaps":
         return {"error": "gaps op not applicable to FOI stats — use trend/compare_period/top_contributors"}
     if op == "classes":
