@@ -222,8 +222,27 @@ h1 {
 /* Each chart card ships an EMPTY .fignote (pages.py _chart_container) so the
    engine writes into a live region that already exists — a note created fresh
    on each render is a new node, and a screen reader announces nothing when the
-   caveat under a chart changes. Empty, it must occupy no space. */
-.fignote:empty { display: none; }
+   caveat under a chart changes. Empty, it must occupy no space.
+
+   It must NOT be display:none while it does so. A live region that is
+   display:none at the moment it is mutated is the case screen readers most
+   often skip — the region is not in the accessibility tree when the text
+   lands, so the announcement is lost — and empty -> text is exactly the FIRST
+   filter selection of a session, which is when the honesty caveats first
+   appear. visibility:hidden has the same defect (it removes the subtree from
+   the accessibility tree too). The clip pattern below keeps the element
+   mounted, exposed and announceable while taking it out of flow, so it
+   contributes no height between the chart and the next card. */
+.fignote:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* --- movers tables (the FY-pair change analysis beside each change chart) --- */
 

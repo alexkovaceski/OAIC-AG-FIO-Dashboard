@@ -1029,18 +1029,23 @@ def test_page_data_ships_the_part_year_disclosure():
         partial = blob["partial_fys"]
         assert list(partial) == ["2025-26"], f"{page_key}: {list(partial)}"
         entry = partial["2025-26"]
-        assert set(entry) == {"basis", "note", "axis_note"}, entry
         assert entry["basis"] != "basis: financial year", \
             "a part year must not be published under the complete-year label"
         assert "part financial year" in entry["basis"]
         assert "Q1–Q3 cumulative" in entry["basis"]
-        # the note names the year and says what the file actually covers
-        assert "2025-26" in entry["note"] and "July" in entry["note"]
-        assert "not a complete financial year" in entry["note"]
-        assert "not comparable" in entry["note"]
-        # and the axis note explains the rescale rather than leaving the reader
+        # the note names the year and says what the file actually covers. It
+        # comes in a count and a ratio wording since the Stage 3a sweep (item
+        # C) — the key set itself is pinned by
+        # test_part_year_note_says_what_kind_of_figure_it_is_qualifying
+        for note in (entry["count_note"], entry["ratio_note"]):
+            assert "2025-26" in note and "July" in note
+            assert "not a complete financial year" in note
+            assert "not comparable" in note
+        # and the axis notes explain the rescale rather than leaving the reader
         # to compare nine months against a full-year interval
-        assert "rescaled" in entry["axis_note"]
+        assert all("scale" in entry[k] or "Axis" in entry[k]
+                   for k in ("axis_note_lowered", "axis_note_raised",
+                             "axis_note_unchanged"))
         assert LATEST_COMPLETE_FY not in partial, \
             "the latest COMPLETE year must never be flagged as partial"
 
@@ -1099,7 +1104,10 @@ def test_chart_cards_ship_a_persistent_live_note():
                 f"{page_key}/{fig_key}: the note precedes its chartbox"
     assert boxes == 11, f"chartbox count moved ({boxes}) — retarget this guard"
     css = _site_css()
-    assert re.search(r"\.fignote:empty\s*\{[^}]*display:\s*none", css), \
+    # an empty note must occupy no space — WITHOUT leaving the accessibility
+    # tree, which display:none would do (item E; the rule itself is pinned by
+    # test_empty_fignote_stays_in_the_accessibility_tree)
+    assert re.search(r"\.fignote:empty\s*\{[^}]*clip-path", css), \
         "an empty note must occupy no space"
 
 
@@ -1113,7 +1121,10 @@ def test_chart_engine_qualifies_a_part_year_selection():
     assert "partial_fys" in js, "the engine must read the derived part-year set"
     assert "function partialFy(" in js and "function setBasis(" in js
     assert "partial.basis" in js, "the basis label must vary for a part year"
-    assert "partial.note" in js and "partial.axis_note" in js
+    # the note and the axis sentence are chosen per render since item C —
+    # by spec kind, and by whether the axis actually shrank
+    assert "partYearNote(partial, spec)" in js
+    assert "partYearAxisNote(partial," in js
     assert re.search(r"else if \(partial\) pin = own", js), \
         "a part-year selection must rescale to its own maximum, not the pin"
     assert "out.fyIgnored" in js, \
@@ -1225,3 +1236,212 @@ def test_chart_engine_recovers_from_a_render_failure():
     # and it must NOT claim the publisher does not report the measure
     assert "noData(el, key, NO_DATA_TEXT)" not in catch, \
         "a render failure is not a data-availability claim"
+
+
+# --- Stage 3a carry-over sweep (Stage 2 deploy caveats A-F) ------------------
+# Six loose ends, all prose / presentation / predicate hygiene: no figure VALUE
+# moves. A (the workbook caption), C (part-year prose) and F (the dsl agency
+# predicate, in tests/test_dsl.py) are server-testable; B, D and E are JS/CSS
+# and are pinned from the source text, the way every other engine guard here is.
+
+def _synthetic_annual_frame(years):
+    """A Frame carrying one annual fact per year in `years` — enough for the
+    caption derivation, which reads only fy and quarter."""
+    from storage.frame import Frame
+    row = {"agency_key": "a", "agency_name": "Agency A", "quarter": None,
+           "measure_group": "requests", "measure": "received", "bucket": "total",
+           "value": 10.0, "derived": False, "portfolio": ""}
+    return Frame([dict(row, fy=fy) for fy in years])
+
+
+def test_workbook_caption_is_derived_from_the_frame_not_written_down():
+    # A: _WORKBOOK_SOURCE hardcoded "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)"
+    # and rode eleven FY cards. Correct on today's frame and wrong the year
+    # LATEST_COMPLETE_FY advances: every card would keep calling the newest
+    # annual file a Q1–Q3 cumulative and would freeze the range endpoint at
+    # 2025-26. The caption is now derived from the frame's own annual years.
+    import ast
+    from pathlib import Path
+    from stats.catalog import LATEST_COMPLETE_FY, PARTIAL_FY_COVERAGE
+    from site.pages import _workbook_source
+    # no EMITTABLE string literal in pages.py may carry an FY range. Docstrings
+    # are exempt because _workbook_source's own docstring quotes the constant it
+    # replaced, which is the record of what went wrong; comments never reach a
+    # page at all, and ast drops them.
+    tree = ast.parse(Path("src/site/pages.py").read_text(encoding="utf-8"))
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if (isinstance(first, ast.Expr)
+                    and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                docstrings.add(id(first.value))
+    emitted = [n.value for n in ast.walk(tree)
+               if isinstance(n, ast.Constant) and isinstance(n.value, str)
+               and id(n) not in docstrings]
+    hardcoded = [s for s in emitted if re.search(r"FY\d{4}-\d{2}\s*[–-]\s*FY", s)]
+    assert not hardcoded, f"the workbook caption hardcodes an FY range: {hardcoded}"
+
+    # on the real frame it reproduces the retired constant byte for byte
+    frame = Frame(normalise_all())
+    assert _workbook_source(frame) == (
+        "Source: data.gov.au FOI statistics workbooks, "
+        "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")
+
+    # a frame that ENDS at the latest complete year carries no cumulative
+    # qualifier — which is exactly what the constant could never do
+    complete = _synthetic_annual_frame(["2019-20", LATEST_COMPLETE_FY])
+    assert _workbook_source(complete) == (
+        "Source: data.gov.au FOI statistics workbooks, "
+        f"FY2019-20 – FY{LATEST_COMPLETE_FY}")
+    assert PARTIAL_FY_COVERAGE not in _workbook_source(complete)
+
+    # and the endpoint FOLLOWS the frame: a later annual file moves it, and
+    # stays qualified while partial_fys still calls that year partial
+    later = _synthetic_annual_frame(["2019-20", LATEST_COMPLETE_FY, "2999-00"])
+    assert _workbook_source(later) == (
+        "Source: data.gov.au FOI statistics workbooks, "
+        f"FY2019-20 – FY2999-00 ({PARTIAL_FY_COVERAGE})")
+
+    # a single-year frame must not print a range from a year to itself
+    one = _synthetic_annual_frame([LATEST_COMPLETE_FY])
+    assert _workbook_source(one) == (
+        f"Source: data.gov.au FOI statistics workbooks, FY{LATEST_COMPLETE_FY}")
+
+
+def test_workbook_caption_rides_every_fy_card():
+    # A, wiring: the derived caption must reach the same cards the constant did
+    from site.pages import _workbook_source
+    frame = Frame(normalise_all())
+    caption = _workbook_source(frame)
+    pages = _pages()
+    carrying = [k for k, html in pages.items() if caption in html]
+    # ten of the twelve pages carry at least one FY card (data-notes, how-to-use
+    # and api carry none; at-a-glance carries one)
+    assert len(carrying) == 10, carrying
+    total = sum(html.count(caption) for html in pages.values())
+    assert total == 11, f"the caption rides {total} cards, not 11"
+
+
+def test_part_year_note_says_what_kind_of_figure_it_is_qualifying():
+    # C: the single part-year note was COUNT-shaped ("These are part-year totals
+    # and are not comparable with a full-year figure") and fired on the two
+    # ratio pages, where the figure is a RATE — 71.1% is not a partial total,
+    # and a rate does not "read as a fall in FOI activity" because the period
+    # is short. The prose now varies by spec kind.
+    for page_key in ("key-agency-contributions-received", "requests-received",
+                     "change-timeliness", "change-decision-outcomes"):
+        entry = _chart_page_data(page_key)["partial_fys"]["2025-26"]
+        assert set(entry) == {"basis", "count_note", "ratio_note",
+                              "axis_note_lowered", "axis_note_raised",
+                              "axis_note_unchanged"}, entry
+        # both notes still name the year and say what the file actually covers
+        for note in (entry["count_note"], entry["ratio_note"]):
+            assert "2025-26" in note and "July" in note
+            assert "not a complete financial year" in note
+            assert "not comparable" in note
+        # the COUNT note keeps the totals wording
+        assert "part-year totals" in entry["count_note"]
+        # the RATIO note must not call a rate a total, and must give a rate's
+        # real caveat: a shorter period over a smaller denominator
+        assert "total" not in entry["ratio_note"].lower(), entry["ratio_note"]
+        assert "denominator" in entry["ratio_note"]
+        assert "rate" in entry["ratio_note"]
+
+
+def test_part_year_axis_note_only_claims_a_rescale_down_when_the_axis_shrank():
+    # C: the part-year exception pins the axis to the SELECTION's own maximum.
+    # On a count that is below the full-year baseline, so the axis shrinks —
+    # but on a RATE it frequently grows. Measured 2026-08-26 over the two ratio
+    # pages at FY2025-26, portfolio x type: 34 of 90 selections put the axis
+    # ABOVE the unfiltered baseline (change-timeliness, Attorney-General's,
+    # personal: baseline 78.6, axis 99.4) while the note claimed a rescale down.
+    entry = _chart_page_data("change-timeliness")["partial_fys"]["2025-26"]
+    lowered, raised = entry["axis_note_lowered"], entry["axis_note_raised"]
+    unchanged = entry["axis_note_unchanged"]
+    assert "down" in lowered.lower()
+    assert "fall in FOI activity" in lowered, \
+        "the shrink case is the one that rationale belongs to"
+    # the grown case must not claim a reduction, and must not reuse the
+    # count-shaped "reads as a fall in FOI activity" mechanism
+    for note in (raised, unchanged):
+        assert "rescaled down" not in note.lower(), note
+        assert "fall in FOI activity" not in note, note
+    assert "above" in raised.lower() or "higher" in raised.lower(), raised
+
+    # and the engine must CHOOSE between them from a measured comparison
+    js = _charts_js()
+    assert "function partYearAxisNote(" in js, \
+        "the engine must pick the axis sentence that is true for this render"
+    for key in ("axis_note_lowered", "axis_note_raised", "axis_note_unchanged"):
+        assert key in js, f"the engine never reaches for {key}"
+    assert "pin < baseline ? partial.axis_note_lowered" in js, \
+        "the direction must come from a comparison, not from the spec kind"
+    assert "partial.axis_note;" not in js, "the single axis claim is back"
+    assert "function partYearNote(" in js and 'kind === "ratio_trend"' in js, \
+        "the note must vary by spec kind"
+
+
+def test_lone_point_trend_keeps_its_emphasis_and_says_it_is_alone():
+    # D: figureOption boosted symbolSize only when cats.length === 1, but since
+    # the I2 axis fix the axis always carries EVERY published FY — so an agency
+    # that published one year drew a single default 4px dot, no connecting line
+    # (nulls break smooth) and no note (oneFyNote needs active.fy).
+    # Measured 2026-08-26: 61 of the 433 agencies with annual rows publish
+    # exactly one financial year.
+    js = _charts_js()
+    opt = re.search(r"function figureOption\(key, fig, opts, width\) \{(.*?)\n  \}",
+                    js, re.S)
+    assert opt, "figureOption is gone"
+    opt = opt.group(1)
+    assert "cats.length === 1) opt.symbolSize" not in opt, \
+        "the emphasis is still gated on the axis length, not the data"
+    assert re.search(r"countPublished\(s\.values\) === 1", opt), \
+        "a lone NON-NULL point is what needs the bigger symbol"
+    assert "function countPublished(" in js
+    # and the reader has to be told the series is one point on a full axis
+    assert "function lonePointNote(" in js
+    assert js.count("lonePointNote(") >= 4, \
+        "every trend path must be able to emit the lone-point note"
+
+
+def test_empty_fignote_stays_in_the_accessibility_tree():
+    # E: `.fignote:empty { display: none }` on an aria-live region is the
+    # classic skipped-live-region case — a region that is display:none at the
+    # moment it is mutated is what screen readers most often miss, and the
+    # empty -> text transition is the FIRST filter of the session, which is
+    # when the honesty caveats first appear. It must occupy no space without
+    # leaving the accessibility tree.
+    css = _site_css()
+    rule = re.search(r"\.fignote:empty\s*\{([^}]*)\}", css)
+    assert rule, "the empty-note rule is gone"
+    body = rule.group(1)
+    assert not re.search(r"display:\s*none", body), \
+        "display:none removes the live region a screen reader must observe"
+    assert not re.search(r"visibility:\s*hidden", body), \
+        "visibility:hidden removes it from the accessibility tree too"
+    assert "clip-path" in body and "position: absolute" in body, \
+        "the clip pattern is what hides it without unmounting it"
+    assert re.search(r"height:\s*1px", body) and re.search(r"width:\s*1px", body)
+
+
+def test_axis_contract_header_describes_the_part_year_exception_it_implements():
+    # B: the header said the part-year exception "auto-scales" three lines after
+    # explaining that auto-scaling was REJECTED (ECharts picks a rounded top —
+    # 7,000 for a 6,228 maximum). The code pins to the selection's own maximum.
+    js = _charts_js()
+    header = js[:js.index("(function ()")]
+    contract = re.search(r"Axis contract:(.*?)\n \*\n", header, re.S).group(1)
+    # unwrap the comment so the assertions do not depend on where lines break
+    contract = " ".join(contract.replace("\n *", " ").split())
+    assert "exceptions auto-scale" not in contract, \
+        "the header still calls the part-year pin an auto-scale"
+    assert re.search(r"PART-year selection, which is pinned to the "
+                     r"SELECTION'S OWN maximum", contract), \
+        "the part-year exception pins to the selection's own maximum"
+    # and the header must say the pin moves both ways, since the note now does
+    assert "either way" in " ".join(header.split()).lower()
+    # and the code it describes is unchanged
+    assert re.search(r"else if \(partial\) pin = own", js)

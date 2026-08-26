@@ -34,13 +34,41 @@ GOLDEN_SOURCE = ("Transcribed from the OAIC Power BI report, Q1 2025-26 "
                  "(Jul–Sep 2025); not derivable from the cumulative "
                  "Q1–Q3 workbook.")
 
-# provenance caption for every FY figure: the whole annual workbook family, not
-# one year's file. It was pasted at nine call sites and the two top-N pages
-# named a SINGLE file instead ("agency-foi-data-2024-25.xlsx") — true of the
-# default ranking and false the moment the FY filter selects another year, which
-# the same chart supports. One definition, every FY card.
-_WORKBOOK_SOURCE = ("Source: data.gov.au FOI statistics workbooks, "
-                    "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")
+
+def _workbook_source(frame) -> str:
+    """Provenance caption for every FY figure: the whole annual workbook family,
+    not one year's file. It was pasted at nine call sites and the two top-N
+    pages named a SINGLE file instead ("agency-foi-data-2024-25.xlsx") — true of
+    the default ranking and false the moment the FY filter selects another year,
+    which the same chart supports. One definition, eleven FY cards.
+
+    DERIVED from the frame, not written down. The constant this replaced read
+    "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)": correct on today's frame and
+    wrong the year LATEST_COMPLETE_FY advances, because all eleven cards would
+    go on calling the newest annual file a Q1–Q3 cumulative and would freeze the
+    range endpoint at 2025-26 while the frame moved past it. The range runs from
+    the earliest ANNUAL financial year in the frame to the latest, and the
+    cumulative qualifier rides only while stats.catalog.partial_fys still calls
+    that latest year partial — the same derivation the part-year disclosure and
+    the How to use definition already use.
+
+    Quarter-carrying rows are excluded for the reason partial_fys excludes them:
+    the golden Q1 facts are a separate single-quarter basis with its own
+    provenance caption (GOLDEN_SOURCE), and they never join an FY series.
+
+    Measured 2026-08-26 on the real frame: annual years 2019-20..2025-26 with
+    partial_fys() == ['2025-26'] reproduce the retired constant byte for byte.
+    """
+    annual = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
+    stem = "Source: data.gov.au FOI statistics workbooks"
+    if not annual:
+        return stem
+    span = (f"FY{annual[0]}" if annual[0] == annual[-1]
+            else f"FY{annual[0]} – FY{annual[-1]}")
+    qualifier = (f" ({PARTIAL_FY_COVERAGE})"
+                 if annual[-1] in partial_fys(frame) else "")
+    return f"{stem}, {span}{qualifier}"
+
 
 # page_key -> the figure keys that page's chartboxes reference (the keys the
 # page's window.__pageData blob ships). Pages without charts ship no figures.
@@ -100,25 +128,61 @@ def _partial_fy_blob(frame) -> dict:
     LATEST_COMPLETE_FY, and the prose lives here where it is escaped once and
     testable from the server side.
 
-    Three strings per year, because the engine needs them in three places:
-      basis     — replaces the figure card's "basis: financial year" line
-      note      — the .fignote sentence that says what the year actually covers
-      axis_note — why the axis was rescaled instead of being pinned to the
-                  full-year baseline (see the axis contract in foi-charts.js)
+    Six strings per year, because the engine has to say the true one:
+
+      basis        — replaces the figure card's "basis: financial year" line
+      count_note   — what the year covers, for a figure that plots COUNTS
+      ratio_note   — the same, for a figure that plots a RATE
+      axis_note_lowered / _raised / _unchanged
+                   — why the axis is pinned to the selection's own maximum
+                     instead of the full-year baseline, in the three directions
+                     that pin can take (see the axis contract in foi-charts.js)
+
+    Why the note comes in two shapes. One count-shaped sentence used to fire on
+    every figure kind, including the two ratio pages: it told a reader looking
+    at 71.1% that "these are part-year TOTALS", and warned that a part year
+    "reads as a fall in FOI activity" — a mechanism that belongs to a count and
+    does not apply to a rate at all. A rate's real caveat is that it is computed
+    over a shorter period and a smaller denominator, so a handful of decisions
+    can move it in a way a full year would damp.
+
+    Why the axis note comes in three. The part-year exception pins the axis to
+    the SELECTION's own maximum rather than holding the unfiltered baseline. On
+    a count that is a rescale DOWN (nine months of activity against a full
+    year). On a rate it is frequently a rescale UP — measured 2026-08-26 over
+    change-timeliness and change-decision-outcomes at FY2025-26, across
+    portfolio x type, 34 of the 90 selections that publish a figure put the axis
+    ABOVE the unfiltered baseline (change-timeliness, Attorney-General's,
+    personal: baseline 78.6, axis 99.4) while the single note claimed a rescale
+    down. One selection landed exactly on the baseline. The engine measures the
+    direction and picks the sentence that is true of the chart it just drew.
 
     Measured 2026-08-26: returns one entry, 2025-26.
     """
     out = {}
     for fy in partial_fys(frame):
+        covers = (f"FY {fy} is not a complete financial year: the published "
+                  f"file covers {PARTIAL_FY_COVERAGE} ({PARTIAL_FY_MONTHS}), "
+                  f"not the full July–June year.")
         out[fy] = {
             "basis": PARTIAL_FY_BASIS,
-            "note": (f"FY {fy} is not a complete financial year: the published "
-                     f"file covers {PARTIAL_FY_COVERAGE} ({PARTIAL_FY_MONTHS}), "
-                     f"not the full July–June year. These are part-year totals "
-                     f"and are not comparable with a full-year figure."),
-            "axis_note": ("Axis rescaled to this part-year selection: a part "
-                          "year drawn against the full-year axis reads as a "
-                          "fall in FOI activity that the data does not show."),
+            "count_note": (f"{covers} These are part-year totals and are not "
+                           f"comparable with a full-year figure."),
+            "ratio_note": (f"{covers} This rate is measured over that shorter "
+                           f"period and a smaller denominator, so it is not "
+                           f"comparable with a full-year rate."),
+            "axis_note_lowered": ("Axis rescaled down to this part-year "
+                                  "selection: a part year drawn against the "
+                                  "full-year axis reads as a fall in FOI "
+                                  "activity that the data does not show."),
+            "axis_note_raised": ("Axis set to this part-year selection's own "
+                                 "maximum, which sits above the unfiltered "
+                                 "one: the interval grew to fit the selection "
+                                 "rather than being reduced to it."),
+            "axis_note_unchanged": ("Axis set to this part-year selection's own "
+                                    "maximum rather than held at the unfiltered "
+                                    "one: a part year and a full year are not "
+                                    "like windows to compare across."),
         }
     return out
 
@@ -166,7 +230,10 @@ def _chart_container(chart_key, fig) -> str:
     nothing, so a filter selection silently changed the caveat under the chart.
     A container that exists before the text lands is the same pattern the chat
     log and the report output already use (role/aria-live on a server-rendered
-    div). It renders as nothing while empty: site.css hides `.fignote:empty`."""
+    div). It renders as nothing while empty: site.css clips `.fignote:empty` out
+    of flow — clipped rather than `display: none`, because a live region that is
+    display:none at the moment it is mutated is the one screen readers skip, and
+    the empty→text transition is the first filter selection of the session."""
     inner = ""
     has_data = _figure_has_data(fig)
     if not has_data:
@@ -582,7 +649,7 @@ def _page_at_a_glance(frame) -> str:
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
                     "requests_received_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("at-a-glance")}
     {_page_data_script(frame, "at-a-glance")}"""
     return chrome("FOI at a glance", body,
@@ -599,11 +666,11 @@ def _page_requests_received(frame) -> str:
     {_kpis(frame, ["requests_received_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
                     "requests_received_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_trend_section(FIG_CAPTIONS["received_channel_trend"],
                     _stat(frame, "received_channel_trend")["value"],
                     "received_channel_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("requests-received")}
     {_page_data_script(frame, "requests-received")}"""
     return chrome("Requests received", body,
@@ -621,7 +688,7 @@ def _page_key_agency_contributions_received(frame) -> str:
     file covers.</p>
     {_filters_bar(frame, "key-agency-contributions-received")}
     {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("key-agency-contributions-received")}
     {_page_data_script(frame, "key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
@@ -640,7 +707,7 @@ def _page_requests_finalised(frame) -> str:
     {_kpis(frame, ["requests_finalised_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
                     "requests_finalised_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("requests-finalised")}
     {_page_data_script(frame, "requests-finalised")}"""
     return chrome("Requests finalised", body,
@@ -657,7 +724,7 @@ def _page_requests_decided(frame) -> str:
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("requests-decided")}
     {_page_data_script(frame, "requests-decided")}"""
     return chrome("Requests decided", body,
@@ -675,7 +742,7 @@ def _page_key_agency_contributions_decided(frame) -> str:
     file covers.</p>
     {_filters_bar(frame, "key-agency-contributions-decided")}
     {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("key-agency-contributions-decided")}
     {_page_data_script(frame, "key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",
@@ -695,7 +762,7 @@ def _page_decision_outcomes(frame) -> str:
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
                     "decision_outcomes_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("decision-outcomes")}
     {_page_data_script(frame, "decision-outcomes")}"""
     return chrome("Decision outcomes", body,
@@ -714,7 +781,7 @@ def _page_change_decision_outcomes(frame) -> str:
     {_filters_bar(frame, "change-decision-outcomes")}
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
                     "granted_full_part_change",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_movers_or_note(frame, "Refusal-rate movers", "refusal_rate_movers")}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
@@ -733,7 +800,7 @@ def _page_timeliness(frame) -> str:
     {_filters_bar(frame, "timeliness")}
     {_kpis(frame, ["within_statutory_pct_q1"])}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_lineage_panel("timeliness")}
     {_page_data_script(frame, "timeliness")}"""
     return chrome("Timeliness", body,
@@ -752,7 +819,7 @@ def _page_change_timeliness(frame) -> str:
     it.</p>
     {_filters_bar(frame, "change-timeliness")}
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
-                    source=_WORKBOOK_SOURCE)}
+                    source=_workbook_source(frame))}
     {_movers_or_note(frame, "Timeliness movers", "timeliness_movers")}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""

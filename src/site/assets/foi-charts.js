@@ -21,14 +21,24 @@
  * two, and say so in the note when the interval had to grow. The UNFILTERED
  * view is pinned to its own maximum for the same reason — left to auto-scale
  * it picked a rounded top (7,000 for a 6,228 maximum) and jumped to an exact
- * one on the first selection. Two deliberate exceptions auto-scale and say so
- * in the note: a single-agency view, and a PART-year selection. The part-year
- * exception is the one the comparability rule gets wrong — holding the axis
- * only aids comparison between like windows, and nine months against a full
- * year is not one. Measured 2026-08-26: selecting the part year (a nine-
- * month cumulative file) on received_top20 drew a 12,264 leader against the
- * latest-complete-year pin of 17,120, i.e. at 72% height, which reads as a
+ * one on the first selection. Two deliberate exceptions leave the baseline pin
+ * behind and say so in the note: a single-agency view, which auto-scales, and a
+ * PART-year selection, which is pinned to the SELECTION'S OWN maximum (not
+ * auto-scaled — auto-scaling is what the rounded-top paragraph above rules
+ * out). The part-year exception is the one the comparability rule gets wrong —
+ * holding the axis only aids comparison between like windows, and nine months
+ * against a full year is not one. Measured 2026-08-26: selecting the part year
+ * (a nine-month cumulative file) on received_top20 drew a 12,264 leader against
+ * the latest-complete-year pin of 17,120, i.e. at 72% height, which reads as a
  * collapse in FOI activity that did not happen.
+ *
+ * That pin can move EITHER WAY, and the note has to say which. On a count the
+ * selection's own maximum is below the baseline, so the axis shrinks; on a rate
+ * it is frequently above it. Measured 2026-08-26 across change-timeliness and
+ * change-decision-outcomes at the part year, portfolio x type: 34 of the 90
+ * selections that publish a figure raised the axis (Attorney-General's,
+ * personal: baseline 78.6, axis 99.4), 55 lowered it and one landed on it —
+ * while a single stored sentence claimed a rescale down in all 90.
  *
  * Category contract: a trend's category axis is the FULL published axis, taken
  * from the unfiltered figure, with null where the selection has no row for a
@@ -96,6 +106,30 @@
     var map = (data && data.partial_fys) || null;
     if (!fy || !map) return null;
     return Object.prototype.hasOwnProperty.call(map, fy) ? map[fy] : null;
+  }
+
+  // partYearNote — the part-year caveat that fits the KIND of figure on screen.
+  // One count-shaped sentence used to fire on every kind, so a reader looking at
+  // a 71.1% within-statutory rate was told "these are part-year TOTALS" and
+  // warned that a part year reads as a fall in FOI activity — a mechanism that
+  // belongs to a count and says nothing true about a rate. The rate's own
+  // caveat (shorter period, smaller denominator) is the ratio_note.
+  function partYearNote(partial, spec) {
+    return (spec && spec.kind === "ratio_trend")
+      ? partial.ratio_note : partial.count_note;
+  }
+
+  // partYearAxisNote — which of the three part-year axis sentences is TRUE of
+  // the chart just drawn. The exception pins the axis to the selection's own
+  // maximum, and that is a rescale DOWN only when the selection's maximum is
+  // below the unfiltered baseline. See the axis contract at the top of this
+  // file for the 34/90 measurement that made the single claim false.
+  function partYearAxisNote(partial, baseline, pin) {
+    if (baseline === null || baseline === undefined ||
+        pin === null || pin === undefined || pin === baseline) {
+      return partial.axis_note_unchanged;
+    }
+    return pin < baseline ? partial.axis_note_lowered : partial.axis_note_raised;
   }
 
   // fyAxis — the FULL published financial-year axis for a figure, taken from
@@ -190,6 +224,18 @@
     }));
   }
 
+  // countPublished — how many of a values array are actual published figures.
+  // A null is a year the selection has no row for (the category contract keeps
+  // it on the axis as a gap), so the LENGTH of the array is the length of the
+  // axis, not the amount of data on it.
+  function countPublished(values) {
+    var n = 0;
+    (values || []).forEach(function (v) {
+      if (v !== null && v !== undefined) n++;
+    });
+    return n;
+  }
+
   // gridLeft — the label gutter for a horizontal ranking. A fixed 230px starved
   // the plot on a phone: at the 900px breakpoint a 390px viewport leaves a
   // ~294px chartbox, and 230 + 30 left ~34px of bar for a 20-agency ranking.
@@ -234,8 +280,15 @@
       };
       if (type === "line") {
         opt.smooth = true;
-        // a single-year selection is one point: draw a symbol big enough to read
-        if (cats.length === 1) opt.symbolSize = 9;
+        // one published point is one point: draw a symbol big enough to read.
+        // Gated on the number of PUBLISHED values, not on cats.length — since
+        // the category contract put every published FY on the axis whatever the
+        // selection, a one-year agency has a seven-category axis carrying a
+        // single value, and the cats.length test stopped firing for it. It
+        // drew a default 4px dot with no connecting line (nulls break smooth).
+        // Measured 2026-08-26: 61 of the 433 agencies with annual rows publish
+        // exactly one financial year.
+        if (countPublished(s.values) === 1) opt.symbolSize = 9;
       }
       if (type === "bar" && horizontal) opt.barMaxWidth = 28;
       return opt;
@@ -491,8 +544,9 @@
   // agency name today (measured 2026-08-26: 0 of 54,602 facts), so that half is
   // inert — it is here because catalog.py's per-agency figures apply both
   // halves, and a guard that is only inert cannot be relied on to stay correct
-  // when one appears. The ops in stats/dsl.py are a different story; see the
-  // is_reporting_agency docstring for which of them are not aligned.
+  // when one appears. Since the Stage 3a sweep (item F) all six per-agency ops
+  // in stats/dsl.py apply the same predicate too, so the three engines that
+  // rank or aggregate by agency now agree on what an agency is.
   function isReportingAgency(name) {
     return !!name && name.toLowerCase() !== "total" && name.charAt(0) !== "x";
   }
@@ -530,6 +584,34 @@
     if (cats.length !== 1 || !active.fy) return null;
     return "FY " + active.fy + " selected: a trend across a single financial " +
       "year is one point. Clear the FY filter to see the whole series.";
+  }
+
+  // lonePointNote — the same explanation for the OTHER way a trend becomes one
+  // point: the selection itself publishes fewer than two financial years.
+  // oneFyNote cannot cover it, because it needs active.fy and this happens with
+  // the FY filter clear. Measured 2026-08-26: 61 of the 433 agencies with
+  // annual rows publish exactly one financial year, so a reader selecting one
+  // of them saw a lone dot on a seven-year axis, no connecting line (nulls
+  // break smooth) and nothing saying why.
+  //
+  // `seriesList` is the array of {name, values} about to be drawn; a year is
+  // published when ANY series has a value for it (a multi_trend draws several
+  // measures against one axis).
+  function lonePointNote(seriesList, active) {
+    if (active && active.fy) return null;   // oneFyNote already explains that
+    var published = Object.create(null), count = 0;
+    (seriesList || []).forEach(function (s) {
+      (s.values || []).forEach(function (v, idx) {
+        if (v !== null && v !== undefined && published[idx] === undefined) {
+          published[idx] = 1;
+          count++;
+        }
+      });
+    });
+    if (count !== 1) return null;           // 0 published takes the no-data path
+    return "This selection publishes a figure for one financial year only, so " +
+      "the trend is a single point. The axis still carries every published " +
+      "year, and a year with no published figure is drawn as a gap.";
   }
 
   // rankingPoolNote — how many agencies the ranking was drawn from, counted
@@ -576,7 +658,7 @@
             }) };
           }),
         },
-        note: oneFyNote(cats, active),
+        note: oneFyNote(cats, active) || lonePointNote(series, active),
       };
     }
 
@@ -607,7 +689,8 @@
       if (!anyNumeric(values)) return undefined;
       return { fig: { categories: cats,
                       series: [{ name: spec.name, values: values }] },
-               note: oneFyNote(cats, active) };
+               note: oneFyNote(cats, active) ||
+                     lonePointNote([{ values: values }], active) };
     }
 
     if (spec.kind === "top_n") {
@@ -630,6 +713,12 @@
         // the FY selection is dropped on this path. Saying so is the same rule
         // the one-year trend note follows: a select that visibly ignores its
         // input reads as broken.
+        //
+        // The FY dimension is not applied here, so the lone-point note is asked
+        // WITHOUT it — passing `active` would let a set FY filter suppress the
+        // very note a one-year agency needs. 61 of the 433 agencies with annual
+        // rows reach this path with a single published year.
+        var loneAgencyNote = lonePointNote([{ values: values }], {});
         return {
           fig: { categories: cats,
                  series: [{ name: spec.measure, values: values.map(
@@ -640,7 +729,8 @@
                   ? " The FY " + active.fy + " selection is not applied here: " +
                     "the trend spans every published financial year, and a year " +
                     "this agency has no published figure for is drawn as a gap."
-                  : ""),
+                  : "") +
+                (loneAgencyNote ? " " + loneAgencyNote : ""),
           asTrend: true,
           // the FY selection did not scope this figure, so the part-year
           // disclosure must not ride on it — six of these seven points are
@@ -663,11 +753,11 @@
         // "basis: financial year". Both guards mirror the SERVER'S RANKING —
         // stats/catalog.py's top_n branch skips quarter-carrying rows and
         // applies is_reporting_agency, and isReportingAgency is that
-        // predicate's twin. It is not the predicate "every per-agency op in
-        // stats/ applies": measured 2026-08-26, five of the six ops in
-        // stats/dsl.py drop only the "Total" pseudo-agency and keep x-prefixed
-        // rows, so this client guard is stricter than they are. No row moves
-        // either way on the current frame (0 x-prefixed rows).
+        // predicate's twin. It IS now the predicate every per-agency op in
+        // stats/ applies: five of the six ops in stats/dsl.py used to drop only
+        // the "Total" pseudo-agency and keep x-prefixed rows, and the Stage 3a
+        // sweep (item F) aligned them. No row moved either way on the current
+        // frame (0 x-prefixed rows in 54,602 facts).
         if (row.quarter !== null) continue;
         if (!isReportingAgency(row.agency_name)) continue;
         if (row.fy !== fy || row.measure !== spec.measure ||
@@ -791,11 +881,15 @@
       // to use page defines as a COMPLETE July-June year
       setBasis(el, partial);
       var notes = [];
-      if (partial) notes.push(partial.note);
+      // the caveat that fits this figure's KIND — a rate is not a part-year
+      // total, and does not "read as a fall in FOI activity"
+      if (partial) notes.push(partYearNote(partial, spec));
       if (out.note) notes.push(out.note);
       if (active.agency) notes.push("Axis rescaled for the selected agency.");
-      else if (partial) notes.push(partial.axis_note);
-      else if (pin && baselineMax[key] && pin > baselineMax[key]) {
+      // and the axis sentence that is true of the pin this render just chose
+      else if (partial) {
+        notes.push(partYearAxisNote(partial, baselineMax[key], pin));
+      } else if (pin && baselineMax[key] && pin > baselineMax[key]) {
         notes.push("Axis extended past the unfiltered maximum to fit this " +
                    "selection.");
       }

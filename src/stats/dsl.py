@@ -9,7 +9,24 @@ import ast
 import operator as _op
 import re
 
-from stats.catalog import foi_stats, STAT_KEYS
+from stats.catalog import foi_stats, is_reporting_agency, STAT_KEYS
+
+# Every per-agency op below selects its rows with stats.catalog's
+# is_reporting_agency, which excludes exactly two things: the golden "Total"
+# pseudo-agency (a national total-level fact, not an agency) and the
+# normaliser's x-prefixed placeholder rows.
+#
+# Five of the six used to open-code only the first half — `agency_name.lower()
+# != "total"` — so filter_agencies, summarize_agencies, trend, compare_period
+# and by_portfolio kept x-prefixed rows that list_agencies, stats.catalog's
+# per-agency figures and foi-charts.js's isReportingAgency all dropped.
+# Measured 2026-08-26, the divergence moved 0 rows: ingest.normalise drops
+# x-prefixed rows, so 0 of the frame's 54,602 facts could exercise the second
+# half. That made the exposure one ingest change away rather than structurally
+# impossible, and it is why the alignment is a strict TIGHTENING — it can only
+# drop rows, never add one, so it cannot invent a figure. The synthetic-frame
+# test in tests/test_dsl.py is what actually exercises the x-prefixed half,
+# because the real frame cannot.
 
 # citation pointer {c:<job>.<turn>.<call>.<field>} -> a value recorded in the
 # transcript of a query_dataset call (see resolve_citations). The field path
@@ -69,11 +86,11 @@ def query_dataset(frame, op: str, params: dict) -> dict:
     basis = params.get("window_mode", "fy")
     if op == "list_agencies":
         return {"basis": basis, "agencies": sorted({f["agency_name"] for f in frame.facts
-                if not f["agency_name"].startswith("x") and f["agency_name"].lower() != "total"})}
+                if is_reporting_agency(f["agency_name"])})}
     if op == "filter_agencies":
-        # {fy?, measure?, bucket?, top_n?} — the golden "Total" pseudo-agency is
-        # a total-level fact, not an agency, so it is excluded from per-agency ops
-        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
+        # {fy?, measure?, bucket?, top_n?} — reporting agencies only (see the
+        # predicate note at the top of this module)
+        rows = [f for f in frame.facts if is_reporting_agency(f["agency_name"])]
         if params.get("fy"): rows = [f for f in rows if f["fy"] == params["fy"]]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
@@ -84,7 +101,7 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         top = sorted(aggs.items(), key=lambda kv: kv[1], reverse=True)[:int(params.get("top_n", 20))]
         return {"basis": basis, "count": len(aggs), "top": [{"agency": a, "value": round(v)} for a, v in top]}
     if op == "summarize_agencies":
-        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
+        rows = [f for f in frame.facts if is_reporting_agency(f["agency_name"])]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]
         return {"basis": basis, "count": len(rows), "total": round(sum(f["value"] for f in rows))}
@@ -92,10 +109,11 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         # 5-year FY trend from the annual files (quarter is None). A measure
         # with no annual-FY rows (e.g. within_statutory, which only exists as
         # single-quarter Q1 facts) returns an EMPTY series, never a fabricated
-        # flat zero line. The golden "Total" pseudo-agency is excluded.
+        # flat zero line. Reporting agencies only.
         rows = [f for f in frame.facts if f["quarter"] is None
                 and f["measure"] == params.get("measure", "received")
-                and f["bucket"] == "total" and f["agency_name"].lower() != "total"]
+                and f["bucket"] == "total"
+                and is_reporting_agency(f["agency_name"])]
         if not rows:
             return {"basis": "fy", "years": [], "values": []}
         by = {}
@@ -112,7 +130,7 @@ def query_dataset(frame, op: str, params: dict) -> dict:
         def tot(fy):
             return sum(f["value"] for f in frame.facts
                        if f["fy"] == fy and f["measure"] == m and f["bucket"] == "total"
-                       and f["agency_name"].lower() != "total")  # no golden grand totals
+                       and is_reporting_agency(f["agency_name"]))  # no grand totals
         va, vb = tot(a), tot(b)
         return {"basis": "fy", "fy_a": a, "fy_b": b, "value_a": round(va), "value_b": round(vb),
                 "change": round(vb - va),
@@ -120,8 +138,9 @@ def query_dataset(frame, op: str, params: dict) -> dict:
     if op == "top_contributors":
         return query_dataset(frame, "filter_agencies", params)
     if op == "by_portfolio":
-        # the golden "Total" pseudo-agency is a total-level fact, not an agency
-        rows = [f for f in frame.facts if f["agency_name"].lower() != "total"]
+        # reporting agencies only (see the predicate note at the top of this
+        # module) — the golden "Total" row is a national fact, not an agency
+        rows = [f for f in frame.facts if is_reporting_agency(f["agency_name"])]
         if params.get("fy"): rows = [f for f in rows if f["fy"] == params["fy"]]
         if params.get("measure"): rows = [f for f in rows if f["measure"] == params["measure"]]
         if params.get("bucket"): rows = [f for f in rows if f["bucket"] == params["bucket"]]

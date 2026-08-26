@@ -172,3 +172,86 @@ def test_resolve_citations_known_and_fail_loud():
         assert False, "should have failed loud"
     except SystemExit as e:
         assert "FAIL LOUD" in str(e)
+
+
+# --- Stage 3a carry-over sweep, item F ---------------------------------------
+
+def _synthetic_agency_frame():
+    """A frame carrying one real agency, the golden "Total" pseudo-agency and an
+    x-prefixed placeholder row, in two financial years.
+
+    SYNTHETIC on purpose: the real frame cannot exercise the x-prefixed half of
+    the predicate at all — measured 2026-08-26, 0 of its 54,602 facts carry an
+    x-prefixed agency name, because ingest.normalise drops those rows. That is
+    why the divergence between stats.catalog.is_reporting_agency and the dsl ops
+    survived unnoticed, and it is why a real-frame assertion cannot guard the
+    alignment.
+    """
+    def row(agency, fy, value, portfolio="Attorney-General's"):
+        return {"agency_key": agency.lower().replace(" ", "-"),
+                "agency_name": agency, "fy": fy, "quarter": None,
+                "measure_group": "requests", "measure": "received",
+                "bucket": "total", "value": float(value), "derived": False,
+                "portfolio": portfolio}
+    return Frame([
+        row("Agency A", "2023-24", 100), row("Agency A", "2024-25", 120),
+        row("Total", "2023-24", 100), row("Total", "2024-25", 120),
+        row("xPlaceholder", "2023-24", 7), row("xPlaceholder", "2024-25", 9),
+    ])
+
+
+def test_every_per_agency_op_applies_both_halves_of_the_agency_predicate():
+    # F: only list_agencies applied both halves of is_reporting_agency;
+    # filter_agencies, summarize_agencies, trend, compare_period and
+    # by_portfolio dropped the "Total" pseudo-agency and KEPT x-prefixed
+    # placeholder rows. The divergence moved 0 rows on the real frame (no
+    # x-prefixed facts survive ingest), so the exposure was one ingest change
+    # away rather than structurally impossible. All six now apply the same
+    # predicate the catalog and the chart engine apply.
+    from stats.catalog import is_reporting_agency
+    f = _synthetic_agency_frame()
+    assert not is_reporting_agency("xPlaceholder")
+    assert not is_reporting_agency("Total")
+    assert is_reporting_agency("Agency A")
+
+    ag = query_dataset(f, "list_agencies", {})
+    assert ag["agencies"] == ["Agency A"], ag
+
+    top = query_dataset(f, "filter_agencies", {"measure": "received"})
+    assert [t["agency"] for t in top["top"]] == ["Agency A"], top
+    assert top["count"] == 1
+
+    # 100 + 120 from Agency A alone; 236 would mean the placeholder was summed
+    s = query_dataset(f, "summarize_agencies", {"measure": "received"})
+    assert s["total"] == 220 and s["count"] == 2, s
+
+    tr = query_dataset(f, "trend", {"measure": "received"})
+    assert tr["years"] == ["2023-24", "2024-25"]
+    assert tr["values"] == [100, 120], tr
+
+    cp = query_dataset(f, "compare_period",
+                       {"measure": "received", "fy_a": "2023-24", "fy_b": "2024-25"})
+    assert cp["value_a"] == 100 and cp["value_b"] == 120, cp
+
+    bp = query_dataset(f, "by_portfolio", {"measure": "received"})
+    assert bp["portfolios"] == [{"portfolio": "Attorney-General's", "value": 220}], bp
+
+    # top_contributors delegates to filter_agencies, so it is covered too
+    tc = query_dataset(f, "top_contributors", {"measure": "received"})
+    assert [t["agency"] for t in tc["top"]] == ["Agency A"], tc
+
+
+def test_dsl_agency_predicate_is_single_sourced():
+    # F: six ops open-coded `agency_name.lower() != "total"`. One definition —
+    # stats.catalog.is_reporting_agency — or they drift again.
+    import ast
+    from pathlib import Path
+    # the CODE, comments stripped — the module comment quotes the predicate it
+    # replaced, which is the record of what went wrong
+    code = ast.unparse(ast.parse(
+        Path("src/stats/dsl.py").read_text(encoding="utf-8")))
+    applied = code.count("is_reporting_agency(f['agency_name'])")
+    assert applied == 6, \
+        f"{applied} of the 6 per-agency ops apply the shared predicate"
+    assert "!= 'total'" not in code, "an open-coded half-predicate is back"
+    assert ".startswith('x')" not in code, "an open-coded half-predicate is back"
