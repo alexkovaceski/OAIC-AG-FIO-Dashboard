@@ -219,6 +219,33 @@ live; internal-site tour (chat → reports → risk) with the named
 accounts. Folds in the earlier drafted summary email (Alexia's asks).
 Written in Alex's voice.
 
+**S3.5 Data provenance library (added 2026-08-26, Alex-approved).** A
+layered provenance capability exposed on three surfaces:
+
+- **Registry:** `data/corpus/provenance/` — three curated OKF-style
+  markdown files (`sources.md`: dataset page URL, all seven workbook
+  resources with direct URLs and as-ingested content hashes, the OAIC
+  dashboard URL behind the golden figures, update cadence;
+  `derivations.md`: sheets read, measure/bucket/portfolio extraction,
+  normaliser version; `decisions.md`: courts distinct-by-design, rename
+  policy, trend window, applicant-vs-total basis, golden transcription,
+  post-2018-19 quarterly gap). Parsed at boot by `src/provenance.py`
+  into a structured registry; missing or malformed files fail boot loud
+  (stale provenance is worse than none).
+- **Live layer:** answers about a specific figure add the current
+  `foi_datasets` snapshot (period, canonical hash, fact count,
+  normaliser version, source files) and that figure's `source_rows` +
+  `rows_hash` from the catalog — the same values replay_verify checks.
+- **Surfaces:** a `provenance` DSL op (optional figure/stat key param)
+  returning the layered payload; chat routing that recognises
+  provenance intent while preserving scope-refusal behaviour; read-only
+  rate-limited `GET /api/provenance`; public `provenance.html` in the
+  Reference nav group linking each dashboard's lineage page.
+
+Nothing is invented at answer time: answers compose curated registry
+text and measured lineage values that exist before the question is
+asked.
+
 ## Non-goals
 
 - Pre-2019 quarterly CSVs (A6's optional extension): deferred — they
