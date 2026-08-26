@@ -176,7 +176,9 @@ def test_foi_charts_js_smoke():
     # Task 4: wireFilters must read the selects and re-filter the facts — the
     # change binding and the honest no-derive fallback must be present
     assert "addEventListener(\"change\"" in js, "wireFilters must bind change handlers"
-    assert "__pageData.facts" in js, "wireFilters must filter the canonical facts"
+    assert "window.__pageData" in js, "engine must read window.__pageData"
+    assert re.search(r"\bdata\.facts\b", js), \
+        "engine must re-derive figures from the canonical facts slice"
 
 
 def test_chat_js_smoke():
@@ -473,3 +475,20 @@ def test_reference_pages_have_no_filter_bar():
     pages = _pages()
     for key in ("data-notes", "how-to-use", "api"):
         assert 'class="filters' not in pages[key]
+
+
+def test_chart_pages_ship_specs_for_their_figures():
+    pages = _pages()
+    for key in CHART_PAGES:
+        m = re.search(r"window\.__pageData = (.*?);</script>", pages[key], re.S)
+        blob = json.loads(m.group(1))
+        for fig_key in blob["figures"]:
+            assert fig_key in blob["specs"], f"{key}: {fig_key} unspecced"
+
+
+def test_foi_charts_js_has_no_hardcoded_fy_or_measure_maps():
+    from pathlib import Path
+    src = Path("src/site/assets/foi-charts.js").read_text(encoding="utf-8")
+    assert "2024-25" not in src, "top-N year must come from the spec"
+    assert "TREND_MEASURES" not in src and "TOP_N" not in src, \
+        "legacy hardcoded maps must be gone"

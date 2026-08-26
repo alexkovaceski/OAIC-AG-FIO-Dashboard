@@ -211,6 +211,9 @@ h1 {
 .kpi .source, .figure-card .source {
   display: block; font-size: 0.72rem; color: var(--muted); margin-top: 2px;
 }
+.fignote {
+  font-size: 0.78rem; color: var(--muted); margin: 6px 0 0;
+}
 
 /* --- figure cards ---------------------------------------------------------- */
 
