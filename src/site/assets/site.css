@@ -219,6 +219,11 @@ h1 {
 .fignote {
   font-size: 0.78rem; color: var(--ink-2); margin: 6px 0 0;
 }
+/* Each chart card ships an EMPTY .fignote (pages.py _chart_container) so the
+   engine writes into a live region that already exists — a note created fresh
+   on each render is a new node, and a screen reader announces nothing when the
+   caveat under a chart changes. Empty, it must occupy no space. */
+.fignote:empty { display: none; }
 
 /* --- movers tables (the FY-pair change analysis beside each change chart) --- */
 

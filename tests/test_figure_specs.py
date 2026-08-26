@@ -12,7 +12,7 @@ from storage.frame import Frame
 from stats import catalog
 from stats.catalog import (FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY,
                            MOVERS_MIN_DENOMINATOR, STAT_KEYS, foi_stats,
-                           hash_rows, _fy_series_source_rows,
+                           hash_rows, partial_fys, _fy_series_source_rows,
                            _movers_source_rows, _previous_complete_fy)
 
 
@@ -30,6 +30,33 @@ def test_latest_complete_fy_is_single_sourced():
     # the only "2024-25" literal in catalog.py is the constant's own definition
     assert src.count('"2024-25"') == 1, \
         "top-N years must reference LATEST_COMPLETE_FY, not literals"
+
+
+def test_partial_fys_are_derived_not_listed():
+    # C1: the FY filter re-ranks a top-N for ANY published year, including
+    # 2025-26 — whose annual file is a Q1-Q3 cumulative partial. Every
+    # disclosure the pages and the chart engine make about that comes from
+    # here, and it must be derived from LATEST_COMPLETE_FY rather than named,
+    # or the site carries two year literals that can drift apart.
+    frame = Frame(normalise_all())
+    annual = sorted({f["fy"] for f in frame.facts if f["quarter"] is None})
+    assert partial_fys(frame) == ["2025-26"], partial_fys(frame)
+    assert all(fy > LATEST_COMPLETE_FY for fy in partial_fys(frame))
+    assert LATEST_COMPLETE_FY in annual and LATEST_COMPLETE_FY not in partial_fys(frame)
+
+    row = {"agency_key": "a", "agency_name": "Agency A", "quarter": None,
+           "measure_group": "requests", "measure": "received", "bucket": "total",
+           "value": 10.0, "derived": False, "portfolio": ""}
+    # a frame that ends at the latest complete year has no part year at all
+    complete_only = Frame([dict(row, fy=LATEST_COMPLETE_FY)])
+    assert partial_fys(complete_only) == []
+    # and the next annual file to land is a part year until the constant moves
+    with_next = Frame([dict(row, fy=LATEST_COMPLETE_FY), dict(row, fy="2999-00")])
+    assert partial_fys(with_next) == ["2999-00"]
+    # a quarter-carrying row is a separate basis and never makes an FY partial
+    quarters = Frame([dict(row, fy=LATEST_COMPLETE_FY),
+                      dict(row, fy="2999-00", quarter=1)])
+    assert partial_fys(quarters) == []
 
 
 def test_generic_figure_reproduces_legacy_outputs():

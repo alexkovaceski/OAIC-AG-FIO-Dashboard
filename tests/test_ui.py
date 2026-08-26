@@ -399,10 +399,9 @@ def test_single_quarter_kpis_carry_transcription_source():
 
 def test_fy_figure_cards_name_their_source():
     pages = _pages()
-    assert "agency-foi-data-2024-25.xlsx" in pages["key-agency-contributions-received"]
-    assert "data.gov.au FOI statistics workbooks" in pages["requests-received"]
-    assert "data.gov.au FOI statistics workbooks" in pages["requests-decided"]
-    assert "data.gov.au FOI statistics workbooks" in pages["timeliness"]
+    for key in ("key-agency-contributions-received", "requests-received",
+                "requests-decided", "timeliness"):
+        assert "data.gov.au FOI statistics workbooks" in pages[key], key
 
 
 def test_pilot_seed_script_shape():
@@ -663,14 +662,21 @@ def test_top_n_note_discloses_an_ignored_fy_selection():
     js = _charts_js()
     assert "selection is not applied here" in js, \
         "an ignored FY selection must be disclosed"
-    # and the disclosure must describe the series that is actually drawn:
-    # trendSeries takes its categories from the FILTERED rows, so a small agency
-    # spans fewer years than the frame (measured: "Aboriginal Benefit Account
-    # Advisory Committee" renders 4 categories in a 7-FY frame). "every
-    # published year" over-claimed.
-    assert "the trend covers every year this agency has published" in js
-    assert "the trend covers every published year" not in js, \
-        "the note claims a span the one-agency trend does not have"
+    # and the disclosure must describe the series that is actually drawn. It
+    # used to read "every year this agency has published data for", because
+    # trendSeries built its categories from the FILTERED rows and a small agency
+    # therefore spanned fewer years than the frame — "Aboriginal Benefit Account
+    # Advisory Committee" rendered a 4-category axis in a 7-FY frame, and the
+    # wording was accurate about a chart that was itself wrong. The category
+    # contract (final fix wave, 2026-08-26) made the axis the full published one
+    # with a gap where the agency has no row, so the note now claims the whole
+    # span — correctly — and names the gap. Measured after: the same agency
+    # renders 7 categories, values [0,0,0,0,null,null,null].
+    assert "the trend spans every published financial year" in js
+    assert "drawn as a gap" in js, \
+        "an axis with holes must say what the holes are"
+    assert "covers every year this agency has published" not in js, \
+        "the note under-claims the span the trend now draws"
 
 
 def test_dim_filter_docstring_matches_its_call_sites():
@@ -992,3 +998,230 @@ def test_round_to_does_not_scale_by_ten_before_testing_for_a_tie():
     # 2,170 operand pairs reachable on today's frame sit exactly on such a tie
     assert "down % 2 === 0 ? down : down + 1" in body, \
         "an exact tie must still round half to even"
+
+
+# --- final fix wave (whole-branch review 2026-08-26) --------------------------
+# C1 (part-year honesty), I2 (category axis), I4 (baseline), I5 (a11y),
+# I6 (render-failure recovery). The JS behaviours are pinned from the source
+# text — there is no JS harness in this project by design — and every claim
+# these guard was measured against the real frame before the fix.
+
+def _chart_page_data(page_key):
+    """The window.__pageData blob for one page, decoded."""
+    html = _pages()[page_key]
+    m = re.search(r"window\.__pageData\s*=\s*(\{.*?\});", html, re.S)
+    assert m, f"{page_key}: no __pageData"
+    return json.loads(m.group(1).replace("<\\/", "</")
+                      .replace("\\u002d\\u002d", "--"))
+
+
+def test_page_data_ships_the_part_year_disclosure():
+    # C1: selecting FY2025-26 re-ranks a top-N from the Q1-Q3 CUMULATIVE file —
+    # nine months of activity — under a card that said "basis: financial year",
+    # which How to use defines as a COMPLETE July-June year. The engine cannot
+    # name the year itself (it carries no year literals), so the server ships
+    # the derived set and the prose with it.
+    from stats.catalog import LATEST_COMPLETE_FY
+    for page_key in ("key-agency-contributions-received",
+                     "key-agency-contributions-decided",
+                     "requests-received", "change-timeliness"):
+        blob = _chart_page_data(page_key)
+        partial = blob["partial_fys"]
+        assert list(partial) == ["2025-26"], f"{page_key}: {list(partial)}"
+        entry = partial["2025-26"]
+        assert set(entry) == {"basis", "note", "axis_note"}, entry
+        assert entry["basis"] != "basis: financial year", \
+            "a part year must not be published under the complete-year label"
+        assert "part financial year" in entry["basis"]
+        assert "Q1–Q3 cumulative" in entry["basis"]
+        # the note names the year and says what the file actually covers
+        assert "2025-26" in entry["note"] and "July" in entry["note"]
+        assert "not a complete financial year" in entry["note"]
+        assert "not comparable" in entry["note"]
+        # and the axis note explains the rescale rather than leaving the reader
+        # to compare nine months against a full-year interval
+        assert "rescaled" in entry["axis_note"]
+        assert LATEST_COMPLETE_FY not in partial, \
+            "the latest COMPLETE year must never be flagged as partial"
+
+
+def test_top_n_pages_assert_no_year_the_fy_filter_can_change():
+    # C1: both Key agency contributions pages sat under a live FY filter while
+    # the intro said "in FY2024-25" and the caption named a single workbook
+    # ("agency-foi-data-2024-25.xlsx"). One click on the FY select made both
+    # false. They now describe the DEFAULT view and point at the note, and the
+    # caption names the workbook family every FY selection draws from.
+    pages = _pages()
+    for key in ("key-agency-contributions-received",
+                "key-agency-contributions-decided"):
+        page = pages[key]
+        assert "agency-foi-data-2024-25.xlsx" not in page, \
+            f"{key}: the caption names one year's file under an FY filter"
+        assert "data.gov.au FOI statistics workbooks" in page, key
+        intro = re.search(r'<p class="intro">(.*?)</p>', page, re.S).group(1)
+        assert "This page opens" in intro, f"{key}: intro asserts a fixed year"
+        assert "FY filter re-ranks" in intro, key
+        assert "note under the chart" in intro, key
+
+
+def test_how_to_use_defines_the_part_year_basis():
+    # C1: the basis vocabulary is defined in one place and a label the charts
+    # can emit must be defined there too — otherwise "basis: part financial
+    # year" appears on a card with nothing telling the reader what it means.
+    from site.pages import PARTIAL_FY_BASIS
+    page = _pages()["how-to-use"]
+    assert "a figure for a complete" in page, \
+        "the complete-financial-year definition is the one this contrasts with"
+    assert PARTIAL_FY_BASIS in page, "the part-year label is undefined"
+    assert "have not yet published in full" in page
+    assert "FY2025-26" in page, "the definition must name the part year in force"
+
+
+def test_chart_cards_ship_a_persistent_live_note():
+    # I5: .fignote carries every honesty caveat the engine emits, and the
+    # engine used to CREATE and REMOVE the element per render. A brand-new node
+    # is not a live-region update, so a filter selection silently swapped the
+    # sentence under the chart. The container is server-rendered, empty, and
+    # announced — the same pattern the chat log and the report output use.
+    from site.pages import PAGE_FIGURE_KEYS
+    pages = _pages()
+    boxes = 0
+    for page_key, figs in PAGE_FIGURE_KEYS.items():
+        for fig_key in figs:
+            boxes += 1
+            page = pages[page_key]
+            note = (f'<p class="fignote" id="fignote-{fig_key}" '
+                    f'aria-live="polite"></p>')
+            assert note in page, \
+                f"{page_key}/{fig_key}: no persistent live note for this figure"
+            # and it sits AFTER the box it describes
+            assert page.index(note) > page.index(f'data-figure="{fig_key}"'), \
+                f"{page_key}/{fig_key}: the note precedes its chartbox"
+    assert boxes == 11, f"chartbox count moved ({boxes}) — retarget this guard"
+    css = _site_css()
+    assert re.search(r"\.fignote:empty\s*\{[^}]*display:\s*none", css), \
+        "an empty note must occupy no space"
+
+
+def test_chart_engine_qualifies_a_part_year_selection():
+    # C1, client half: the ranking, the basis line and the axis all have to
+    # agree that a part year is a part year. Measured on the real frame before
+    # the fix: FY2025-26 on received_top20 drew its 12,264 leader against the
+    # FY2024-25 pin of 17,120 — 71.6% of the axis — under "basis: financial
+    # year", which reads as a collapse in FOI activity that did not happen.
+    js = _charts_js()
+    assert "partial_fys" in js, "the engine must read the derived part-year set"
+    assert "function partialFy(" in js and "function setBasis(" in js
+    assert "partial.basis" in js, "the basis label must vary for a part year"
+    assert "partial.note" in js and "partial.axis_note" in js
+    assert re.search(r"else if \(partial\) pin = own", js), \
+        "a part-year selection must rescale to its own maximum, not the pin"
+    assert "out.fyIgnored" in js, \
+        "the one-agency view ignores the FY filter and must not claim a part year"
+    # the prose lives on the server; the engine still names no year
+    assert "2025-26" not in js
+
+
+def test_chart_engine_takes_its_categories_from_the_unfiltered_figure():
+    # I2: trendSeries built the category axis from the FILTERED rows, so a year
+    # the selection had no row for vanished instead of becoming a gap — and
+    # with smooth:true the remaining points rendered evenly spaced and joined,
+    # asserting a continuity the data does not carry. Measured 2026-08-26: 230
+    # of the 433 agencies with annual rows do not span all seven FYs, and
+    # "Aboriginal Benefit Account Advisory Committee" drew a 4-category axis in
+    # a 7-FY frame.
+    js = _charts_js()
+    assert "function fyAxis(" in js and "function trendCats(" in js
+    assert re.search(r"function trendSeries\(facts, measure, bucket, cats\)", js), \
+        "the categories must be an INPUT to trendSeries, not an output"
+    assert "cats.indexOf(row.fy) === -1" not in js, \
+        "the axis is being rebuilt from the filtered rows again"
+    assert "fig.value.categories.slice()" in js, \
+        "a trend's axis must come from the unfiltered figure"
+    # the server's own promise this mirrors
+    from site import pages as pages_mod
+    assert re.search(r"missing year renders as '—',\s+never '0'", pages_mod.__doc__), \
+        "the server-side contract this client fix mirrors has moved"
+
+
+def test_chart_engine_computes_the_baseline_whatever_the_filter_state():
+    # I4: baselineMax was assigned only inside the `if (!hasFilters)` branch.
+    # The filter selects carry no autocomplete="off" and nothing resets them, so
+    # a soft reload restores the reader's selections while module state starts
+    # empty. `baselineMax[key] || 0` then collapsed the pin to the selection's
+    # own maximum (measured: FY2022-23 on received_top20 drew against 12,993
+    # instead of the 17,120 baseline, so two selections were no longer
+    # comparable) AND the same falsy value short-circuited the disclaimer, so
+    # "Axis extended past the unfiltered maximum" was suppressed in exactly the
+    # case where the axis was being rescaled (FY2019-20, own max 17,294).
+    js = _charts_js()
+    assert "function ensureBaseline(" in js
+    assert re.search(r"var hasFilters = [^\n]*\n\s*ensureBaseline\(key\);", js), \
+        "the baseline must be computed before the filtered/unfiltered branch"
+    body = re.search(r"if \(!hasFilters\) \{(.*?)\n      \}", js, re.S)
+    assert body and "baselineMax[key] =" not in body.group(1), \
+        "the baseline is assigned inside the unfiltered branch again"
+
+
+def test_chart_engine_names_itself_to_assistive_tech():
+    # I5: ECharts OVERWRITES the aria-label the page sets — with aria.enabled
+    # and no aria.label.description it falls through to its own generated
+    # string, so every chart announced "This is a chart with type bar" instead
+    # of its <h2>. Its generated string also enumerates only
+    # aria.label.data.maxCount points (default 10), half of a top-20, with no
+    # table fallback on the page. Verified against the bundled ECharts 5.6.1.
+    js = _charts_js()
+    assert "function ariaDescription(" in js
+    assert re.search(r"description:\s*ariaDescription\(label, figValue\)", js), \
+        "ECharts must be given the intended label, or it invents one"
+    assert '"no data"' in js, \
+        "a missing year must reach assistive tech as 'no data', not as nothing"
+    # the bundled build is the one this was verified against
+    from pathlib import Path
+    bundle = Path("src/site/assets/echarts.common.min.js").read_text(
+        encoding="utf-8", errors="ignore")
+    assert 'a.get("description")' in bundle, \
+        "the bundled ECharts no longer honours aria.label.description"
+    assert 'setAttribute("role","img")' in bundle, \
+        "the bundled ECharts no longer stamps role=img — recheck noData"
+
+
+def test_no_data_placeholder_is_reachable_by_a_screen_reader():
+    # I5: ECharts stamps role="img" + aria-label on the CONTAINER and dispose()
+    # leaves both behind, so when noData replaced a chart with the honest "No
+    # published aggregate..." text, a screen reader still saw an image with the
+    # old label and never reached the text. The site's central honesty
+    # mechanism was unavailable to exactly the readers least able to work
+    # around it.
+    js = _charts_js()
+    body = re.search(r"function noData\(el, key, text\) \{(.*?)\n  \}", js, re.S)
+    assert body, "noData is gone"
+    body = body.group(1)
+    assert 'el.removeAttribute("role")' in body, "role=img survives dispose"
+    assert 'el.removeAttribute("aria-label")' in body, \
+        "the disposed chart's label would mask the placeholder text"
+    assert 'el.setAttribute("aria-live", "polite")' in body
+    assert re.search(r'aria-live".*?el\.innerHTML', body, re.S), \
+        "the live region must exist before the text lands"
+    # and a mounted chart must not stay a live region, or every filter change
+    # announces the whole enumerated series again
+    mount = re.search(r"function mountChart\(el, key, figValue, opts\) \{(.*?)\n  \}",
+                      js, re.S)
+    assert 'el.removeAttribute("aria-live")' in mount.group(1)
+
+
+def test_chart_engine_recovers_from_a_render_failure():
+    # I6: setNote runs AFTER mountChart, which has already cleared innerHTML. A
+    # throw inside setOption left the PREVIOUS render's caveat ("Ranked from
+    # the 303 agencies with published FY 2024-25 data for this measure") over
+    # an empty box, describing a chart that is no longer there.
+    js = _charts_js()
+    catch = re.search(r"\} catch \(err\) \{(.*?)\n    \}", js, re.S)
+    assert catch, "the render guard is gone"
+    catch = catch.group(1)
+    assert "noData(el, key, RENDER_FAILED_TEXT)" in catch, \
+        "a failed render must clear the stale note and say what happened"
+    assert "RENDER_FAILED_TEXT" in js and "could not be drawn" in js
+    # and it must NOT claim the publisher does not report the measure
+    assert "noData(el, key, NO_DATA_TEXT)" not in catch, \
+        "a render failure is not a data-availability claim"

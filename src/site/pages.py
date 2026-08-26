@@ -17,7 +17,9 @@ import re
 from pathlib import Path
 
 from stats.catalog import (foi_stats, FIG_CAPTIONS, FIGURE_SPECS,
-                           is_reporting_agency)
+                           is_reporting_agency, partial_fys,
+                           LATEST_COMPLETE_FY, PARTIAL_FY_COVERAGE,
+                           PARTIAL_FY_MONTHS)
 from site.templates import chrome, _asset_link
 
 _CORPUS = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
@@ -31,6 +33,14 @@ _CHART_SCRIPTS = (_asset_link("echarts.common.min.js") + "\n"
 GOLDEN_SOURCE = ("Transcribed from the OAIC Power BI report, Q1 2025-26 "
                  "(Jul–Sep 2025); not derivable from the cumulative "
                  "Q1–Q3 workbook.")
+
+# provenance caption for every FY figure: the whole annual workbook family, not
+# one year's file. It was pasted at nine call sites and the two top-N pages
+# named a SINGLE file instead ("agency-foi-data-2024-25.xlsx") — true of the
+# default ranking and false the moment the FY filter selects another year, which
+# the same chart supports. One definition, every FY card.
+_WORKBOOK_SOURCE = ("Source: data.gov.au FOI statistics workbooks, "
+                    "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")
 
 # page_key -> the figure keys that page's chartboxes reference (the keys the
 # page's window.__pageData blob ships). Pages without charts ship no figures.
@@ -74,6 +84,45 @@ _BASIS_LABEL = {
     "fy": "basis: financial year",
 }
 
+# The basis label a PART financial year is allowed to carry. "basis: financial
+# year" is defined on the How to use page as "a figure for a COMPLETE financial
+# year (July-June)", so it may not ride beside a figure drawn from a part-year
+# file. This label is display-only: it never enters foi_stats, whose `basis`
+# stays one of config.WINDOW_MODES.
+PARTIAL_FY_BASIS = f"basis: part financial year ({PARTIAL_FY_COVERAGE})"
+
+
+def _partial_fy_blob(frame) -> dict:
+    """Per-FY disclosure for every financial year this frame publishes without
+    a complete July-June file. Shipped in window.__pageData so the chart engine
+    can say which year it is drawing and under what basis, WITHOUT naming a year
+    in JavaScript: stats.catalog.partial_fys derives the set from
+    LATEST_COMPLETE_FY, and the prose lives here where it is escaped once and
+    testable from the server side.
+
+    Three strings per year, because the engine needs them in three places:
+      basis     — replaces the figure card's "basis: financial year" line
+      note      — the .fignote sentence that says what the year actually covers
+      axis_note — why the axis was rescaled instead of being pinned to the
+                  full-year baseline (see the axis contract in foi-charts.js)
+
+    Measured 2026-08-26: returns one entry, 2025-26.
+    """
+    out = {}
+    for fy in partial_fys(frame):
+        out[fy] = {
+            "basis": PARTIAL_FY_BASIS,
+            "note": (f"FY {fy} is not a complete financial year: the published "
+                     f"file covers {PARTIAL_FY_COVERAGE} ({PARTIAL_FY_MONTHS}), "
+                     f"not the full July–June year. These are part-year totals "
+                     f"and are not comparable with a full-year figure."),
+            "axis_note": ("Axis rescaled to this part-year selection: a part "
+                          "year drawn against the full-year axis reads as a "
+                          "fall in FOI activity that the data does not show."),
+        }
+    return out
+
+
 def _stat(frame, key):
     """foi_stats with a guarded accessor — a missing key is a programming error
     (the model can only cite catalog keys), not a silently missing figure."""
@@ -107,7 +156,17 @@ def _chart_container(chart_key, fig) -> str:
     initialised. The JS toggle still runs: classList.add on a class the server
     already wrote is a no-op, and the JS still REMOVES it when the same box
     falls back to a one-agency trend or an honest placeholder — which is why a
-    figure with no data keeps the plain box here too."""
+    figure with no data keeps the plain box here too.
+
+    The empty `.fignote` after the box is a PERSISTENT live region, not a
+    placeholder: foi-charts.js writes every honesty caveat it emits into this
+    element (the ranking pool, the part-year disclosure, the axis
+    disclaimers). Created and destroyed per render — which is what the engine
+    used to do — the note is a new node each time and a screen reader announces
+    nothing, so a filter selection silently changed the caveat under the chart.
+    A container that exists before the text lands is the same pattern the chat
+    log and the report output already use (role/aria-live on a server-rendered
+    div). It renders as nothing while empty: site.css hides `.fignote:empty`."""
     inner = ""
     has_data = _figure_has_data(fig)
     if not has_data:
@@ -117,7 +176,8 @@ def _chart_container(chart_key, fig) -> str:
     is_top_n = FIGURE_SPECS.get(chart_key, {}).get("kind") == "top_n"
     css_class = "chartbox topn" if (is_top_n and has_data) else "chartbox"
     return (f'<div class="{css_class}" id="chart-{chart_key}" '
-            f'data-figure="{chart_key}">{inner}</div>')
+            f'data-figure="{chart_key}">{inner}</div>'
+            f'<p class="fignote" id="fignote-{chart_key}" aria-live="polite"></p>')
 
 
 def _figure_has_data(fig) -> bool:
@@ -203,8 +263,10 @@ def _page_data_script(frame, page_key) -> str:
     long-form facts scoped to the measures those specs consume, and the
     platform-derived filter options (GLOBAL — derived from the full frame, so
     the dropdowns always list every agency/portfolio/type/FY regardless of
-    which measures the page ships). PURE frame -> JSON — no fabricated
-    figures, no new aggregates. The live filters select/re-group
+    which measures the page ships), and the part-year disclosure for every FY
+    the source files do not publish in full (_partial_fy_blob — derived from
+    the frame, so the client never carries a year literal). PURE frame -> JSON
+    — no fabricated figures, no new aggregates. The live filters select/re-group
     window.__pageData.facts only; they never sum into a total the platform did
     not derive.
 
@@ -219,7 +281,8 @@ def _page_data_script(frame, page_key) -> str:
     measures = _page_spec_measures(page_key)
     facts = [f for f in frame.facts if f["measure"] in measures]
     blob = {"figures": figures, "specs": specs, "facts": facts,
-            "filters": _filters_blob(frame)}
+            "filters": _filters_blob(frame),
+            "partial_fys": _partial_fy_blob(frame)}
     safe = (json.dumps(blob).replace("</", "<\\/")
             .replace("--", "\\u002d\\u002d"))
     return f"<script>window.__pageData = {safe};</script>"
@@ -519,8 +582,7 @@ def _page_at_a_glance(frame) -> str:
     {_trend_section("Requests received, FY trend",
                     g('requests_received_trend')['value'],
                     "requests_received_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("at-a-glance")}
     {_page_data_script(frame, "at-a-glance")}"""
     return chrome("FOI at a glance", body,
@@ -537,13 +599,11 @@ def _page_requests_received(frame) -> str:
     {_kpis(frame, ["requests_received_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_received_trend"], fig,
                     "requests_received_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_trend_section(FIG_CAPTIONS["received_channel_trend"],
                     _stat(frame, "received_channel_trend")["value"],
                     "received_channel_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("requests-received")}
     {_page_data_script(frame, "requests-received")}"""
     return chrome("Requests received", body,
@@ -554,11 +614,14 @@ def _page_key_agency_contributions_received(frame) -> str:
     fig = _stat(frame, "received_top20")["value"]
     body = f"""
     <h1>Key agency contributions — requests received</h1>
-    <p class="intro">Top 20 agencies by FOI requests received in FY2024-25
-    (the latest complete financial year in the annual files).</p>
+    <p class="intro">Top 20 agencies by FOI requests received. This page opens
+    on FY{LATEST_COMPLETE_FY}, the latest complete financial year in the annual
+    files; the FY filter re-ranks the chart for any published year, and the
+    note under the chart always names the year it ranked and what that year's
+    file covers.</p>
     {_filters_bar(frame, "key-agency-contributions-received")}
     {_top20_section(FIG_CAPTIONS["received_top20"], fig, "received_top20",
-                    source="Source: agency-foi-data-2024-25.xlsx")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("key-agency-contributions-received")}
     {_page_data_script(frame, "key-agency-contributions-received")}"""
     return chrome("Key agency contributions — requests received",
@@ -577,8 +640,7 @@ def _page_requests_finalised(frame) -> str:
     {_kpis(frame, ["requests_finalised_q1"])}
     {_trend_section(FIG_CAPTIONS["requests_finalised_trend"], fig,
                     "requests_finalised_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("requests-finalised")}
     {_page_data_script(frame, "requests-finalised")}"""
     return chrome("Requests finalised", body,
@@ -595,8 +657,7 @@ def _page_requests_decided(frame) -> str:
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("requests-decided")}
     {_page_data_script(frame, "requests-decided")}"""
     return chrome("Requests decided", body,
@@ -607,11 +668,14 @@ def _page_key_agency_contributions_decided(frame) -> str:
     fig = _stat(frame, "decided_top20")["value"]
     body = f"""
     <h1>Key agency contributions — requests decided</h1>
-    <p class="intro">Top 20 agencies by FOI requests decided in the latest
-    complete financial year in the annual files.</p>
+    <p class="intro">Top 20 agencies by FOI requests decided. This page opens
+    on FY{LATEST_COMPLETE_FY}, the latest complete financial year in the annual
+    files; the FY filter re-ranks the chart for any published year, and the
+    note under the chart always names the year it ranked and what that year's
+    file covers.</p>
     {_filters_bar(frame, "key-agency-contributions-decided")}
     {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20",
-                    source="Source: agency-foi-data-2024-25.xlsx")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("key-agency-contributions-decided")}
     {_page_data_script(frame, "key-agency-contributions-decided")}"""
     return chrome("Key agency contributions — requests decided",
@@ -631,8 +695,7 @@ def _page_decision_outcomes(frame) -> str:
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
                     "decision_outcomes_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("decision-outcomes")}
     {_page_data_script(frame, "decision-outcomes")}"""
     return chrome("Decision outcomes", body,
@@ -651,8 +714,7 @@ def _page_change_decision_outcomes(frame) -> str:
     {_filters_bar(frame, "change-decision-outcomes")}
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
                     "granted_full_part_change",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_movers_or_note(frame, "Refusal-rate movers", "refusal_rate_movers")}
     {_lineage_panel("change-decision-outcomes")}
     {_page_data_script(frame, "change-decision-outcomes")}"""
@@ -671,8 +733,7 @@ def _page_timeliness(frame) -> str:
     {_filters_bar(frame, "timeliness")}
     {_kpis(frame, ["within_statutory_pct_q1"])}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_lineage_panel("timeliness")}
     {_page_data_script(frame, "timeliness")}"""
     return chrome("Timeliness", body,
@@ -691,8 +752,7 @@ def _page_change_timeliness(frame) -> str:
     it.</p>
     {_filters_bar(frame, "change-timeliness")}
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
-                    source="Source: data.gov.au FOI statistics workbooks, "
-                           "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}
+                    source=_WORKBOOK_SOURCE)}
     {_movers_or_note(frame, "Timeliness movers", "timeliness_movers")}
     {_lineage_panel("change-timeliness")}
     {_page_data_script(frame, "change-timeliness")}"""
@@ -742,8 +802,16 @@ def _page_data_notes() -> str:
                   page_key="data-notes")
 
 
-def _page_how_to_use() -> str:
-    body = """
+def _page_how_to_use(frame) -> str:
+    # the part-year years are derived from the frame (stats.catalog.partial_fys),
+    # so this definition can never name a year the snapshot has since completed
+    partial = ", ".join(f"FY{fy}" for fy in partial_fys(frame))
+    partial_clause = (f"In the current snapshot that is {partial}, published as "
+                      f"{PARTIAL_FY_COVERAGE} ({PARTIAL_FY_MONTHS})."
+                      if partial else
+                      "The current snapshot publishes every financial year in "
+                      "full.")
+    body = f"""
     <h1>How to use</h1>
     <p class="intro">The 12 Bluebird FOI Insights pages are built from the source data
     published on data.gov.au (FOI statistics). Every figure is computed
@@ -757,6 +825,12 @@ def _page_how_to_use() -> str:
       quarter window (e.g. Q1-Q3 within a financial year).</li>
       <li><strong>basis: financial year</strong> — a figure for a complete
       financial year (July-June).</li>
+      <li><strong>{html.escape(PARTIAL_FY_BASIS)}</strong> — a figure for a
+      financial year the source files have not yet published in full.
+      {html.escape(partial_clause)} A part-year total is not comparable with a
+      full year, and a chart drawn for one says so in the note beneath it and
+      rescales its axis rather than drawing part of a year against a full
+      year's scale.</li>
     </ul>
     <h2>Missing data is shown, not invented</h2>
     <p>Where the source files do not publish a measure (for example, the
@@ -766,10 +840,13 @@ def _page_how_to_use() -> str:
     on-transfer request channel is published, ingested as its own measure and
     charted on the Requests received page.</p>
     <h2>Filters</h2>
-    <p>The filters row (agency &middot; type (personal/other) &middot; FY) is
-    live on the chart pages: selections re-derive the charts from the
-    platform's own published facts. Where a selection has no published
-    aggregate, the page says so instead of inventing one.</p>
+    <p>The filters row (agency &middot; portfolio &middot; type
+    (personal/other) &middot; FY) is live on the chart pages: selections
+    re-derive the charts from the platform's own published facts. Where a
+    selection has no published aggregate, the page says so instead of inventing
+    one. Selecting a financial year re-ranks the agency charts for that year and
+    the note beneath the chart names the year it ranked; if that year is a part
+    year, the basis label beside the chart changes with it.</p>
     <h2>Data notes</h2>
     <p>The <a href="/data-notes.html">Data notes and disclaimer</a> page carries
     the publisher's definitional notes verbatim.</p>
@@ -899,7 +976,7 @@ def render_all_pages(frame) -> dict[str, str]:
         "timeliness": _page_timeliness(frame),
         "change-timeliness": _page_change_timeliness(frame),
         "data-notes": _page_data_notes(),
-        "how-to-use": _page_how_to_use(),
+        "how-to-use": _page_how_to_use(frame),
         "api": _page_api(),
     }
     return pages

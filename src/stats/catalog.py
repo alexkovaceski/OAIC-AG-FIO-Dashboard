@@ -51,6 +51,39 @@ FIG_CAPTIONS = {
 # the year is written — specs and pages reference the constant.
 LATEST_COMPLETE_FY = "2024-25"
 
+# What a PART-year annual file covers, and what that window means in months.
+# The site is allowed to say "financial year" only about a complete July-June
+# year (site/pages.py defines that label on the How to use page), so a figure
+# drawn for a part year has to say which months it actually covers. Two short
+# strings rather than one because the basis label wants the window and the
+# prose wants the months; nesting them read as "(Q1-Q3 cumulative (July to
+# March))".
+PARTIAL_FY_COVERAGE = "Q1–Q3 cumulative"
+PARTIAL_FY_MONTHS = "July to March"
+
+
+def partial_fys(frame) -> list[str]:
+    """The annual financial years in this frame that are NOT complete years.
+
+    DERIVED, not listed. LATEST_COMPLETE_FY names the latest year whose file
+    covers a whole July-June year, so every annual category AFTER it is by
+    definition a part-year release — no second year literal to fall out of step
+    with the first. FY labels sort lexicographically in chronological order (the
+    property _previous_complete_fy, _figure and _fy_series already rely on), so
+    "later than" is a string comparison.
+
+    Measured 2026-08-26 on the real frame: annual categories 2019-20..2025-26
+    against LATEST_COMPLETE_FY 2024-25 returns exactly ['2025-26'] — the Q1-Q3
+    cumulative workbook, and nothing else.
+
+    Quarter-carrying rows are excluded for the same reason _fy_series excludes
+    them: this is about which ANNUAL files are partial, and the golden Q1 rows
+    are a separate single-quarter basis that never joins an FY series.
+    """
+    return sorted(fy for fy in {f["fy"] for f in frame.facts
+                                if f["quarter"] is None}
+                  if fy > LATEST_COMPLETE_FY)
+
 # Movers floor: an agency needs at least this many denominator events (decided
 # requests) in BOTH compared years before its rate change is ranked. Without a
 # floor the top-10s are pure sampling noise — measured on the real frame
