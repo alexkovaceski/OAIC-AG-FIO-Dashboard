@@ -4,6 +4,8 @@ The generic _figure must reproduce the legacy per-key outputs exactly;
 these tests pin the spec vocabulary and the output-identity property.
 """
 import sys; sys.path.insert(0, "src")
+import json
+
 import pytest
 
 import api
@@ -13,7 +15,7 @@ from stats import catalog
 from stats.catalog import (FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY,
                            MOVERS_MIN_DENOMINATOR, STAT_KEYS, foi_stats,
                            hash_rows, is_reporting_agency, partial_fys,
-                           _fy_series_source_rows,
+                           _figure_source_rows, _fy_series_source_rows,
                            _movers_source_rows, _previous_complete_fy)
 
 
@@ -347,16 +349,6 @@ def test_ratio_trend_with_empty_operand_yields_empty_values():
     assert fig["series"][0]["values"] == []
 
 
-def _spec_measures_of(key):
-    spec = FIGURE_SPECS[key]
-    out = set(spec.get("measures", [])) | set(spec.get("numerators", []))
-    if spec.get("denominator"):
-        out.add(spec["denominator"])
-    if spec.get("measure"):
-        out.add(spec["measure"])
-    return out
-
-
 def test_every_figure_hashes_only_the_rows_its_spec_consumes():
     # The whole-frame hash made all 13 figure keys indistinguishable: replay
     # could not tell requests_received_trend from decided_top20, and an
@@ -369,21 +361,34 @@ def test_every_figure_hashes_only_the_rows_its_spec_consumes():
         assert 0 < stat["source_rows"] < total, \
             f"{key}: source_rows {stat['source_rows']} is not a real subset of {total}"
         hashes.setdefault(stat["rows_hash"], []).append(key)
-    # figures that consume genuinely different rows must hash differently
+    # Figures that consume genuinely different rows must hash differently. The
+    # ONLY collision this permits is a byte-identical spec published under two
+    # keys (received_top20/agency_contributions_received and the decided pair —
+    # same measure, same n, same default FY, different page and caption).
+    #
+    # Comparing MEASURE SETS here instead would permit the regression this test
+    # exists to catch: requests_decided_trend, decided_top20 and
+    # agency_contributions_decided all declare the measure set {decided}, so
+    # dropping the top_n FY narrowing in _figure_source_rows collapses 11
+    # distinct hashes to 9 — a seven-year trend hashing identically to a
+    # one-year top-20 ranking — and a measure-set check still passes.
     collisions = {h: ks for h, ks in hashes.items() if len(ks) > 1}
     for h, keys in collisions.items():
-        measures = {frozenset(_spec_measures_of(k)) for k in keys}
-        assert len(measures) == 1, \
-            f"keys with different measures share hash {h[:12]}: {keys}"
+        specs = {json.dumps(FIGURE_SPECS[k], sort_keys=True) for k in keys}
+        assert len(specs) == 1, \
+            f"keys with different specs share hash {h[:12]}: {keys}"
 
 
 def test_figure_source_rows_are_annual_reporting_rows():
     # same discipline as _movers_source_rows: annual rows only (no golden
-    # single-quarter rows), real reporting agencies only
-    from stats.catalog import _figure_source_rows
+    # single-quarter rows), the total bucket only (both server derivations read
+    # it, so a bucket row entering the basis would hash rows no figure sums),
+    # real reporting agencies only
     frame = Frame(normalise_all())
     for key in FIG_KEYS:
         for f in _figure_source_rows(frame, key):
             assert f["quarter"] is None, f"{key} hashes a quarter-carrying row"
+            assert f["bucket"] == "total", \
+                f"{key} hashes a non-total bucket row: {f['bucket']}"
             assert is_reporting_agency(f["agency_name"]), \
                 f"{key} hashes a non-reporting agency: {f['agency_name']}"

@@ -232,11 +232,15 @@ def _fy_series_source_rows(frame, measures) -> list[dict]:
     row set is the reporting-agency SUBSET of what the series sums. On the
     current frame the two are the same rows — measured 2026-08-26, no annual row
     carries a non-reporting agency name, and the correlation's basis is 4044
-    rows with sha256 65aa3bd3... whether the predicate is applied or not. If an
-    annual "Total" row ever lands, _fy_series would sum it while this basis
-    excluded it; that would be a bug in _fy_series (the top-N path in _figure
-    already excludes it), and the divergence is worth surfacing rather than
-    papering over by hashing rows a per-agency figure would refuse.
+    rows with sha256 65aa3bd3... whether the predicate is applied or not.
+
+    WHICH WAY IT FAILS: silent PASS, not false alarm. If an annual "Total" row
+    ever lands, _fy_series would sum it — moving the computed value — while this
+    basis excluded it, leaving rows_hash unchanged, so replay_verify would tick
+    green over a stat whose value had moved. That would be a bug in _fy_series
+    (the top-N path in _figure already excludes it), and the divergence is worth
+    surfacing rather than papering over by hashing rows a per-agency figure
+    would refuse.
     """
     return [f for f in frame.facts
             if f["quarter"] is None and f["bucket"] == "total"
@@ -397,7 +401,15 @@ def _figure_source_rows(frame, key) -> list[dict]:
     `quarter is None` test, because Frame.filter(quarter=None) means "no
     quarter constraint"), bucket="total" (every spec's server derivation reads
     the total bucket), real reporting agencies only. A top_n additionally
-    narrows to its ranking year.
+    narrows to its ranking year — without that narrowing a seven-year trend and
+    a one-year top-20 over the same measure would hash identically.
+
+    is_reporting_agency is defence-in-depth here, not an active filter: measured
+    2026-08-26, all 8 non-reporting rows in the 54,602-fact frame are the golden
+    "Total" pseudo-agency carrying quarter=1, so `quarter is None` already
+    excludes every one of them and dropping the predicate moves no row. It earns
+    its place by matching what _figure's top_n path applies, so the basis cannot
+    drift from the ranking if an annual "Total" row ever lands.
 
     Same honest caveat as _fy_series_source_rows: the trend kinds route through
     _fy_series, which applies NO agency predicate, so for those this basis is
@@ -406,6 +418,25 @@ def _figure_source_rows(frame, key) -> list[dict]:
     non-reporting agency name, and every figure's basis is byte-identical with
     the predicate applied or removed. The top_n kinds have no such gap; _figure
     applies the identical predicate there.
+
+    SECOND CAVEAT — the category axis is outside this basis, and it fails SILENT
+    PASS. _figure builds `cats` from the annual FY set of the WHOLE frame (any
+    measure, any bucket, any agency), so an FY that no row in this basis carries
+    still adds a category and a trailing None to the figure's series: the value
+    moves while rows_hash does not, and replay_verify ticks green over a changed
+    figure. That is worse than a false alarm — a false alarm is visible.
+    Measured 2026-08-26 by injecting one annual withdrawn row in a new FY
+    2026-27: requests_received_trend gained the category and a trailing None,
+    source_rows stayed 2022 and rows_hash stayed 3b698fc46826.
+
+    It is inert on the real frame because the annual/total/reporting table is
+    complete — all 9 measures x 7 FYs are populated (2,022 rows per measure), so
+    a new annual file enters every figure's basis at once and no FY can exist
+    outside one. It becomes reachable the moment that stops holding: a
+    partial-measure ingest, an FY present only in non-total buckets, or an FY
+    carried only by non-reporting agencies. Fixing it means changing where
+    _figure derives its categories, which is a behaviour change needing its own
+    review — this docstring records the gap rather than closing it quietly.
     """
     spec = FIGURE_SPECS.get(key)
     if spec is None:
