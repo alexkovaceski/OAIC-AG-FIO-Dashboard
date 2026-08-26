@@ -34,7 +34,7 @@ def test_load_artifact_resolves_page_key_not_dataerror():
     cur = _Cursor(key_row=(7,),
                   artifact_row=("static_page", "at-a-glance", None, 1,
                                 "static render", "{}", "static-render", "rendered"))
-    art = _load_artifact("at-a-glance", _Conn(cur))
+    art, resolved_id = _load_artifact("at-a-glance", _Conn(cur))
     id_queries = [q for q, _ in cur.executed if "WHERE id = " in q]
     key_queries = [q for q, _ in cur.executed if "artifact_key" in q]
     assert key_queries, "non-numeric id must be resolved by artifact_key first"
@@ -43,12 +43,14 @@ def test_load_artifact_resolves_page_key_not_dataerror():
             assert all(not (isinstance(p, str) and not p.isdigit())
                        for p in (params or ())), "raw page-key hit the id compare"
     assert art is not None and art["artifact_key"] == "at-a-glance"
+    assert resolved_id == 7
 
 
 def test_load_artifact_unknown_key_degrades_to_none():
     from site.lineage_viewer import _load_artifact
     cur = _Cursor(key_row=None, artifact_row=None)
-    assert _load_artifact("no-such-page", _Conn(cur)) is None
+    art, resolved_id = _load_artifact("no-such-page", _Conn(cur))
+    assert art is None and resolved_id is None
 
 
 def test_boot_seeds_static_lineage():
@@ -58,3 +60,11 @@ def test_boot_seeds_static_lineage():
     assert "_seed_static_lineage" in src
     assert re.search(r"artifact_type=.static_page.", src)
     assert re.search(r"_seed_static_lineage\(conn, frame, _DATASET_ID\)", src)
+
+
+def test_lineage_route_closes_its_connection():
+    src = Path("src/server/app.py").read_text(encoding="utf-8")
+    m = re.search(r'@app\.get\("/lineage/\{artifact_id\}"\)(.*?)@app\.get',
+                  src, re.S)
+    assert m and "finally" in m.group(1) and "conn.close()" in m.group(1), \
+        "/lineage must close its conn like /dashboards does"

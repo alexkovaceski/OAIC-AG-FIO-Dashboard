@@ -697,13 +697,21 @@ def create_app():
         # calls from the horizon lineage tables so the explainability page shows
         # the REAL transcript recorded by build_spec. Best-effort — an unreachable
         # DB degrades to the honest "no live lineage" page (render_lineage_page
-        # handles conn=None), so the page never 500s on a down DB.
+        # handles conn=None), so the page never 500s on a down DB. The conn is
+        # closed in the finally, mirroring /dashboards below.
         conn = None
         try:
-            conn = get_conn()
-        except (RuntimeError, psycopg2.OperationalError):
-            conn = None
-        return HTMLResponse(render_lineage_page(artifact_id, conn))
+            try:
+                conn = get_conn()
+            except (RuntimeError, psycopg2.OperationalError):
+                conn = None
+            return HTMLResponse(render_lineage_page(artifact_id, conn))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     @app.get("/dashboards/{artifact_id}")
     def dashboard(artifact_id: str):

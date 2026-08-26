@@ -46,8 +46,14 @@ def _resolve_key_id(artifact_key, conn):
 
 
 def _load_artifact(artifact_id, conn):
+    """Load the artifact row, resolving a non-numeric page key exactly once.
+
+    Returns (artifact_dict_or_None, resolved_id_or_None) — the resolved
+    numeric id is handed back so callers (render_lineage_page) can reuse it
+    for the ops/tool_calls lookups instead of resolving the key a second time.
+    """
     if conn is None:
-        return None
+        return None, None
     try:
         with conn.cursor() as cur:
             # B1: the static pages link /lineage/<page-key>. A non-numeric id
@@ -58,20 +64,21 @@ def _load_artifact(artifact_id, conn):
                     or (isinstance(artifact_id, str) and artifact_id.isdigit())):
                 artifact_id = _resolve_key_id(artifact_id, conn)
                 if artifact_id is None:
-                    return None
+                    return None, None
             cur.execute(
                 "SELECT artifact_type, artifact_key, user_id, dataset_id, "
                 "request_text, spec_json, model, status "
                 "FROM horizon.lineage_artifacts WHERE id = %s", (int(artifact_id),))
             row = cur.fetchone()
+        resolved_id = artifact_id
         if not row:
-            return None
+            return None, resolved_id
         return {"artifact_type": row[0], "artifact_key": row[1],
                 "user_id": row[2], "dataset_id": row[3],
                 "request_text": row[4], "spec_json": row[5],
-                "model": row[6], "status": row[7]}
+                "model": row[6], "status": row[7]}, resolved_id
     except psycopg2.OperationalError:
-        return None  # fail-open: an unreachable DB must not crash a page
+        return None, None  # fail-open: an unreachable DB must not crash a page
     except psycopg2.Error:
         raise        # fail-loud: a schema/programming error must surface
 
@@ -164,11 +171,20 @@ def render_lineage_page(artifact_id, conn=None, *, data=None) -> str:
 
     Returns the full HTML page.
     """
-    artifact = _s(data, "artifact") or _load_artifact(artifact_id, conn)
-    resolved_id = artifact_id
-    if artifact is not None and not (isinstance(artifact_id, int) or
-                                     (isinstance(artifact_id, str) and str(artifact_id).isdigit())):
-        resolved_id = _resolve_key_id(artifact_id, conn)
+    data_artifact = _s(data, "artifact")
+    if data_artifact is not None:
+        # data path (tests / callers without a DB): _load_artifact is never
+        # called, so the key still needs resolving once here if non-numeric.
+        artifact = data_artifact
+        resolved_id = artifact_id
+        if not (isinstance(artifact_id, int) or
+                (isinstance(artifact_id, str) and str(artifact_id).isdigit())):
+            resolved_id = _resolve_key_id(artifact_id, conn)
+    else:
+        # conn path: _load_artifact resolves a non-numeric key exactly once
+        # internally and hands the resolved numeric id back — no second
+        # _resolve_key_id call needed here.
+        artifact, resolved_id = _load_artifact(artifact_id, conn)
     dataset_id = (artifact or {}).get("dataset_id")
     dataset = _s(data, "dataset") or _load_dataset(dataset_id, conn)
     ops = _s(data, "ops") or (_load_ops(resolved_id, conn) if resolved_id is not None else None)
