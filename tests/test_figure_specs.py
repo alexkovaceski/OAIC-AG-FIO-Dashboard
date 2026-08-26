@@ -12,7 +12,8 @@ from storage.frame import Frame
 from stats import catalog
 from stats.catalog import (FIG_KEYS, FIGURE_SPECS, LATEST_COMPLETE_FY,
                            MOVERS_MIN_DENOMINATOR, STAT_KEYS, foi_stats,
-                           hash_rows, partial_fys, _fy_series_source_rows,
+                           hash_rows, is_reporting_agency, partial_fys,
+                           _fy_series_source_rows,
                            _movers_source_rows, _previous_complete_fy)
 
 
@@ -344,3 +345,45 @@ def test_ratio_trend_with_empty_operand_yields_empty_values():
     # numerator 'refused' has zero rows in this frame
     fig = foi_stats(frame, "refused_pct_trend")["value"]
     assert fig["series"][0]["values"] == []
+
+
+def _spec_measures_of(key):
+    spec = FIGURE_SPECS[key]
+    out = set(spec.get("measures", [])) | set(spec.get("numerators", []))
+    if spec.get("denominator"):
+        out.add(spec["denominator"])
+    if spec.get("measure"):
+        out.add(spec["measure"])
+    return out
+
+
+def test_every_figure_hashes_only_the_rows_its_spec_consumes():
+    # The whole-frame hash made all 13 figure keys indistinguishable: replay
+    # could not tell requests_received_trend from decided_top20, and an
+    # unrelated measure changing false-alarmed every one of them.
+    frame = Frame(normalise_all())
+    total = len(frame.facts)
+    hashes = {}
+    for key in FIG_KEYS:
+        stat = foi_stats(frame, key)
+        assert 0 < stat["source_rows"] < total, \
+            f"{key}: source_rows {stat['source_rows']} is not a real subset of {total}"
+        hashes.setdefault(stat["rows_hash"], []).append(key)
+    # figures that consume genuinely different rows must hash differently
+    collisions = {h: ks for h, ks in hashes.items() if len(ks) > 1}
+    for h, keys in collisions.items():
+        measures = {frozenset(_spec_measures_of(k)) for k in keys}
+        assert len(measures) == 1, \
+            f"keys with different measures share hash {h[:12]}: {keys}"
+
+
+def test_figure_source_rows_are_annual_reporting_rows():
+    # same discipline as _movers_source_rows: annual rows only (no golden
+    # single-quarter rows), real reporting agencies only
+    from stats.catalog import _figure_source_rows
+    frame = Frame(normalise_all())
+    for key in FIG_KEYS:
+        for f in _figure_source_rows(frame, key):
+            assert f["quarter"] is None, f"{key} hashes a quarter-carrying row"
+            assert is_reporting_agency(f["agency_name"]), \
+                f"{key} hashes a non-reporting agency: {f['agency_name']}"

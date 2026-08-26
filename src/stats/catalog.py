@@ -383,6 +383,48 @@ def _movers_stat(frame, num_measure, den_measure,
             "basis": "fy", "source_rows": len(rows), "rows_hash": hash_rows(rows)}
 
 
+def _figure_source_rows(frame, key) -> list[dict]:
+    """The exact fact rows a figure's spec consumes — the hash basis for that
+    figure, mirroring _movers_source_rows.
+
+    Every figure key used to hash `frame.facts` wholesale, so all 13 returned
+    the IDENTICAL rows_hash: replay_verify could not distinguish
+    requests_received_trend from decided_top20, and an unrelated measure
+    changing false-alarmed all thirteen. The spec already declares exactly
+    which measures a figure reads, so the basis derives from it.
+
+    Discipline matches _movers_source_rows: annual rows only (the explicit
+    `quarter is None` test, because Frame.filter(quarter=None) means "no
+    quarter constraint"), bucket="total" (every spec's server derivation reads
+    the total bucket), real reporting agencies only. A top_n additionally
+    narrows to its ranking year.
+
+    Same honest caveat as _fy_series_source_rows: the trend kinds route through
+    _fy_series, which applies NO agency predicate, so for those this basis is
+    the reporting-agency SUBSET of what the series sums. Measured 2026-08-26 on
+    the real frame the two are the same rows — no annual row carries a
+    non-reporting agency name, and every figure's basis is byte-identical with
+    the predicate applied or removed. The top_n kinds have no such gap; _figure
+    applies the identical predicate there.
+    """
+    spec = FIGURE_SPECS.get(key)
+    if spec is None:
+        return []
+    measures = set(spec.get("measures", [])) | set(spec.get("numerators", []))
+    if spec.get("denominator"):
+        measures.add(spec["denominator"])
+    if spec.get("measure"):
+        measures.add(spec["measure"])
+    rows = [f for f in frame.facts
+            if f["quarter"] is None
+            and f["bucket"] == "total"
+            and f["measure"] in measures
+            and is_reporting_agency(f["agency_name"])]
+    if spec["kind"] == "top_n":
+        rows = [f for f in rows if f["fy"] == spec["default_fy"]]
+    return rows
+
+
 def _figure(frame, key):
     """A chartable figure: {categories, series}, computed by interpreting the
     figure's FIGURE_SPECS entry. The FY trends read the annual files
@@ -524,7 +566,7 @@ def foi_stats(frame, key) -> dict:
                 "basis": "fy", "source_rows": len(rows),
                 "rows_hash": hash_rows(rows)}
     if key in FIG_KEYS:
-        rows = frame.facts
+        rows = _figure_source_rows(frame, key)
         return {"value": _figure(frame, key), "basis": "fy", "source_rows": len(rows),
                 "rows_hash": hash_rows(rows)}
     raise KeyError(f"unknown stat key {key!r} — the model cannot cite this")
