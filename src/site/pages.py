@@ -122,26 +122,18 @@ def _filters_blob(frame) -> dict:
     }
 
 
-# pages that carry a live filter bar. The four data pages all compute their
-# figures from the facts, so a live filter can re-select them. The other chart
-# pages (requests-decided / key-agency-contributions-decided / decision-outcomes
-# / change-decision-outcomes / timeliness / change-timeliness) now render real
-# FY series too, but the filter bar is deliberately scoped to these four pages —
-# the rest render without one.
-_FILTER_PAGES = frozenset({
-    "at-a-glance",
-    "requests-received",
-    "key-agency-contributions-received",
-    "requests-finalised",
-})
+# every page with a chartable figure carries the live filter bar; the engine
+# (foi-charts.js) applies each dimension only where the figure kind can honour
+# it and shows the honest note where it cannot (spec S2.2)
+_FILTER_PAGES = frozenset(k for k, figs in PAGE_FIGURE_KEYS.items() if figs)
 
 
 def _filters_bar(frame, page_key) -> str:
-    """The live-filter dropdowns (Agency / Type / FY) for the data pages. The
-    selects carry data-filter="agency|type|fy" so foi-charts.js can read them;
-    class names are static literals so Tailwind's content scan compiles them.
-    Returns "" for pages outside _FILTER_PAGES — the filter bar is scoped to
-    those four pages."""
+    """The live-filter dropdowns (Agency / Portfolio / Type / FY) for every
+    chart page. The selects carry data-filter="agency|portfolio|type|fy" so
+    foi-charts.js can read them; class names are static literals so
+    Tailwind's content scan compiles them. Returns "" for pages outside
+    _FILTER_PAGES — pages with no chartable figure render without one."""
     if page_key not in _FILTER_PAGES:
         return ""
     f = _filters_blob(frame)
@@ -157,6 +149,7 @@ def _filters_bar(frame, page_key) -> str:
                 f'class="filter-select text-sm">{chr(10).join(opts)}</select></label>')
 
     agency = _select("Agency", "agency", f["agencies"], "All agencies")
+    portfolio = _select("Portfolio", "portfolio", f["portfolios"], "All portfolios")
     # personal/other are the drill-down buckets; the platform's total-basis
     # figures are what "All types" (no filter) already shows, so a separate
     # "total" option would duplicate it (B3, decision 2026-08-25).
@@ -164,7 +157,7 @@ def _filters_bar(frame, page_key) -> str:
     typ = _select("Type", "type", type_opts, "All types")
     fy = _select("FY", "fy", f["fys"], "All FYs")
     return (f'<div class="filters flex flex-wrap items-center gap-3" '
-            f'role="group" aria-label="Filter the charts">{agency}{typ}{fy}</div>')
+            f'role="group" aria-label="Filter the charts">{agency}{portfolio}{typ}{fy}</div>')
 
 
 def _page_spec_measures(page_key) -> set:
@@ -416,6 +409,7 @@ def _page_requests_decided(frame) -> str:
     <h1>Requests decided</h1>
     <p class="intro">FOI requests decided by Australian Government agencies and
     ministers, by financial year, alongside the latest published quarter.</p>
+    {_filters_bar(frame, "requests-decided")}
     {_kpis(frame, ["decided_q1"])}
     {_notes_section(FIG_CAPTIONS["requests_decided_trend"], fig,
                     "requests_decided_trend",
@@ -433,6 +427,7 @@ def _page_key_agency_contributions_decided(frame) -> str:
     <h1>Key agency contributions — requests decided</h1>
     <p class="intro">Top 20 agencies by FOI requests decided in the latest
     complete financial year in the annual files.</p>
+    {_filters_bar(frame, "key-agency-contributions-decided")}
     {_top20_section(FIG_CAPTIONS["decided_top20"], fig, "decided_top20",
                     source="Source: agency-foi-data-2024-25.xlsx")}
     {_lineage_panel("key-agency-contributions-decided")}
@@ -449,6 +444,7 @@ def _page_decision_outcomes(frame) -> str:
     <h1>Decision outcomes</h1>
     <p class="intro">Outcomes of decisions on FOI requests: granted in full,
     granted in part, refused, and withdrawn, by financial year.</p>
+    {_filters_bar(frame, "decision-outcomes")}
     {_kpis(frame, ["granted_full_share_q1", "granted_part_share_q1",
                    "refused_share_q1", "withdrawn_q1"])}
     {_notes_section(FIG_CAPTIONS["decision_outcomes_trend"], fig,
@@ -467,6 +463,7 @@ def _page_change_decision_outcomes(frame) -> str:
     <h1>Change in decision outcomes</h1>
     <p class="intro">Change in the percentage of decisions granted in full or
     in part, by financial year.</p>
+    {_filters_bar(frame, "change-decision-outcomes")}
     {_notes_section(FIG_CAPTIONS["granted_full_part_change"], fig,
                     "granted_full_part_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -485,6 +482,7 @@ def _page_timeliness(frame) -> str:
     decisions made within the statutory time period, by financial year. Only
     the within-statutory measure is published in the source files; the
     after-statutory buckets are not ingested.</p>
+    {_filters_bar(frame, "timeliness")}
     {_kpis(frame, ["within_statutory_pct_q1"])}
     {_notes_section(FIG_CAPTIONS["timeliness_trend"], fig, "timeliness_trend",
                     source="Source: data.gov.au FOI statistics workbooks, "
@@ -501,6 +499,7 @@ def _page_change_timeliness(frame) -> str:
     <h1>Change in timeliness</h1>
     <p class="intro">Change in the percentage of decisions within the statutory
     time period, by financial year.</p>
+    {_filters_bar(frame, "change-timeliness")}
     {_notes_section(FIG_CAPTIONS["timeliness_change"], fig, "timeliness_change",
                     source="Source: data.gov.au FOI statistics workbooks, "
                            "FY2019-20 – FY2025-26 (Q1–Q3 cumulative)")}

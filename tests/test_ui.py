@@ -127,25 +127,27 @@ def test_pagedata_ships_facts_for_live_filters():
 
 
 def test_filters_bar_present():
-    # Task 4: the filter bar (agency / type / fy selects) is deliberately scoped
-    # to the 4 data pages in _FILTER_PAGES; the other chart pages render without
-    # one (they now carry real FY series, but the live-filter scope is those 4).
+    # spec S2.2 (Stage 2 Task 3): the filter bar (agency / portfolio / type / fy
+    # selects) ships on every chart page — Task 3 lifted the earlier 4-page
+    # allowlist once _FILTER_PAGES became derived from PAGE_FIGURE_KEYS. Only
+    # the reference pages (no chartable figure) render without one.
     pages = _pages()
     data_pages = ["at-a-glance", "requests-received",
-                  "key-agency-contributions-received", "requests-finalised"]
+                  "key-agency-contributions-received", "requests-finalised",
+                  "requests-decided", "key-agency-contributions-decided",
+                  "decision-outcomes", "change-decision-outcomes",
+                  "timeliness", "change-timeliness"]
     for key in data_pages:
         html = pages[key]
         assert '<div class="filters' in html, \
-            f"{key}: expected a filter bar on a data page"
-        assert html.count("<select") >= 3, \
-            f"{key}: expected agency/type/fy selects"
+            f"{key}: expected a filter bar on a chart page"
+        assert html.count("<select") >= 4, \
+            f"{key}: expected agency/portfolio/type/fy selects"
         # every select carries a data-filter dimension the JS reads
-        for dim in ["agency", "type", "fy"]:
+        for dim in ["agency", "portfolio", "type", "fy"]:
             assert f'data-filter="{dim}"' in html, \
                 f"{key}: missing a data-filter=\"{dim}\" select"
-    pages_without_filters = ["requests-decided", "key-agency-contributions-decided",
-                             "decision-outcomes", "change-decision-outcomes",
-                             "timeliness", "change-timeliness"]
+    pages_without_filters = ["data-notes", "how-to-use", "api"]
     for key in pages_without_filters:
         assert '<div class="filters' not in pages[key], \
             f"{key}: a page outside the filter scope must not render a filter bar"
@@ -448,3 +450,26 @@ def test_filters_blob_exposes_portfolios():
     portfolios = blob["filters"].get("portfolios")
     assert portfolios and len(portfolios) >= 10, portfolios
     assert all(p for p in portfolios)
+
+
+CHART_PAGES = ["at-a-glance", "requests-received",
+               "key-agency-contributions-received", "requests-finalised",
+               "requests-decided", "key-agency-contributions-decided",
+               "decision-outcomes", "change-decision-outcomes",
+               "timeliness", "change-timeliness"]
+
+
+def test_every_chart_page_has_the_filter_bar():
+    # B12/B13/B16 (spec S2.2): filters are page-spec-driven, not an allowlist
+    pages = _pages()
+    for key in CHART_PAGES:
+        page = pages[key]
+        assert 'class="filters' in page, f"{key} has no filter bar"
+        for f in ("agency", "portfolio", "type", "fy"):
+            assert f'data-filter="{f}"' in page, f"{key} missing {f} select"
+
+
+def test_reference_pages_have_no_filter_bar():
+    pages = _pages()
+    for key in ("data-notes", "how-to-use", "api"):
+        assert 'class="filters' not in pages[key]
