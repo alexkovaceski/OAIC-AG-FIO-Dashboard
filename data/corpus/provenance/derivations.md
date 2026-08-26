@@ -53,11 +53,24 @@ The header spelling is not itself stable and cannot be relied on: five workbooks
 label the request-type sub-header P, O and T, while the 2023-24 and 2025-26
 files spell it Personal, Other and Total.
 
-Columns not read from this sheet: the on-hand counts at the start and end of the
-period, and the columns giving each agency's percentage share of all agencies'
-requests. Nothing on the site needs the published share, and importing a rounded
-percentage alongside the counts it is derived from would put two versions of the
-same quantity in the frame.
+Columns not read from this sheet, in full. The on-hand counts at the start of
+the period (columns 1, 2, 3) and at the end of it (columns 19, 20, 21). Columns
+10, 11 and 12, headed "Total requests received". And columns 13, 14 and 15,
+each agency's percentage share of all agencies' requests received.
+
+Columns 10 to 12 are worth naming rather than leaving to a general statement,
+because they are the columns the `applicant-vs-total` decision in `decisions.md`
+turns on. The sheet publishes two totals that both describe requests received:
+"Requests received from applicant" at columns 4 to 6, which is read, and "Total
+requests received" at columns 10 to 12, which is not. The second is the first
+plus requests on transfer. That decision entry says why the applicant figure is
+the one the site reports, and it pins all three numbers against the frame at
+every boot.
+
+The percentage share is left out for a different reason: nothing on the site
+needs the published share, and importing a rounded percentage alongside the
+counts it is derived from would put two versions of the same quantity in the
+frame.
 
 ## Sheet: Action on requests
 
@@ -71,8 +84,10 @@ buckets: personal, other, total
 ```
 
 This sheet is read by header rather than by position. The parser lowercases the
-header row and takes the first column whose header starts with a known phrase,
-then reads the following three columns as personal, other and total:
+header row, finds the first column whose header starts with a known phrase, and
+reads that column and the two after it as personal, other and total — not the
+three columns following it. The column numbers below are the ones actually
+read:
 
 - "granted in full" — becomes `granted_full` (columns 1, 2, 3)
 - "granted in part" — becomes `granted_part` (columns 5, 6, 7)

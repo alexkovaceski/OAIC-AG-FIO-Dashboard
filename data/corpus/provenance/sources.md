@@ -14,6 +14,16 @@ The hashes, byte counts and financial-year coverage recorded here were measured
 on 2026-08-26 by reading the files in `data/sources/` and the facts the
 normaliser derives from them. They were not copied from any document.
 
+One caveat belongs to the set rather than to any single entry below, so it is
+stated once here. The `sha256` on each entry pins the local file to itself: it
+answers whether the file has changed since it was registered, and that is the
+check the service runs at boot. Whether the local file is still byte-identical
+to what data.gov.au serves is a different question, and the answer differs by
+workbook. data.gov.au publishes its own content hash for exactly one of the
+seven resources, the 2020-21 workbook, and the copy here reproduces it. For the
+other six there is no published hash, so the correspondence rests on the byte
+count, which matches the published `size` field for all seven.
+
 ## data.gov.au — Freedom of information statistics
 
 ```prov
@@ -81,9 +91,8 @@ Full financial year, July 2020 to June 2021. 21 sheets, three read, 7,587 facts.
 This is the one resource for which data.gov.au publishes its own content hash
 (an MD5, `887306f8e5b3fb53f8563d7454d5bbe5`). The copy in this repository
 reproduces it exactly, which pins the local file to the published one byte for
-byte rather than by size alone. For the other six workbooks data.gov.au
-publishes no hash, so the correspondence rests on the byte count, which matches
-the published `size` field for all seven.
+byte rather than by size alone. What that leaves for the other six is set out
+in the preamble above.
 
 ## Agency FOI data 2021-22
 

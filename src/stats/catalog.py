@@ -436,8 +436,11 @@ def _figure_source_rows(frame, key) -> list[dict]:
     reads `withdrawn` and so took the injected row into its own basis (its hash
     moved too, correctly). requests_received_trend is the representative case:
     categories gained '2026-27', the series gained a trailing None, source_rows
-    stayed 2022 and rows_hash stayed 3b698fc46826. The three top_n keys are
-    unaffected — they narrow to one FY.
+    stayed 2022 and rows_hash stayed 3b698fc46826. All FOUR top_n keys are
+    unaffected — decided_top20, received_top20, agency_contributions_received
+    and agency_contributions_decided each narrow to one FY (re-measured
+    2026-08-27: every one of the four returns a 303-row basis confined to
+    2024-25).
 
     AND ONE HARD FAILURE ON THE SAME TRIGGER. That same injected row makes
     timeliness_slippage_corr raise, not drift: `TypeError: unsupported operand

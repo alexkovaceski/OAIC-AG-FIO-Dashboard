@@ -66,10 +66,18 @@ Five renames are applied:
 - Net Zero Economy Agency becomes Net Zero Economy Authority
 
 Each pair was checked for a clean cutover before being added, and re-checked
-against the raw sheets on 2026-08-26: for all five, the new name starts
+against the raw sheets on 2026-08-27: for all five, the new name starts
 reporting in the financial year immediately after the old name stops, with no
-year in which both appear and no year in which neither does. A test asserts that
-none of the superseded names survives into the frame.
+year in which both names appear and no gap year between the old name's last
+appearance and the new name's first.
+
+Two of the five do have earlier years carrying neither name, which is a
+different thing and not a hole in a series. Department of Health and Aged Care
+first appears in 2022-23 and Net Zero Economy Agency in 2023-24, so 2019-20 to
+2021-22 and 2019-20 to 2022-23 respectively carry neither the old name nor the
+new one. Those are years in which the body was not reporting under either name,
+and the mapping leaves them empty rather than inventing a series for them. A
+test asserts that none of the superseded names survives into the frame.
 
 The rule is deliberately narrow. It covers renames only. Where responsibilities
 were combined or materially changed, the new body is a new entity, which is what

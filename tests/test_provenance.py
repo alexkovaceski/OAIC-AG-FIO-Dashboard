@@ -31,6 +31,19 @@ def _registry_copy(tmp_path):
     return dst
 
 
+@pytest.fixture(autouse=True)
+def _reset_validated_registry():
+    """`provenance._VALIDATED` is process-wide state (I1): validate_registry
+    stashes the registry it accepted and describe() serves that copy. Left set
+    between tests it would make every test after the first depend on ORDER — a
+    describe test would pass on a verdict some earlier test earned rather than
+    on the registry it set up itself. Cleared either side, so each test states
+    its own precondition."""
+    provenance._VALIDATED = None
+    yield
+    provenance._VALIDATED = None
+
+
 _FACTS = None
 
 
@@ -82,11 +95,39 @@ def test_every_entry_carries_its_required_keys():
         assert d["prose"], f"{d['id']}: a decision with no rationale is not a decision"
 
 
-def test_registry_ids_are_unique_within_a_file():
-    reg = provenance.load_registry()
-    for kind, entries in reg.items():
-        ids = [e["id"] for e in entries]
-        assert len(ids) == len(set(ids)), f"{kind}: duplicate id"
+def test_a_duplicate_id_fails_loud(tmp_path, monkeypatch):
+    """This replaces an assertion that could not fail. The old version loaded
+    the real registry and asserted its ids were unique — but `_parse_file`
+    raises on a duplicate, so `load_registry` can only ever RETURN unique ids
+    and the assertion was true of every input, drifted or not. The check is
+    only worth having if a duplicate is actually introduced."""
+    d = _registry_copy(tmp_path)
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    assert text.count("id: workbook-2020-21") == 1
+    (d / "sources.md").write_text(
+        text.replace("id: workbook-2020-21", "id: workbook-2019-20"),
+        encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError) as exc:
+        provenance.load_registry()
+    assert "duplicate id" in str(exc.value)
+
+
+def test_an_unclosed_fence_fails_loud(tmp_path, monkeypatch):
+    """A half-written key block must not silently swallow the entries after it.
+    Dropping ONE closing fence leaves the file with an odd number, so the fence
+    state is still open at EOF and the parser says so instead of returning a
+    registry that is missing whatever the open fence ate."""
+    d = _registry_copy(tmp_path)
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    assert text.count("```") % 2 == 0, "the real registry should balance"
+    broken = text.replace("verified: 2026-08-26\n```\n", "verified: 2026-08-26\n", 1)
+    assert broken.count("```") == text.count("```") - 1
+    (d / "sources.md").write_text(broken, encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError) as exc:
+        provenance.load_registry()
+    assert "unclosed" in str(exc.value)
 
 
 def test_a_section_without_a_key_block_fails_loud(tmp_path, monkeypatch):
@@ -131,6 +172,65 @@ def test_a_drifted_workbook_hash_fails_validation(tmp_path, monkeypatch):
     with pytest.raises(provenance.ProvenanceError) as exc:
         provenance.validate_registry(_real_frame())
     assert "sha256" in str(exc.value)
+
+
+def test_a_stale_covers_year_fails_validation(tmp_path, monkeypatch):
+    """`covers` ties a workbook to the facts it is responsible for, and it is
+    the one source key with no shape rule to catch a typo: any comma-separated
+    string parses. A year the frame does not carry means the registry is
+    describing an ingest that is not the one running.
+
+    The stale year is ADDED, not substituted, and that is load-bearing.
+    Replacing 2024-25 with 2027-28 also leaves 2024-25 uncovered, so the
+    COVERAGE check fires and the test would have passed with the stale-year
+    check deleted — green for a reason other than the one it was written for,
+    which is the defect class this whole review round is about (confirmed by
+    mutation: with `stale = []` forced, the substituting version still passed).
+    Adding a year keeps coverage complete, so only the stale-year check can
+    raise, and the assertion names that check's own wording."""
+    d = _registry_copy(tmp_path)
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    assert "covers: 2024-25\n" in text
+    (d / "sources.md").write_text(
+        text.replace("covers: 2024-25\n", "covers: 2024-25, 2027-28\n", 1),
+        encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError) as exc:
+        provenance.validate_registry(_real_frame())
+    assert "claims to cover" in str(exc.value)
+    assert "2027-28" in str(exc.value)
+
+
+def test_a_drifted_byte_count_fails_validation(tmp_path, monkeypatch):
+    """`bytes` is the claim sources.md leans on for the six workbooks
+    data.gov.au publishes no hash for, so it has to be checked, not decorative."""
+    d = _registry_copy(tmp_path)
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    real = next(s for s in provenance.load_registry()["sources"]
+                if s.get("bytes"))
+    (d / "sources.md").write_text(
+        text.replace(f"bytes: {real['bytes']}",
+                     f"bytes: {int(real['bytes']) + 1}", 1), encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError) as exc:
+        provenance.validate_registry(_real_frame())
+    assert "byte count drift" in str(exc.value)
+
+
+def test_a_drifted_bucket_fails_validation(tmp_path, monkeypatch):
+    """The request-type buckets are what every Type filter on the site selects
+    on. A derivation that claims a fourth one is describing a frame this is not."""
+    d = _registry_copy(tmp_path)
+    text = (d / "derivations.md").read_text(encoding="utf-8")
+    assert "buckets: personal, other, total\n" in text
+    (d / "derivations.md").write_text(
+        text.replace("buckets: personal, other, total\n",
+                     "buckets: personal, other, total, aggregate\n", 1),
+        encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError) as exc:
+        provenance.validate_registry(_real_frame())
+    assert "request-type drift" in str(exc.value)
 
 
 def test_a_missing_workbook_fails_validation(tmp_path, monkeypatch):
@@ -191,6 +291,77 @@ def test_a_decision_number_that_no_longer_matches_the_frame_fails_validation(
     with pytest.raises(provenance.ProvenanceError) as exc:
         provenance.validate_registry(_real_frame())
     assert "34419" in str(exc.value)
+
+
+# ------------------------------------------ the validated-registry stash (I1) ---
+
+def test_describe_serves_the_validated_registry_not_a_file_edited_after_boot(
+        tmp_path, monkeypatch):
+    """I1. `load_registry` re-reads the files on every call and enforces SHAPE
+    only, so a registry edited after boot parses cleanly and used to be served
+    straight to a reader as validated provenance — hash, coverage, measures and
+    frame_check all unre-checked since start-up. The edit below is one
+    `validate_registry` would REJECT; describe must serve the validated copy
+    instead of carrying it."""
+    frame = _real_frame()
+    real = next(s for s in provenance.load_registry()["sources"]
+                if s.get("ingested_as"))
+    provenance.validate_registry(frame)          # the boot gate, real registry
+    d = _registry_copy(tmp_path)
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    (d / "sources.md").write_text(text.replace(real["sha256"], "0" * 64),
+                                  encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    # the drifted file still PARSES — which is exactly why the shape checks
+    # alone were never the guarantee
+    assert any(s.get("sha256") == "0" * 64
+               for s in provenance.load_registry()["sources"])
+    served = {s["id"]: s.get("sha256") for s in provenance.describe(frame)["sources"]}
+    assert served[real["id"]] == real["sha256"]
+    assert "0" * 64 not in served.values()
+
+
+def test_describe_before_any_validation_validates_rather_than_serving(
+        tmp_path, monkeypatch):
+    """I1, the other half. With nothing stashed, describe must not fall back to
+    reading the file and serving it. It runs the same gate boot runs, against
+    the frame it was handed, so a drifted registry raises here exactly as it
+    would at start-up — the answer is never an unvalidated one."""
+    d = _registry_copy(tmp_path)
+    real = next(s for s in provenance.load_registry()["sources"]
+                if s.get("ingested_as"))
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    (d / "sources.md").write_text(text.replace(real["sha256"], "0" * 64),
+                                  encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    assert provenance._VALIDATED is None
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.describe(_real_frame())
+
+
+def test_a_failed_validation_stashes_nothing(tmp_path, monkeypatch):
+    """The stash is what describe serves, so it must be written only after
+    every check has passed — a registry that raised halfway through must not
+    leave a partially-checked copy behind for the next reader."""
+    d = _registry_copy(tmp_path)
+    real = next(s for s in provenance.load_registry()["sources"]
+                if s.get("ingested_as"))
+    text = (d / "sources.md").read_text(encoding="utf-8")
+    (d / "sources.md").write_text(text.replace(real["sha256"], "0" * 64),
+                                  encoding="utf-8")
+    monkeypatch.setattr(provenance, "_REGISTRY_DIR", d)
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.validate_registry(_real_frame())
+    assert provenance._VALIDATED is None
+
+
+def test_the_payload_is_a_copy_so_a_caller_cannot_edit_the_validated_registry():
+    frame = _real_frame()
+    provenance.validate_registry(frame)
+    out = provenance.describe(frame)
+    out["sources"].append({"id": "not-a-real-source"})
+    assert all(s["id"] != "not-a-real-source"
+               for s in provenance.describe(frame)["sources"])
 
 
 # -------------------------------------------------------------- describe() ---
@@ -270,6 +441,176 @@ def test_describe_carries_no_generated_prose():
         for entry in out[kind]:
             assert entry["prose"] in files
             assert entry["title"] in files
+
+
+# ----------------------------------------- the three qualifier classes (I2) ---
+
+_GOLDEN_Q1_KEYS = ("requests_received_q1", "requests_finalised_q1", "decided_q1",
+                   "within_statutory_pct_q1", "granted_full_share_q1",
+                   "granted_part_share_q1", "refused_share_q1", "withdrawn_q1")
+
+
+def test_every_qualifier_names_the_view_its_own_payload_claims():
+    """THE STRUCTURAL ONE. Three classes of key carry three different
+    sentences, and before `_qualifier` all three contained the words "default
+    view" for three unrelated reasons — one said "the default view of <key>",
+    another said "the page's default view". A guard asserting that substring
+    passed on all three BY COINCIDENCE, and a reword of any one of them could
+    have dropped the view silently while the guard stayed green.
+
+    So this does not look for a literal. It reads `applies_to` out of the
+    payload, maps it through the same table the builder used, and requires the
+    result in the qualifier — the sentence and the machine-readable field
+    cannot drift apart, and every key in the catalog is covered, not a sample.
+    """
+    from stats.catalog import FIG_KEYS, STAT_KEYS
+    frame = _real_frame()
+    for key in FIG_KEYS + STAT_KEYS:
+        fig = provenance.describe(frame, key=key)["figure"]
+        expected = provenance._APPLIES_TO_PROSE[fig["applies_to"]]
+        assert expected in fig["qualifier"], key
+
+
+def test_a_qualifier_that_does_not_name_its_view_cannot_be_built():
+    """The refusal is the guarantee. `_qualifier` is the only constructor, so a
+    future sentence that forgets the view is a ProvenanceError at build time
+    rather than a false claim in front of a reader."""
+    with pytest.raises(provenance.ProvenanceError):
+        provenance._qualifier("default_view", "A sentence with no view in it.")
+    with pytest.raises(provenance.ProvenanceError):
+        provenance._qualifier("filtered_view", "Describes {view}.")
+    assert (provenance._qualifier("default_view", "Describes {view}.")
+            == "Describes the default view.")
+
+
+def test_no_stat_key_is_ever_re_derived_in_the_browser():
+    """The premise under both stat qualifiers below, asserted rather than
+    assumed. `window.__pageData.figures` is built from PAGE_FIGURE_KEYS and
+    foi-charts.js reads figures ONLY from there, so a key absent from every
+    page's list is never re-derived under a filter — it is server-rendered HTML
+    with a fixed basis. If a stat key is ever added to a page's figure list,
+    this fails and the qualifier has to be revisited with it."""
+    from site.pages import PAGE_FIGURE_KEYS
+    from stats.catalog import STAT_KEYS
+    shipped = {k for keys in PAGE_FIGURE_KEYS.values() for k in keys}
+    assert not (shipped & set(STAT_KEYS)), sorted(shipped & set(STAT_KEYS))
+
+
+def test_a_transcribed_q1_stat_names_its_transcription_not_a_filter_caveat():
+    """I2. The eight golden Q1 keys are the one place on this platform where a
+    value was READ OFF the OAIC's published dashboard rather than computed from
+    a workbook. `pages.GOLDEN_SOURCE` already tells a reader that beside the
+    tile; the provenance answer must not replace it with a filter caveat that
+    is both weaker and — for a server-rendered tile — false."""
+    frame = _real_frame()
+    for key in _GOLDEN_Q1_KEYS:
+        q = provenance.describe(frame, key=key)["figure"]["qualifier"]
+        assert "transcribed" in q.lower(), key
+        # it points at the registry entries that travel in the same payload
+        assert "oaic-dashboard" in q, key
+        assert "golden-q1-transcription" in q, key
+        # and it does NOT offer a browser re-derivation that cannot happen
+        assert "in the browser" not in q, key
+
+
+def test_the_entries_a_transcribed_qualifier_names_travel_with_it():
+    """A qualifier that cites `oaic-dashboard` and `golden-q1-transcription` is
+    only useful if a reader gets those entries in the same answer."""
+    payload = provenance.describe(_real_frame(), key="decided_q1")
+    assert any(s["id"] == "oaic-dashboard" for s in payload["sources"])
+    assert any(d["id"] == "golden-q1-transcription" for d in payload["decisions"])
+
+
+def test_a_server_rendered_stat_does_not_promise_a_filter_that_cannot_reach_it():
+    """I2. The old qualifier told EVERY stat reader that "any filter a reader
+    sets re-derives what is drawn from the same published facts". That is true
+    of a chart and false of a KPI tile or a movers table: neither is in
+    __pageData.figures, so no filter re-derives either. Claiming otherwise
+    sends a reader looking for a control that does not exist."""
+    frame = _real_frame()
+    for key in ("timeliness_slippage_corr", "refusal_rate_movers",
+                "timeliness_movers", "refusal_rate_change_fy23_fy24"):
+        q = provenance.describe(frame, key=key)["figure"]["qualifier"]
+        assert "in the browser" not in q, key
+        assert "re-derives what is drawn" not in q, key
+        # it still says which view the count describes — that guarantee holds
+        # for every key, only the reason differs
+        assert "default view" in q.lower(), key
+        # and no raw enum token in a sentence a member of the public reads
+        assert "a fy basis" not in q, key
+
+
+def test_a_chart_figure_keeps_the_default_view_wording():
+    """The class split must not have quietly weakened the one qualifier that
+    WAS correct: a chart really is re-derived in the browser under a filter."""
+    q = provenance.describe(_real_frame(),
+                            key="requests_received_trend")["figure"]["qualifier"]
+    assert "default view" in q.lower()
+    assert "in the browser" in q
+
+
+# ----------------------------------------------- what the scope sentence says ---
+
+def test_the_scope_sentence_claims_no_portfolio_filter_not_every_portfolio():
+    """M6. Measured 2026-08-27: 85 of requests_received_trend's 2,022 basis rows
+    carry NO portfolio, and 2,295 of the frame's annual rows do (the
+    `portfolio-capture` derivation records why). "Every portfolio" claims a
+    completeness the rows do not have; what is true is that nothing was
+    filtered out by portfolio."""
+    from stats.catalog import _figure_source_rows
+    frame = _real_frame()
+    rows = _figure_source_rows(frame, "requests_received_trend")
+    assert sum(1 for f in rows if not f["portfolio"]) > 0, \
+        "if every basis row now carries a portfolio, revisit the wording"
+    q = provenance.describe(frame, key="requests_received_trend")["figure"]["qualifier"]
+    assert "no portfolio filter" in q
+    assert "every portfolio" not in q
+
+
+def test_a_top_n_scope_sentence_separates_the_ranking_basis_from_what_is_drawn():
+    """`received_top20` consumes 303 rows over 303 agencies and draws 20 of
+    them. "every reporting agency" beside a chart captioned "Top 20", with a
+    source_rows of 303, reads as a contradiction unless the sentence says which
+    number is which."""
+    frame = _real_frame()
+    fig = provenance.describe(frame, key="received_top20")["figure"]
+    assert fig["source_rows"] == 303
+    assert fig["default_view"]["distinct_agencies"] == 303
+    assert "ranking basis" in fig["qualifier"]
+    assert "top 20" in fig["qualifier"]
+
+
+def test_a_multi_year_basis_says_what_its_agency_count_counts():
+    """M5. The reader sees "across 433 reporting agencies" in the rendered
+    answer, which reads as "433 agencies report" — it is the number of distinct
+    NAMES across seven workbooks. A comment in the payload builder does not
+    reach the reader; the qualifier does. A one-year top_n has no such gap, so
+    it does not carry the sentence."""
+    frame = _real_frame()
+    trend = provenance.describe(frame, key="requests_received_trend")["figure"]
+    assert len(trend["default_view"]["financial_years"]) == 7
+    assert trend["default_view"]["distinct_agencies"] == 433
+    assert "not the number reporting in any one year" in trend["qualifier"]
+    top = provenance.describe(frame, key="received_top20")["figure"]
+    assert len(top["default_view"]["financial_years"]) == 1
+    assert "not the number reporting in any one year" not in top["qualifier"]
+
+
+def test_a_financial_year_range_is_only_claimed_when_the_years_are_contiguous():
+    """M7. "2019-20 to 2025-26" asserts every year in between, and the sentence
+    used to build it from nothing but first-and-last of a set.
+    `catalog._figure_source_rows` documents the case that falsifies that: an FY
+    can be missing from a figure's basis while the chart still shows the year.
+    On the real frame every basis is contiguous, so this is a unit test on the
+    phrase itself."""
+    assert provenance._fy_phrase([]) == "no financial year"
+    assert provenance._fy_phrase(["2024-25"]) == "financial year 2024-25"
+    assert (provenance._fy_phrase(["2019-20", "2020-21", "2021-22"])
+            == "financial years 2019-20 to 2021-22")
+    # the hole: 2021-22 missing. A range here would claim a year the hash does
+    # not cover, so the years are listed instead.
+    assert (provenance._fy_phrase(["2019-20", "2020-21", "2022-23"])
+            == "financial years 2019-20, 2020-21, 2022-23")
 
 
 # ------------------------------------------------------------------- boot ---

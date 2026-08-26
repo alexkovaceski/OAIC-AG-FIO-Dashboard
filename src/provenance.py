@@ -2,9 +2,22 @@
 
 The premise (spec S3.5): a reader asks where a number came from and gets the
 dataset, the files, the hashes, the curation decisions, and for a named figure
-the row basis behind it. Nothing in that answer is generated. Every value is
-either curated text a human wrote into `data/corpus/provenance/*.md`, or a
-number measured from the frame at answer time.
+the row basis behind it. No claim in that answer is invented at answer time.
+
+Be exact about what that does and does not rule out, because "nothing here is
+generated" is the easier sentence and it is not quite true. Every value in a
+provenance answer is one of three things: curated text a human wrote into
+`data/corpus/provenance/*.md`; a number measured from the frame at answer time;
+or one of two human-authored strings this module supplies — the figure
+`caption`, read from `stats.catalog.FIG_CAPTIONS`, and the `qualifier`, whose
+sentences are written out in `_live_layer` below, assembled by `_qualifier`,
+and whose only variable parts are the key, the basis, the measured scope, and
+the name of the view taken from the payload's own `applies_to`. The qualifier
+IS composed, from a fixed template, and it is composed on purpose: a row count
+and a hash with no statement of what they describe is precisely the false claim
+this feature exists to prevent. What no code path here does is author a NEW
+claim about the data — a description, a caveat, or a number a human did not
+write down or the frame did not produce.
 
 Three files make up the registry, each a list of `## ` sections. A section opens
 with a fenced key block the parser reads and continues as free prose a human
@@ -35,18 +48,43 @@ golden gate, so the service refuses to start rather than serving a page beside
 provenance that has drifted. Stale provenance on a transparency site is worse
 than none: it is a false claim with an official-looking hash next to it.
 
-WHAT THE LIVE LAYER MAY AND MAY NOT SAY. Each chart page ships the whole
-`foi_stats` result for its figures into `window.__pageData.figures[key]`,
-including `source_rows` and `rows_hash`, while shipping facts for EVERY
-financial year; the chart engine then re-derives the chart in the browser for
-whatever filter the reader picks. So the hash that travels with a figure
-describes the DEFAULT view and not the one a filtered reader is looking at.
-`_live_layer` therefore labels its basis explicitly (`applies_to:
-"default_view"`) and carries a `qualifier` sentence saying so, plus a
-`default_view` block measured from the basis rows themselves rather than
-asserted. It does NOT attempt to recompute a basis for a client-side filter
-state: the server never sees that state, and a count derived from a state it
-cannot observe would be the same class of false claim in a new place.
+VALIDATED CONTENT ONLY. `load_registry` is the raw parse and enforces SHAPE
+only. Content — a hash against the bytes on disk, a `covers` year against the
+frame, a measure against the frame, a decision's `frame_check` — is checked by
+`validate_registry`, which stashes the registry it accepted. `describe` serves
+that stashed copy, so a registry edited after boot cannot be handed to a reader
+wearing a validation it never passed. See `_validated_registry` for what
+happens when `describe` runs before any validation has.
+
+WHAT THE LIVE LAYER MAY AND MAY NOT SAY. There are three classes of key and
+they do not share a caveat; the qualifier is chosen per class in `_live_layer`.
+
+  CHART FIGURES (`FIG_KEYS`). Each chart page ships the whole `foi_stats`
+  result for its figures into `window.__pageData.figures[key]`, including
+  `source_rows` and `rows_hash`, while shipping facts for EVERY financial year;
+  the chart engine then re-derives the chart in the browser for whatever filter
+  the reader picks. So the hash that travels with a figure describes the
+  DEFAULT view and not the one a filtered reader is looking at, and the
+  qualifier says exactly that. The layer does NOT attempt to recompute a basis
+  for a client-side filter state: the server never sees that state, and a count
+  derived from a state it cannot observe would be the same class of false claim
+  in a new place.
+
+  SERVER-RENDERED STATS. No stat key appears in `site.pages.PAGE_FIGURE_KEYS`,
+  so no stat reaches `window.__pageData.figures` and `foi-charts.js` never
+  touches one. The KPI tiles and the movers tables are server-rendered HTML
+  over a fixed basis; the page says so itself (`pages._kpi_scope_note`). Giving
+  them the chart caveat would offer a reader a filter path that does not exist,
+  so they get a qualifier that says the filters do not reach them.
+
+  TRANSCRIBED Q1 FIGURES. The eight single-quarter keys are the one place on
+  this platform where a value was READ OFF the OAIC's published dashboard
+  rather than computed from a workbook, and that — not a filter caveat — is the
+  provenance fact a reader needs. Their qualifier names the `oaic-dashboard`
+  source and the `golden-q1-transcription` decision, both of which travel in
+  the same payload. They are recognised by their `single_quarter` basis, the
+  same rule `pages._source_for_basis` uses to attach `GOLDEN_SOURCE`, rather
+  than by a second list of eight key names to fall out of step with the first.
 """
 from __future__ import annotations
 
@@ -67,6 +105,11 @@ class ProvenanceError(RuntimeError):
 # repoint it; every function below looks it up at call time.
 _REGISTRY_DIR = CORPUS_DIR / "provenance"
 
+# The registry `validate_registry` last ACCEPTED, and the only registry
+# `describe` will serve. Set on success only. A test that needs to re-validate
+# a repointed _REGISTRY_DIR resets this to None.
+_VALIDATED: dict | None = None
+
 _FILES = {"sources": "sources.md",
           "derivations": "derivations.md",
           "decisions": "decisions.md"}
@@ -85,6 +128,15 @@ _KEY_RE = re.compile(r"[a-z][a-z0-9_]*\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 _DERIVATION_KINDS = ("sheet", "convention")
+
+# foi_stats' basis tokens, spelled for a reader. "on a fy basis" is a database
+# field printed at a member of the public; these are the same three values the
+# site's own basis labels use. A basis with no entry falls through as itself
+# rather than being dropped — an unspelled token is ugly, a missing one is a
+# hole in the sentence.
+_BASIS_PROSE = {"fy": "financial-year",
+                "single_quarter": "single-quarter",
+                "cumulative": "cumulative"}
 
 
 # ------------------------------------------------------------- the parser ---
@@ -215,9 +267,21 @@ def load_registry() -> dict:
     each a list of entries in file order. Raises ProvenanceError on a missing
     or malformed file.
 
-    Not cached. The three files are small, and re-reading them means an operator
-    who corrects a typo sees it without a restart. The gate that matters —
-    validate_registry — runs at boot.
+    A SHAPE CHECK, NOT A CONTENT CHECK, and not what a reader is served. This
+    function re-reads the files every call and enforces everything a single
+    file can be judged on alone: required keys, sha256 format, duplicate ids,
+    derivation kinds. It checks nothing against the world — not one hash
+    against the bytes on disk, not one `covers` year or measure against the
+    frame, not one `frame_check`. That is `validate_registry`, and `describe`
+    serves only what `validate_registry` accepted.
+
+    So there is no hot reload, and the earlier version of this docstring was
+    wrong to advertise one. Editing these files under a running service does
+    not put the edit in front of a reader as validated provenance; it takes a
+    restart, because the restart is what re-validates. That is the point: an
+    edit reaching readers without passing the content gate is the failure mode
+    this whole module exists to prevent, and a typo corrected in the prose is
+    not worth a path that would also serve a wrong hash.
     """
     return {file_kind: _parse_file(_REGISTRY_DIR / name, file_kind)
             for file_kind, name in _FILES.items()}
@@ -364,6 +428,7 @@ def _check_decisions(decisions: list[dict], frame) -> None:
 
 def validate_registry(frame) -> None:
     """Cross-check the curated registry against reality. Raises on any drift.
+    On success, stashes the registry it accepted for `describe` to serve.
 
     WHAT IT CHECKS:
       - every source that claims `ingested_as` names a file that exists, and
@@ -394,24 +459,143 @@ def validate_registry(frame) -> None:
         it. What this function guarantees is that the numbers and file
         identities beside it are still true.
     """
+    global _VALIDATED
     registry = load_registry()
     _check_sources(registry["sources"], frame)
     _check_derivations(registry["derivations"], frame)
     _check_decisions(registry["decisions"], frame)
+    # Only on success, and only after every check: this is the copy describe()
+    # serves, so a registry that failed anything above must not land here.
+    _VALIDATED = registry
+
+
+def _validated_registry(frame) -> dict:
+    """The registry as `validate_registry` last accepted it — never a fresh
+    parse. Returns a copy, so a caller mutating the payload cannot edit the
+    validated original.
+
+    BEFORE ANY VALIDATION HAS RUN, THIS VALIDATES ON DEMAND rather than raising.
+    The choice is between two ways of not serving unvalidated content, and the
+    third option — serving it — is not on the table. Raising would be the
+    louder read, but `describe` is always handed a frame, which is the only
+    thing `validate_registry` needs, so refusing to answer a question it has
+    everything it needs to answer correctly buys no safety: the gate runs
+    either way, and a drift raises ProvenanceError from here exactly as it does
+    from boot. It also keeps every non-server caller honest — the DSL op, the
+    chat report, a test holding a real frame — instead of making validation a
+    thing only `server.app._boot` remembers to do.
+
+    In the service this branch is dead: `_boot` validates before `_FRAME` is
+    cached and before a route can be served, so by the time any request reaches
+    `describe` the stash is already filled.
+
+    THE LIMIT, STATED. The stash records that this registry CONTENT passed
+    against a frame in this process; it does not record which frame. In the
+    service there is one frame and boot validates it. A process that validated
+    against one frame and then called `describe` with a different one would get
+    the earlier verdict, which is why nothing here re-derives a frame of its
+    own — the caller's frame and the validated frame are the same object by
+    construction in `server.app`.
+    """
+    if _VALIDATED is None:
+        validate_registry(frame)
+    return {file_kind: list(entries) for file_kind, entries in _VALIDATED.items()}
 
 
 # ------------------------------------------------------- the live figure ----
 
-def _default_view_sentence(financial_years: list[str], buckets: list[str]) -> str:
+def _fy_phrase(financial_years: list[str]) -> str:
+    """The financial-year span of a basis, in words — a RANGE only when the
+    years really are contiguous.
+
+    "2019-20 to 2025-26" asserts every year in between, and the old version
+    asserted it from nothing but first-and-last of a set. `_figure_source_rows`
+    documents the case that falsifies it: a figure's basis can carry a hole (an
+    FY present only in non-total buckets, or only for non-reporting agencies, or
+    a partial-measure ingest) while the chart's category axis still shows the
+    year. Measured 2026-08-27 on the real frame, all thirteen figure bases run
+    2019-20..2025-26 unbroken (or a single 2024-25 for the four top_n keys), so
+    the list branch is inert today — which is when a guard is cheap to add.
+
+    A year label the frame cannot supply as `YYYY-YY` falls to the list branch
+    too: enumerating is never wrong, only longer.
+    """
+    if not financial_years:
+        return "no financial year"
     if len(financial_years) == 1:
-        years = f"financial year {financial_years[0]}"
-    elif financial_years:
-        years = f"financial years {financial_years[0]} to {financial_years[-1]}"
-    else:
-        years = "no financial year"
+        return f"financial year {financial_years[0]}"
+    starts = []
+    for fy in financial_years:
+        head = fy[:4]
+        starts.append(int(head) if head.isdigit() else None)
+    contiguous = all(a is not None and b is not None and b - a == 1
+                     for a, b in zip(starts, starts[1:]))
+    if contiguous:
+        return f"financial years {financial_years[0]} to {financial_years[-1]}"
+    return "financial years " + ", ".join(financial_years)
+
+
+def _default_view_sentence(spec, financial_years: list[str],
+                           buckets: list[str]) -> str:
+    """The scope of a chart figure's basis, in words.
+
+    "no portfolio filter", not "every portfolio": measured 2026-08-27, 85 of
+    requests_received_trend's 2,022 basis rows carry no portfolio at all (2,295
+    of the frame's 54,594 annual rows do, for the reason `portfolio-capture` in
+    derivations.md records — each sheet's first banner sits above the row the
+    parser starts from). "Every portfolio" would claim a completeness the rows
+    do not have; what is true is that nothing was filtered out by portfolio.
+
+    A top_n basis says what it is. `received_top20` consumes 303 rows and ranks
+    303 agencies to draw 20 of them, so "every reporting agency" beside a chart
+    captioned "Top 20" reads as a contradiction unless the sentence separates
+    the ranking basis from what is drawn.
+    """
     types = " and ".join(buckets) if buckets else "no request type"
-    return (f"every reporting agency, every portfolio, request type {types}, "
-            f"{years}")
+    scope = (f"every reporting agency, no portfolio filter, request type "
+             f"{types}, {_fy_phrase(financial_years)}")
+    if spec and spec.get("kind") == "top_n":
+        return (f"{scope} — the count and hash cover that whole ranking basis, "
+                f"of which the chart draws the top {spec['n']}")
+    return scope
+
+
+_APPLIES_TO_PROSE = {"default_view": "the default view"}
+
+
+def _qualifier(applies_to: str, template: str) -> str:
+    """The ONLY constructor of a `qualifier`, and it cannot build one that does
+    not name the view the count and hash describe.
+
+    Structural, not incidental. Three classes of key need three different
+    sentences, and before this the three happened to contain the words "default
+    view" for three unrelated reasons — one said "the default view of <key>",
+    another said "the page's default view", and a guard asserting the substring
+    passed on all three by coincidence. Any rewording could have dropped the
+    view from one class silently, and the guard would still have been green:
+    the same shape of defect (a check passing for a reason other than the one
+    it was written for) as the ones this feature exists to prevent.
+
+    So the view is not written into any of the three sentences. Each passes a
+    template with a `{view}` placeholder, this function refuses a template
+    without one, and the words come from `applies_to` — the machine-readable
+    field the same payload carries. The sentence a reader sees and the field a
+    machine reads cannot disagree, because there is one source for both.
+
+    Substitution is `replace`, not `format`: the templates carry measured text
+    (agency names, bucket names, financial years) and a stray brace in a
+    published value must not turn a provenance answer into a KeyError.
+    """
+    view = _APPLIES_TO_PROSE.get(applies_to)
+    if view is None:
+        raise ProvenanceError(
+            f"no wording for applies_to {applies_to!r} — a row count and a hash "
+            f"that cannot say which view they describe must not be published")
+    if "{view}" not in template:
+        raise ProvenanceError(
+            "refusing to build a qualifier that does not name the view it "
+            "describes — that is the one thing a qualifier is for")
+    return template.replace("{view}", view)
 
 
 def _live_layer(frame, key: str) -> dict:
@@ -420,9 +604,20 @@ def _live_layer(frame, key: str) -> dict:
     Raises KeyError for a key the catalog does not know (foi_stats owns that
     contract), so an unknown key can never come back as an empty-looking answer.
 
-    `applies_to` is always "default_view" and `qualifier` says so in words. See
-    the module docstring: the chart engine re-derives on the client for the
-    reader's filter selection, and this basis does not describe that view.
+    `applies_to` is always "default_view". The QUALIFIER is not always the same
+    sentence, because the three classes of key are not true of the same things —
+    see the module docstring for the class split and the evidence behind it. In
+    short: a chart figure really is re-derived in the browser under the reader's
+    filter, so its basis has to be labelled as the default view; a stat is
+    server-rendered HTML the filters never touch, so promising a reader they can
+    re-derive it is an invitation to a path that does not exist; and a
+    transcribed Q1 figure's one load-bearing provenance fact is that it was read
+    off the OAIC's dashboard rather than computed, which no filter caveat says.
+
+    What the three DO share is enforced rather than repeated: every one goes
+    through `_qualifier`, which will not emit a sentence that does not name the
+    view, and takes the wording of that view from this layer's own `applies_to`.
+    Three sentences, one guarantee, and no way to reword a class out of it.
     """
     stat = foi_stats(frame, key)
     spec = FIGURE_SPECS.get(key)
@@ -444,24 +639,59 @@ def _live_layer(frame, key: str) -> dict:
             "measures": sorted({f["measure"] for f in rows}),
             # across the whole basis, not per year — a trend's basis spans seven
             # files, so this is the number of distinct names that appear in any
-            # of them, not the number reporting in one year
+            # of them, not the number reporting in one year. Measured 2026-08-27:
+            # 433 over the seven-year trends, 303 over the one-year top_n bases.
+            # The reader sees this number in report._figure_rows as "across N
+            # reporting agencies", so when it spans more than one year the
+            # qualifier below says what N counts; a comment here does not reach
+            # anyone reading the answer.
             "distinct_agencies": len({f["agency_name"] for f in rows}),
         }
-        layer["qualifier"] = (
-            f"This row count and hash describe the default view of {key} as the "
-            f"server computed it: "
-            f"{_default_view_sentence(financial_years, buckets)}. Any filter a "
-            f"reader sets re-derives the chart in the browser from the same "
-            f"published facts, so this basis describes the default view and not "
-            f"a filtered one.")
+        multi_year = "" if len(financial_years) < 2 else (
+            " The agency count is the number of distinct agency names appearing "
+            "anywhere in that basis, not the number reporting in any one year.")
+        layer["qualifier"] = _qualifier(layer["applies_to"], (
+            f"This row count and hash describe {{view}} of {key} as the server "
+            f"computed it: "
+            f"{_default_view_sentence(spec, financial_years, buckets)}."
+            f"{multi_year} Any filter a reader sets re-derives the chart in the "
+            f"browser from the same published facts, so this basis describes "
+            f"{{view}} and not a filtered one."))
+    elif stat["basis"] == "single_quarter":
+        # The transcribed Q1 2025-26 headline figures. Recognised by basis, the
+        # same rule pages._source_for_basis uses to attach GOLDEN_SOURCE, so
+        # there is no second list of eight key names to drift.
+        layer["default_view"] = {"basis": stat["basis"]}
+        # "rests on values transcribed", not "is transcribed": measured
+        # 2026-08-27, four of the eight keys ARE the published count (1 source
+        # row) and four are one published count as a percentage of another (2
+        # source rows, the only arithmetic being the division). Saying "this
+        # figure is transcribed" would be false for those four, and the whole
+        # point of this branch is to stop saying something weaker and less true
+        # than the page already says.
+        layer["qualifier"] = _qualifier(layer["applies_to"], (
+            "This figure rests on values transcribed from the OAIC's own "
+            "published FOI dashboard, not computed from the workbooks: the "
+            "current workbook reports July to March cumulatively, so a single "
+            "quarter cannot be recovered from it. Its row count says how many "
+            "transcribed values it uses — one where the figure is a published "
+            "count, two where it is one published count as a percentage of "
+            "another. The source entry `oaic-dashboard` and the curation "
+            "decision `golden-q1-transcription` below record what was read and "
+            "when, and every start of this service re-sums those rows against "
+            "the published figures before it will serve a page. The tile is "
+            "rendered by the server: the filters apply to the charts below it, "
+            "so {view}, which is what this count and hash describe, is the only "
+            "view of it there is."))
     else:
         layer["default_view"] = {"basis": stat["basis"]}
-        layer["qualifier"] = (
-            f"This row count and hash describe {key} as the server computed it "
-            f"for the default, unfiltered view, on a {stat['basis']} basis. Any "
-            f"filter a reader sets re-derives what is drawn from the same "
-            f"published facts, so this basis describes the default view and not "
-            f"a filtered one.")
+        layer["qualifier"] = _qualifier(layer["applies_to"], (
+            f"This row count and hash describe {{view}} of {key} as the server "
+            f"computed it, on a "
+            f"{_BASIS_PROSE.get(stat['basis'], stat['basis'])} basis. The "
+            f"server works this out and renders the result into the page as it "
+            f"stands; the filters on a chart page re-derive the chart and not "
+            f"this, so {{view}} is the only view of it there is."))
     return layer
 
 
@@ -474,8 +704,12 @@ def describe(frame, dataset=None, key=None) -> dict:
     that has a connection reads it and hands it over).
     With `key`: the live layer for that figure or stat, measured from this
     frame. An unknown key raises KeyError.
+
+    The registry half comes from `_validated_registry`, never a fresh
+    `load_registry`: a reader is served the content `validate_registry`
+    accepted, not whatever is on disk at request time.
     """
-    out = load_registry()
+    out = _validated_registry(frame)
     if dataset is not None:
         out["dataset"] = dataset
     if key is not None:
