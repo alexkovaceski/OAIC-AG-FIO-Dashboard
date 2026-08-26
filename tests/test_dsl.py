@@ -255,3 +255,74 @@ def test_dsl_agency_predicate_is_single_sourced():
         f"{applied} of the 6 per-agency ops apply the shared predicate"
     assert "!= 'total'" not in code, "an open-coded half-predicate is back"
     assert ".startswith('x')" not in code, "an open-coded half-predicate is back"
+
+
+# --- Stage 3a Task 4: the provenance op --------------------------------------
+
+def test_provenance_op_returns_the_registry():
+    f = Frame(normalise_all())
+    out = query_dataset(f, "provenance", {})
+    assert out["sources"] and out["derivations"] and out["decisions"]
+    # the curated workbook entries, with the hash the boot gate re-checks
+    ingested = [s for s in out["sources"] if s.get("ingested_as")]
+    assert len(ingested) == 7, [s["id"] for s in ingested]
+    assert all(len(s["sha256"]) == 64 for s in ingested)
+
+
+def test_provenance_op_with_a_key_adds_the_figure_layer():
+    f = Frame(normalise_all())
+    out = query_dataset(f, "provenance", {"key": "received_top20"})
+    assert out["figure"]["key"] == "received_top20"
+    assert out["figure"]["source_rows"] > 0
+    assert len(out["figure"]["rows_hash"]) == 64
+    # the registry still travels with the figure — a figure layer is an
+    # ADDITION to the lineage, never a replacement for it
+    assert out["sources"] and out["decisions"]
+
+
+def test_provenance_op_never_ships_a_hash_without_its_qualifier():
+    # THE LOAD-BEARING ONE. The pages ship every FY's facts and the chart engine
+    # re-derives on the client, so a server-computed row count and hash describe
+    # the DEFAULT view and not the filtered one a reader may be looking at. A
+    # count and a hash with no statement of which view they describe is a false
+    # claim on the one feature whose whole job is being trustworthy.
+    f = Frame(normalise_all())
+    for key in ("received_top20", "timeliness_trend", "timeliness_slippage_corr"):
+        fig = query_dataset(f, "provenance", {"key": key})["figure"]
+        assert fig["source_rows"] and fig["rows_hash"]
+        assert fig["applies_to"] == "default_view"
+        assert fig["qualifier"].strip(), f"{key} ships a hash with no qualifier"
+        assert "default view" in fig["qualifier"].lower()
+
+
+def test_provenance_op_is_describe_verbatim_so_nothing_can_be_authored():
+    # Nothing generated: the op is a pass-through of the curated registry plus
+    # measured facts. If it ever starts composing its own text, this fails.
+    import provenance
+    f = Frame(normalise_all())
+    assert query_dataset(f, "provenance", {}) == provenance.describe(f)
+    assert (query_dataset(f, "provenance", {"key": "decided_top20"})
+            == provenance.describe(f, key="decided_top20"))
+
+
+def test_provenance_op_will_not_pass_a_caller_supplied_dataset_claim_through():
+    # describe() takes a `dataset` snapshot from a caller that read the durable
+    # store. The DSL is driven by the model, so it must not be able to hand one
+    # in — that would let a source claim be authored rather than measured.
+    f = Frame(normalise_all())
+    out = query_dataset(f, "provenance", {"dataset": {"name": "not a real dataset"}})
+    assert "dataset" not in out
+
+
+def test_provenance_op_unknown_key_errors_not_raises():
+    f = Frame(normalise_all())
+    out = query_dataset(f, "provenance", {"key": "nope"})
+    assert "error" in out  # the op returns an error dict; it must not 500
+    assert "nope" in out["error"]
+    assert "sources" not in out  # and never a half-answer beside the error
+
+
+def test_unknown_op_message_lists_provenance():
+    f = Frame(normalise_all())
+    out = query_dataset(f, "definitely_not_an_op", {})
+    assert "provenance" in out["error"]

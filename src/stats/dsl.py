@@ -3,12 +3,17 @@
 Read-only ops over the Frame plus AST-safe compute. The agent never touches SQL
 and never writes a digit: it issues ops with enum-constrained params and cites
 recorded tool-call results via {c:job.turn.call.field} pointers.
+
+The `provenance` op answers "where did this come from" the same way: it returns
+provenance.describe verbatim, so the answer is a human's curated registry text
+plus a basis this server measured, and the model contributes only the op call.
 """
 from __future__ import annotations
 import ast
 import operator as _op
 import re
 
+from provenance import describe as describe_provenance
 from stats.catalog import foi_stats, is_reporting_agency, STAT_KEYS
 
 # Every per-agency op below selects its rows with stats.catalog's
@@ -192,11 +197,32 @@ def query_dataset(frame, op: str, params: dict) -> dict:
                 continue
             out[key] = {"value": stat["value"], "basis": stat["basis"]}
         return out
+    if op == "provenance":
+        # {key?} — where a figure came from. The payload is provenance.describe
+        # VERBATIM: the curated registry (a human's text in
+        # data/corpus/provenance/*.md) plus, for a named key, the basis this
+        # server measured for it. Nothing here is composed, so the model driving
+        # the DSL cannot author a claim about a source.
+        #
+        # `dataset` is deliberately NOT accepted from params. describe() takes a
+        # foi_datasets snapshot from a caller that read the durable store; a
+        # caller-supplied one would be an unmeasured source claim entering
+        # through the model's own tool call.
+        #
+        # An unknown (or uncomputable) key comes back as an error dict like
+        # every other op — never a raise, never a 500 on the lineage answer, and
+        # never a half-registry beside the error that would read as an answer.
+        key = params.get("key") or None
+        try:
+            return describe_provenance(frame, key=key)
+        except KeyError as exc:
+            return {"error": f"unknown provenance key {key!r}: {exc.args[0]}"
+                             if exc.args else f"unknown provenance key {key!r}"}
     if op == "gaps":
         return {"error": "gaps op not applicable to FOI stats — use trend/compare_period/top_contributors"}
     if op == "classes":
         return {"classes": sorted({f["measure_group"] for f in frame.facts})}
-    return {"error": f"unknown op {op!r}; allowed: list_agencies, filter_agencies, summarize_agencies, trend, compare_period, top_contributors, by_portfolio, kpis, classes, compute"}
+    return {"error": f"unknown op {op!r}; allowed: list_agencies, filter_agencies, summarize_agencies, trend, compare_period, top_contributors, by_portfolio, kpis, classes, provenance, compute"}
 
 
 def resolve_citations(spec: dict, transcript: list[dict]) -> dict:
