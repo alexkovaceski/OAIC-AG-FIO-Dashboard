@@ -538,3 +538,150 @@ def test_foi_charts_js_has_no_hardcoded_fy_or_measure_maps():
     assert "2024-25" not in src, "top-N year must come from the spec"
     assert "TREND_MEASURES" not in src and "TOP_N" not in src, \
         "legacy hardcoded maps must be gone"
+
+
+# --- chart-engine contract (review round 2026-08-26) -------------------------
+# There is no JS harness in this project by design, so these pin the engine's
+# rendered text and the shape of each fix from the server side. Each names the
+# defect it guards against.
+
+def _charts_js():
+    from pathlib import Path
+    return Path("src/site/assets/foi-charts.js").read_text(encoding="utf-8")
+
+
+def _site_css():
+    from pathlib import Path
+    return Path("src/site/assets/site.css").read_text(encoding="utf-8")
+
+
+def _contrast(fg_hex, bg_hex) -> float:
+    a, b = _relative_luminance(fg_hex), _relative_luminance(bg_hex)
+    lighter, darker = (a, b) if a > b else (b, a)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_chart_axis_pin_can_never_truncate_a_value():
+    # C1: ECharts CLIPS a series at axis.max. Pinning the value axis to the
+    # UNFILTERED baseline drew any larger filtered value at the baseline's
+    # length (on decided_top20 the FY2019-20 leader was drawn at 42% of its
+    # true bar). The pin must be the larger of the baseline and the selection's
+    # own maximum, so the interval can grow but never crops.
+    js = _charts_js()
+    assert "seriesMax(out.fig)" in js, \
+        "the pin must consider the selection's own maximum"
+    assert re.search(r"Math\.max\(baselineMax\[key\]", js), \
+        "the pin must be max(unfiltered baseline, this selection's maximum)"
+    assert not re.search(r"pin\s*=\s*!active\.agency\s*&&\s*baselineMax\[key\]", js), \
+        "the truncating baseline-only pin is back"
+
+
+def test_top_n_footnote_makes_no_claim_about_missing_agencies():
+    # C2 + I1: the old footnote read "N of 434 agencies reported no data for
+    # FY x and are not ranked" — a compliance claim, published two clicks from
+    # the landing page, that was false twice over. It divided a
+    # portfolio-scoped numerator by the GLOBAL agency list (Portfolio=Treasury
+    # rendered "400 of 434 ... reported no data" when those 400 simply sit in
+    # other portfolios), and the agencies genuinely absent are overwhelmingly
+    # abolished, renamed or not yet created rather than non-reporters.
+    js = _charts_js()
+    assert "reported no data" not in js, "the compliance claim is back"
+    assert "are not ranked" not in js, "the compliance claim is back"
+    assert "Ranked from the " in js, "the ranking pool must still be disclosed"
+    assert "filters.agencies" not in js, \
+        "the footnote must not count a universe the ranking never used"
+
+
+def test_chart_engine_explains_a_single_year_selection():
+    # I2: an FY filter APPLIES to a trend and a ratio, narrowing the category
+    # axis to one point. That is a defensible choice — the filter visibly
+    # responds — but the one-point view needs the same explanation the
+    # one-agency ranking gets, and the dimFilter docstring must stop claiming
+    # trends skip fy when both call sites apply it.
+    js = _charts_js()
+    assert "trends consume fy as a category axis" not in js, \
+        "the docstring still contradicts its call sites"
+    assert "single financial" in js, "a one-year selection must explain itself"
+    assert "Clear the FY filter" in js
+
+
+def test_ranking_gutter_is_responsive_and_keeps_every_label():
+    # I3: grid.left was a fixed 230px. Under the 900px breakpoint a 390px
+    # viewport leaves a ~294px chartbox, so 230 + 30 left ~34px of plot for a
+    # 20-bar ranking. I4: the horizontal branch replaced axisLabel wholesale
+    # and dropped interval:0, so ECharts thinned 20 agency names to about 10.
+    js = _charts_js()
+    assert "gridLeft" in js, "the ranking gutter must be derived from the width"
+    assert re.search(r"grid:\s*\{\s*left:\s*230", js) is None, \
+        "the ranking gutter is a fixed pixel value again"
+    assert re.search(r"interval:\s*0[^}]*width:\s*labelWidth", js, re.S), \
+        "the horizontal category axis must keep interval: 0"
+
+
+def test_ranking_chartbox_is_tall_enough_for_its_labels():
+    # I4: 20 bands drawn with interval:0 need more than the 320px default.
+    css = _site_css()
+    m = re.search(r"\.chartbox\.topn\s*\{[^}]*min-height:\s*(\d+)px", css, re.S)
+    assert m, "no taller box for the horizontal rankings"
+    assert int(m.group(1)) >= 500, \
+        f"{m.group(1)}px leaves under 25px a band for 20 agency names"
+
+
+def test_fignote_passes_aa_on_the_figure_card():
+    # I5: .fignote carries every honesty caveat the engine emits — the ranking
+    # pool, the axis disclaimers, the single-year explanation. At 0.78rem that
+    # is body text and must clear 4.5:1 on the --surface the figure card
+    # paints, not the 3.3:1 --muted gave it.
+    css = _site_css()
+    m = re.search(r"\.fignote\s*\{[^}]*color:\s*var\((--[a-z0-9-]+)\)", css, re.S)
+    assert m, "no .fignote colour"
+    token = m.group(1)
+    fg = re.search(rf"{token}:\s*(#[0-9a-fA-F]{{6}})", css)
+    bg = re.search(r"--surface:\s*(#[0-9a-fA-F]{6})", css)
+    assert fg and bg, f"cannot resolve {token} / --surface"
+    ratio = _contrast(fg.group(1), bg.group(1))
+    assert ratio >= 4.5, \
+        f".fignote {token} {fg.group(1)} is {ratio:.2f}:1 on the card surface"
+
+
+def test_ranking_excludes_the_total_pseudo_agency_and_quarter_rows():
+    # C3: the frame carries 8 golden Q1 rows under agency_name "Total" (a
+    # NATIONAL single-quarter figure, not an agency). FY-parameterised ranking
+    # newly reaches them: on FY2025-26 "Total" outranks every real agency
+    # (received 12,359 vs Home Affairs 12,264) and puts one quarter's number on
+    # a chart labelled "basis: financial year". An FY ranking sums annual rows
+    # only, and ranks real agencies only.
+    frame = Frame(normalise_all())
+    golden = [f for f in frame.facts if f["agency_name"].lower() == "total"]
+    assert golden, "the golden national rows moved — retarget this guard"
+    assert all(f["quarter"] is not None for f in golden), \
+        "a 'Total' row without a quarter would slip past the annual-rows guard"
+    js = _charts_js()
+    assert re.search(r'agency_name\.toLowerCase\(\)\s*===\s*"total"', js), \
+        "the ranking must exclude the 'Total' pseudo-agency"
+    assert re.search(r"r\.quarter\s*!==\s*null", js), \
+        "an FY ranking must sum annual rows only"
+
+
+def test_chart_engine_keeps_an_honest_placeholder_honest():
+    # M2/M5: a figure with no published data still ships as a truthy OBJECT
+    # ({categories: [...], series: [{values: []}]}), so an object-truthiness
+    # test let mountChart paint a blank canvas over the server's honest
+    # placeholder after one filter round-trip. Mirror _figure_has_data.
+    js = _charts_js()
+    assert "figHasData" in js, \
+        "the engine must test for VALUES, not for object truthiness"
+    assert not re.search(r"!fig\s*\|\|\s*!fig\.value", js), \
+        "object truthiness is back"
+
+
+def test_chart_engine_rounds_the_way_the_server_rounds():
+    # M4: the client rounded half UP (Math.round(1000*x)/10) while the server
+    # uses Python's half-to-even round(x, 1). Measured over every reachable
+    # ratio selection (agency/portfolio x FY x bucket), 33 of 10,452 disagreed
+    # by 0.1 — e.g. within_statutory 13/16 renders 81.2 on the page and 81.3 in
+    # the chart. Same operand order, same rounding rule, or the two disagree.
+    js = _charts_js()
+    assert "Math.round(1000" not in js, "half-up ratio rounding is back"
+    assert "roundTo(" in js and "down % 2 === 0" in js, \
+        "the engine must round half to even, as Python's round() does"

@@ -211,8 +211,13 @@ h1 {
 .kpi .source, .figure-card .source {
   display: block; font-size: 0.72rem; color: var(--muted); margin-top: 2px;
 }
+/* .fignote carries every honesty caveat the chart engine emits — the ranking
+   pool, the axis-rescale and axis-extension disclaimers, the single-year
+   explanation. It is body text, not a decorative label, so it takes --ink-2
+   (6.64:1 on the card surface); --muted put the disclaimer at 3.25:1 — under
+   the 4.5:1 AA bar, and the least legible line on the page. */
 .fignote {
-  font-size: 0.78rem; color: var(--muted); margin: 6px 0 0;
+  font-size: 0.78rem; color: var(--ink-2); margin: 6px 0 0;
 }
 
 /* --- movers tables (the FY-pair change analysis beside each change chart) --- */
@@ -317,6 +322,13 @@ h1 {
 /* --- ECharts containers ---------------------------------------------------- */
 
 .chartbox { min-height: 320px; }
+
+/* A horizontal ranking draws every category label (interval: 0), so its 20
+   bands need room: at the 320px default they share ~280px — ~14px a band
+   against an 11px font — and the labels collide. foi-charts.js adds .topn to a
+   chartbox it mounts a ranking into, and removes it when the same box falls
+   back to a trend or a placeholder. */
+.chartbox.topn { min-height: 560px; }
 
 /* --- no-data placeholders -------------------------------------------------- */
 
