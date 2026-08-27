@@ -534,6 +534,13 @@ def create_app():
             return b
         return api.measures(frame)
 
+    @app.get("/api/provenance")
+    def api_provenance(request: Request, key: str | None = None):
+        b = _throttled(request)
+        if b:
+            return b
+        return api.provenance(frame, key=key)
+
     @app.get("/")
     def index():
         return HTMLResponse(pages["at-a-glance"])
@@ -616,7 +623,14 @@ def create_app():
         return out
 
     @app.get("/{page}.html")
-    def page(page: str):
+    def page(page: str, key: str | None = None):
+        if page == "provenance" and key is not None:
+            # a figure card's "where did this come from" link arrives with the
+            # figure key attached, so the reader gets THAT figure's measured
+            # basis without having to phrase an FOI noun (the guardrail accepts
+            # the key directly, never widened).
+            from site.pages import _page_provenance
+            return HTMLResponse(_page_provenance(frame, key=key))
         if page in pages:
             return HTMLResponse(pages[page])
         return JSONResponse({"error": "not found"}, status_code=404)

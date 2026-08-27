@@ -19,7 +19,7 @@ PAGE_KEYS = [
     "at-a-glance", "requests-received", "key-agency-contributions-received",
     "requests-finalised", "requests-decided", "key-agency-contributions-decided",
     "decision-outcomes", "change-decision-outcomes", "timeliness",
-    "change-timeliness", "data-notes", "how-to-use", "api",
+    "change-timeliness", "data-notes", "how-to-use", "api", "provenance",
 ]
 
 
@@ -147,7 +147,7 @@ def test_filters_bar_present():
         for dim in ["agency", "portfolio", "type", "fy"]:
             assert f'data-filter="{dim}"' in html, \
                 f"{key}: missing a data-filter=\"{dim}\" select"
-    pages_without_filters = ["data-notes", "how-to-use", "api"]
+    pages_without_filters = ["data-notes", "how-to-use", "api", "provenance"]
     for key in pages_without_filters:
         assert '<div class="filters' not in pages[key], \
             f"{key}: a page outside the filter scope must not render a filter bar"
@@ -306,6 +306,13 @@ def test_no_outbound_oaic_links_or_branding():
     # out of the rebranded Bluebird product, and no outbound OAIC link or AG
     # copyright survives anywhere, source captions included.
     for key, html in _pages().items():
+        if key == "provenance":
+            # the provenance page's whole job is to cite where the data came from,
+            # including the OAIC dashboard the golden Q1 figures were transcribed
+            # from — sourcing, not branding, the same rationale as the .source
+            # caption exemption. The AG-copyright check below still applies.
+            assert "© Commonwealth of Australia" not in html, f"{key}: AG copyright"
+            continue
         assert "oaic.gov.au" not in html, f"{key}: outbound OAIC link remains"
         stripped = re.sub(r'<(span|p) class="source">.*?</\1>', "", html, flags=re.S)
         if key == "data-notes":
@@ -476,8 +483,27 @@ def test_every_chart_page_has_the_filter_bar():
 
 def test_reference_pages_have_no_filter_bar():
     pages = _pages()
-    for key in ("data-notes", "how-to-use", "api"):
+    for key in ("data-notes", "how-to-use", "api", "provenance"):
         assert 'class="filters' not in pages[key]
+
+
+def test_provenance_page_lists_sources_and_decisions():
+    # the public provenance page is the one surface that needs no login and no
+    # FOI noun: it lists every ingested source with its hash, the derivations
+    # and the curation decisions, straight off the validated registry.
+    html = _pages()["provenance"]
+    assert "Data provenance" in html
+    assert "agency-foi-data-2024-25.xlsx" in html
+    assert "sha256" in html
+    assert "Curation decision" in html
+    assert "data.gov.au" in html
+
+
+def test_figure_cards_link_their_own_provenance():
+    # the figure-key affordance: a chart card's "where did this come from?"
+    # arrives with the key attached, so the guardrail is never widened.
+    html = _pages()["requests-received"]
+    assert 'href="/provenance.html?key=requests_received_trend"' in html
 
 
 def test_chart_pages_ship_specs_for_their_figures():
@@ -1473,11 +1499,14 @@ def test_part_year_axis_note_fits_the_figure_kind_and_what_the_axis_did():
         received_fig["categories"].index(fy)]
     cases.append(("requests_received_trend, no filter", False,
                   _series_max(received_fig), received_pin))
-    # and the two cells no selection reaches on today's frame (0 of the 405
-    # count-shaped selections raised or held the axis), driven with constructed
-    # numbers so the sentence a future frame would print is still checked
+    # and the cells the enumerated real-frame cases above do not reach: the two
+    # count-shaped cells (0 of the 405 count-shaped selections raised or held
+    # the axis) and the one ratio selection whose axis is unchanged (1 of the 90
+    # ratio selections) — driven with constructed numbers so the sentence each
+    # cell would print is still checked
     cases.append(("count, axis grew (synthetic)", False, 100.0, 140.0))
     cases.append(("count, axis held (synthetic)", False, 100.0, 100.0))
+    cases.append(("ratio, axis held (synthetic)", True, 100.0, 100.0))
 
     seen = set()
     for label, is_ratio, baseline, pin in cases:
@@ -1505,9 +1534,11 @@ def test_part_year_axis_note_fits_the_figure_kind_and_what_the_axis_did():
 
     # the real frame must actually exercise the discrimination, not just the
     # synthetic tail: a rate that lowered, a rate that grew and a count that
-    # lowered all have to appear above
-    for expected in ((True, "lowered"), (True, "raised"), (False, "lowered")):
-        assert expected in seen, f"{expected} was never reached on the real frame"
+    # lowered all have to appear above; the unchanged-rate cell (1 of 90, not
+    # enumerated above) is driven synthetically and asserted too
+    for expected in ((True, "lowered"), (True, "raised"), (False, "lowered"),
+                     (True, "unchanged")):
+        assert expected in seen, f"{expected} was never reached"
     # and the two lowered sentences must differ, or the dispatch bought nothing
     assert entry[table[(True, "lowered")]] != entry[table[(False, "lowered")]]
 
@@ -1515,8 +1546,15 @@ def test_part_year_axis_note_fits_the_figure_kind_and_what_the_axis_did():
     assert "partYearAxisNote(partial, spec, baselineMax[key], pin)" in js, \
         "the render path must pass the spec, or the kind can never reach it"
     assert "partial.axis_note;" not in js, "the single axis claim is back"
-    assert "function partYearNote(" in js and 'kind === "ratio_trend"' in js, \
-        "the note must vary by spec kind"
+    assert "function partYearNote(" in js, "the kind caveat is gone"
+    # the ONE predicate both part-year sentences route through, pinned to its
+    # body (a loose substring match would pass even after the predicate is
+    # neutered to `return true`, because rederiveFigure also writes
+    # `spec.kind === "ratio_trend"`)
+    isr = re.search(r"function isRatioFigure\(spec\) \{(.*?)\n  \}", js, re.S)
+    assert isr, "isRatioFigure is gone"
+    assert "spec.kind === \"ratio_trend\"" in isr.group(1), \
+        "isRatioFigure must test spec.kind, not hardcode true/false"
 
 
 def test_chart_axis_pin_is_applied_on_a_null_test_not_a_truthy_one():

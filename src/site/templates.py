@@ -41,7 +41,8 @@ SIDENAV_GROUPS = [
                     ("change-timeliness", "Change in timeliness")]),
     ("Reference", [("data-notes", "Data notes"),
                    ("how-to-use", "How to use"),
-                   ("api", "API access")]),
+                   ("api", "API access"),
+                   ("provenance", "Data provenance")]),
 ]
 
 BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")

@@ -52,6 +52,33 @@ def test_measures_groups():
     assert "received" in m["requests"]
 
 
+def test_provenance_api_returns_the_registry():
+    out = api.provenance(_frame())
+    assert out["sources"] and out["decisions"] and out["derivations"]
+
+
+def test_provenance_api_with_a_key_adds_the_figure_layer():
+    out = api.provenance(_frame(), key="received_top20")
+    assert out["figure"]["key"] == "received_top20"
+    assert out["figure"]["source_rows"] > 0
+    assert len(out["figure"]["rows_hash"]) == 64
+
+
+def test_provenance_api_unknown_key_errors_not_raises():
+    out = api.provenance(_frame(), key="nope")
+    assert "error" in out
+    assert "sources" not in out
+
+
+def test_provenance_endpoint_via_testclient():
+    c = TestClient(create_app())
+    r = c.get("/api/provenance")
+    assert r.status_code == 200
+    assert r.json()["sources"]
+    with_key = c.get("/api/provenance?key=received_top20").json()
+    assert with_key["figure"]["key"] == "received_top20"
+
+
 def test_api_endpoints_via_testclient():
     c = TestClient(create_app())
     assert c.get("/api/").status_code == 200

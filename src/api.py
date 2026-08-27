@@ -22,6 +22,7 @@ import time
 from collections import defaultdict
 
 from stats.catalog import foi_stats, FIG_KEYS, STAT_KEYS, FIG_CAPTIONS
+from provenance import describe, ProvenanceError
 
 # --- rate limiter: fixed-window per-IP --------------------------------------
 # A tiny, dependency-free throttle. Per IP we allow RATE_LIMIT requests per
@@ -142,3 +143,20 @@ def measures(frame) -> dict:
     for f in frame.facts:
         groups[f["measure_group"]].add(f["measure"])
     return {g: sorted(m) for g, m in sorted(groups.items())}
+
+
+def provenance(frame, key=None) -> dict:
+    """The curated provenance registry, plus (with `key`) a figure's live layer.
+
+    Same read-only contract as the other endpoints: the curated registry a
+    human wrote plus measured figure facts, never a generated claim. An unknown
+    key returns an error dict rather than a 500 (the DSL op has the same shape),
+    and a drifted registry returns an error rather than stale provenance — a
+    half-registry beside an error would be the false claim in miniature.
+    """
+    try:
+        return describe(frame, key=key)
+    except KeyError:
+        return {"error": f"unknown figure/stat key: {key}"}
+    except ProvenanceError as exc:
+        return {"error": str(exc)}

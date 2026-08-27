@@ -81,4 +81,4 @@ def check_request(text: str) -> None:
             or _FOREIGN_FOI_RE.search(t) or _FOREIGN_FOI_CODE_RE.search(t):
         raise ScopeRefusal("Bluebird FOI Insights builds dashboards and reports from Australian Government freedom-of-information statistics. That request is outside that scope — ask me about FOI requests, decision outcomes, timeliness, or agency/portfolio trends instead.")
     if not any(w in t.lower() for w in _FOI_TERMS):
-        raise ScopeRefusal("Bluebird FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend.")
+        raise ScopeRefusal("Bluebird FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend. If you are asking where a figure came from, name it — \"where did the requests received figures come from?\" — and you will get its source files, hashes and curation decisions.")

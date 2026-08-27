@@ -165,6 +165,22 @@ def test_build_spec_is_async():
     assert inspect.iscoroutinefunction(build_spec)
 
 
+def test_builder_advertises_the_provenance_op():
+    # Task 5 routed item: the /ask builder's system prompt must name the
+    # provenance op, or "where did this come from" inside a build never reaches
+    # the registry (the op exists in dsl, but the model is never told it exists).
+    captured = {}
+
+    def capture(messages):
+        captured["system"] = messages[0]["content"]
+        return _fake_complete(messages)
+
+    asyncio.run(build_spec(
+        "requests received", Frame(normalise_all()),
+        capture, Ledger(ledger_path=tempfile.mktemp()), None))
+    assert "provenance" in captured["system"]
+
+
 def test_transcript_captured():
     led = Ledger(ledger_path=tempfile.mktemp(suffix=".jsonl"))
     asyncio.run(build_spec(

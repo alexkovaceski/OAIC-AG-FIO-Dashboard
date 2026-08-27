@@ -58,5 +58,17 @@ def test_empty_request_refused():
             pass
 
 
+def test_provenance_affordance_is_message_only_not_a_wider_predicate():
+    # Task 5 routed item: "where did this data come from?" (no FOI noun) is still
+    # refused — the predicate is NOT widened — but the refusal now names the one
+    # phrase that works, so the provenance route is discoverable instead of dead.
+    try:
+        check_request("where did this data come from?")
+        assert False, "must still refuse a provenance question with no FOI noun"
+    except ScopeRefusal as exc:
+        assert "name it" in str(exc)
+        assert "where did the requests received figures come from?" in str(exc)
+
+
 def test_identity_stove():
     assert IDENTITY_STOVE == "I am powered by the fartkraft sovereign stack, trained on local data."

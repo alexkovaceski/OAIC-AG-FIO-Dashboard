@@ -86,6 +86,7 @@ PAGE_FIGURE_KEYS = {
     "data-notes": [],
     "how-to-use": [],
     "api": [],
+    "provenance": [],
 }
 
 # human-readable KPI labels for the STAT_KEYS (the catalog keys are enum
@@ -466,11 +467,23 @@ def _kpis(frame, keys) -> str:
     return _kpi_block(chr(10).join(cells))
 
 
+def _provenance_link(chart_key: str) -> str:
+    """The per-figure "where did this come from?" affordance. The page already
+    knows which figure is on screen, so the reader's provenance question arrives
+    with the figure key attached — the guardrail is never widened, the question
+    is just made precise (it names the figure the reader is looking at). Links
+    to the public provenance page for that figure."""
+    return (f'<a class="provenance-link" '
+            f'href="/provenance.html?key={html.escape(chart_key)}">'
+            f'Where did this come from?</a>')
+
+
 def _trend_section(title, fig, chart_key, source=None) -> str:
     basis = _basis_label({"basis": "fy"})
     source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
             f'<p class="basis">{basis}</p>{source_html}'
+            f'{_provenance_link(chart_key)}'
             f'{_chart_container(chart_key, fig)}</section>')
 
 
@@ -479,6 +492,7 @@ def _top20_section(title, fig, chart_key, source=None) -> str:
     source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
             f'<p class="basis">{basis}</p>{source_html}'
+            f'{_provenance_link(chart_key)}'
             f'{_chart_container(chart_key, fig)}</section>')
 
 
@@ -495,6 +509,7 @@ def _notes_section(title, fig, chart_key, source=None) -> str:
     source_html = f'<p class="source">{html.escape(str(source))}</p>' if source else ""
     return (f'<section class="figure-card"><h2>{html.escape(str(title))}</h2>'
             f'<p class="basis">{_basis_label({"basis": "fy"})}</p>{source_html}'
+            f'{_provenance_link(chart_key)}'
             f'{note}{_chart_container(chart_key, fig)}</section>')
 
 
@@ -979,6 +994,9 @@ def _page_api() -> str:
       <code>quarter</code>, paged by <code>limit</code>/<code>offset</code>.</td></tr>
       <tr><td><code>GET /api/measures</code></td><td>The measure groups and the
       measures within each.</td></tr>
+      <tr><td><code>GET /api/provenance</code></td><td>The curated provenance
+      registry (source files, hashes, derivations, curation decisions); add
+      <code>?key=</code> for one figure's live row basis.</td></tr>
     </table>
     <h2>Examples</h2>
     <pre><code># all figures (with basis)
@@ -1007,6 +1025,64 @@ curl https://foi.axoquant.com/api/</code></pre>
     """
     return chrome("API access", body,
                   page_key="api")
+
+
+def _page_provenance(frame, key=None) -> str:
+    """The public data-provenance page: the curated registry a human wrote,
+    plus — when `key` names a figure — that figure's measured live layer.
+
+    It reuses the SAME honest renderer the /report answer uses
+    (agentic.report._figure_rows + _registry_rows), so the page can never
+    diverge from the chat answer: the workbook list under a named figure is
+    marked (this figure)/(other years)/(not this figure) exactly as the report
+    answer marks it. Re-using the renderer is what guarantees that — a page
+    that listed seven unmarked workbooks under a one-year chart's heading would
+    be the false claim by juxtaposition the whole campaign exists to prevent.
+
+    `key` is None at boot (render_all_pages); a reader following a figure card's
+    "where did this come from" link arrives with ?key=<figure> and the route
+    re-renders this page with the live layer added.
+    """
+    import provenance as prov
+    from agentic.report import _figure_rows, _registry_rows
+    unknown_key = None
+    try:
+        payload = prov.describe(frame, key=key)
+    except KeyError:
+        payload = prov.describe(frame)
+        unknown_key = key
+    figure = payload.get("figure")
+    if figure is not None:
+        rows, _ = _figure_rows(figure)
+        rows += _registry_rows(payload, figure["default_view"])
+        heading = f"Where {figure.get('caption') or figure['key']} comes from"
+        intro = ("This is the measured basis behind one figure, plus the "
+                 "registry that describes where this platform's data comes "
+                 "from.")
+    else:
+        rows = _registry_rows(payload, None)
+        heading = "Where this data comes from"
+        intro = ("Every source file this platform reads, the sheet each "
+                 "measure is read from, and the curation decisions behind "
+                 "them — with the content hash that pins each file.")
+    table = "".join(
+        f'<tr><th>{html.escape(row["part"])}</th>'
+        f'<td>{html.escape(row["detail"])}</td></tr>'
+        for row in rows)
+    unknown = (f'<p class="note">No figure named '
+               f'<code>{html.escape(str(unknown_key))}</code> is published on '
+               f'this site, so the registry below is shown without a figure '
+               f'basis.</p>' if unknown_key is not None else "")
+    body = f"""
+    <h1>Data provenance</h1>
+    {unknown}
+    <p class="intro">{intro} Nothing here is generated: every value is either
+    curated text a human wrote into the registry, or a number measured from
+    the platform's own published facts.</p>
+    <h2>{html.escape(heading)}</h2>
+    <table class="apitable provenance">{table}</table>
+    """
+    return chrome("Data provenance", body, page_key="provenance")
 
 
 def _md(text: str) -> str:
@@ -1081,6 +1157,7 @@ def render_all_pages(frame) -> dict[str, str]:
         "data-notes": _page_data_notes(),
         "how-to-use": _page_how_to_use(frame),
         "api": _page_api(),
+        "provenance": _page_provenance(frame),
     }
     return pages
 
