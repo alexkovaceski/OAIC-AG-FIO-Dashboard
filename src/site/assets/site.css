@@ -133,6 +133,22 @@ a { color: var(--link); }
 .topnav .btn-login:hover { background: var(--blue); }
 .nav-username { color: var(--ink-2); font-weight: 600; font-size: 0.9rem; padding: 0 0.4rem; }
 
+/* signed-in account chip: a small avatar circle with the user's initial */
+.user-chip { display: inline-flex; align-items: center; gap: 0.45rem; }
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* --- breadcrumb ------------------------------------------------------------ */
 
 .breadcrumb {

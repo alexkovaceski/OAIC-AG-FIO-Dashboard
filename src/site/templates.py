@@ -43,7 +43,9 @@ SIDENAV_GROUPS = [
                    ("how-to-use", "How to use"),
                    ("api", "API access"),
                    ("provenance", "Data provenance")]),
-    ("Risk & Forecast", [("risk", "Risk & Forecast")]),
+    ("Workspace", [("chat", "Chat"),
+                   ("reports", "Reports"),
+                   ("risk", "Risk & Forecast")]),
 ]
 
 BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")
@@ -104,14 +106,15 @@ def sidenav_html(page_key: str, user: dict | None = None) -> str:
     # w-sidenav theme token (see tailwind/input.css) — Tailwind's arbitrary
     # values are flaky under the v4 content scan, named tokens are not.
     #
-    # The "Risk & Forecast" group is a signed-in section: it is rendered only
-    # when a user is present, so the public (boot-rendered) pages do not
-    # advertise the internal risk views to anonymous visitors.
+    # The "Workspace" group (Chat / Reports / Risk & Forecast) is a signed-in
+    # section: it is rendered only when a user is present, so the public
+    # (boot-rendered) pages do not advertise the signed-in tools to anonymous
+    # visitors.
     out = ['<nav class="sidenav shrink-0 w-sidenav sticky top-0 self-start '
            'max-h-screen overflow-y-auto pt-6 pr-4 pb-8 pl-8" '
            'aria-label="FOI statistics">']
     for group, items in SIDENAV_GROUPS:
-        if group == "Risk & Forecast" and user is None:
+        if group == "Workspace" and user is None:
             continue
         out.append(f'<div class="group">{html.escape(group)}</div>')
         for key, label in items:
@@ -124,13 +127,15 @@ def sidenav_html(page_key: str, user: dict | None = None) -> str:
 def _user_nav(user) -> str:
     if user is None:
         return '<a class="nav-link btn-login" href="/login">Log in</a>'
-    risk = ('<a class="nav-link" href="/risk.html">Risk</a>'
-            if user.get("role") == "internal" else "")
-    return ('<a class="nav-link" href="/chat.html">Chat</a>'
-            '<a class="nav-link" href="/reports.html">Reports</a>' + risk
-            + '<span class="nav-username">'
-            + html.escape(str(user.get("username", ""))) + '</span>'
-            '<a class="nav-link" href="/logout">Log out</a>')
+    name = str(user.get("username", "")) or "?"
+    initial = name[:1].upper() or "?"
+    # Chat / Reports / Risk live in the left "Workspace" sidenav group now; the
+    # masthead carries just the account chip (avatar + username + log out).
+    return ('<span class="user-chip" title="Signed in as ' + html.escape(name) + '">'
+            '<span class="user-avatar" aria-hidden="true">'
+            + html.escape(initial) + '</span>'
+            '<span class="nav-username">' + html.escape(name) + '</span>'
+            '<a class="nav-link" href="/logout">Log out</a></span>')
 
 
 def chrome(title: str, body_html: str = "", page_key: str | None = None,

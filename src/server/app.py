@@ -69,7 +69,7 @@ from storage.lineage import (Ledger, record_artifact, record_op,  # noqa: E402
                              update_artifact, list_artifacts)
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
-from site.templates import chrome  # noqa: E402
+from site.templates import chrome, _user_nav, sidenav_html  # noqa: E402
 from agentic.builder import build_spec  # noqa: E402
 from agentic.guardrails import check_request, ScopeRefusal  # noqa: E402
 from agentic.render import _stat_key, render_dashboard_page  # noqa: E402
@@ -397,6 +397,20 @@ def _load_dashboard(artifact_id, conn):
     return spec, transcript
 
 
+def _signed_in_page(full_html: str, page_key: str, user: dict) -> str:
+    """Re-wrap a boot-rendered page with the signed-in chrome.
+
+    The public pages are rendered once at boot with user=None (no masthead
+    account chip, no Workspace sidenav group). A signed-in request swaps those
+    two chrome pieces in, so navigating to a public section no longer drops the
+    account controls or the Chat/Reports/Risk & Forecast links. The swap is an
+    exact-string replace: both sides come from the same renderers, so a mismatch
+    is a code change, not a data edge.
+    """
+    out = full_html.replace(_user_nav(None), _user_nav(user))
+    return out.replace(sidenav_html(page_key, None), sidenav_html(page_key, user))
+
+
 def _degraded_dashboard_page(artifact_id) -> str:
     """Honest fail-open page for a dashboard that cannot be rendered (unreachable
     DB, or no durable spec for the artifact). Never a 500, never a fabricated
@@ -599,8 +613,12 @@ def create_app():
         return api.provenance(frame, key=key)
 
     @app.get("/")
-    def index():
-        return HTMLResponse(pages["at-a-glance"])
+    def index(request: Request):
+        html_ = pages["at-a-glance"]
+        user = _session_user(request)
+        if user is not None:
+            html_ = _signed_in_page(html_, "at-a-glance", user)
+        return HTMLResponse(html_)
 
     @app.post("/login")
     async def login(request: Request):
@@ -698,7 +716,7 @@ def create_app():
         return out
 
     @app.get("/{page}.html")
-    def page(page: str, key: str | None = None):
+    def page(request: Request, page: str, key: str | None = None):
         if page == "provenance" and key is not None:
             # a figure card's "where did this come from" link arrives with the
             # figure key attached, so the reader gets THAT figure's measured
@@ -707,7 +725,11 @@ def create_app():
             from site.pages import _page_provenance
             return HTMLResponse(_page_provenance(frame, key=key))
         if page in pages:
-            return HTMLResponse(pages[page])
+            html_ = pages[page]
+            user = _session_user(request)
+            if user is not None:
+                html_ = _signed_in_page(html_, page, user)
+            return HTMLResponse(html_)
         return JSONResponse({"error": "not found"}, status_code=404)
 
     @app.post("/ask")

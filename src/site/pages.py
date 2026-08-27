@@ -1179,7 +1179,7 @@ def chat_page(user) -> str:
     <p class="hint">Tip: try "how many requests were received?", "what share
     of decisions were refused?", "which agencies decide the most requests?".</p>
     """
-    return chrome("Chat", body, page_key=None, user=user,
+    return chrome("Chat", body, page_key="chat", user=user,
                   scripts=_asset_link("chat.js"))
 
 
@@ -1210,5 +1210,5 @@ def reports_page(user, artifacts=None) -> str:
     decisions refused", "timeliness within statutory".</p>
     {built}
     """
-    return chrome("Reports", body, page_key=None, user=user,
+    return chrome("Reports", body, page_key="reports", user=user,
                   scripts=_asset_link("report.js"))

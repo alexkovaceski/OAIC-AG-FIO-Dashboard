@@ -338,11 +338,23 @@ def test_masthead_has_bluebird_logo():
         assert 'class="bb-mark" src="/assets/bb-logo.png"' in html, "masthead missing bb-mark logo"
 
 
-def test_masthead_risk_link_only_for_internal():
-    from site.templates import _user_nav
-    assert "Risk" in _user_nav({"role": "internal", "username": "a"})
-    assert "Risk" not in _user_nav({"role": "viewer", "username": "a"})
+def test_masthead_user_chip_and_workspace_sidenav():
+    from site.templates import _user_nav, sidenav_html
+    # the account chip is role-independent; Chat/Reports/Risk & Forecast moved
+    # to the left "Workspace" sidenav group, which is gated to signed-in users.
     assert "btn-login" in _user_nav(None)
+    chip = _user_nav({"role": "internal", "username": "alex"})
+    assert "user-avatar" in chip
+    assert "alex" in chip
+    assert "Risk" not in chip
+    assert "chat.html" not in chip and "reports.html" not in chip
+    # Workspace group: hidden for anonymous, shown for signed-in
+    anon = sidenav_html("at-a-glance", None)
+    signed = sidenav_html("at-a-glance", {"role": "viewer", "username": "alex"})
+    assert "Workspace" not in anon
+    assert "Workspace" in signed
+    assert "/chat.html" in signed and "/reports.html" in signed
+    assert "/risk.html" in signed
 
 
 def test_top_nav_links_are_all_internal():
