@@ -102,6 +102,16 @@ def _agency_trend(frame, agencies):
     return out
 
 
+def _load_agency_forecast(path):
+    """Load the {agency: [{fy, value, lo, hi}]} sidecar, or {} when absent."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _fitted_page(user, frame, artifacts):
     base = artifacts.get("base", "")
     forecast_dir = os.path.join(base, "forecast")
@@ -119,6 +129,8 @@ def _fitted_page(user, frame, artifacts):
         "benchmark": benchmark,
         "trend": (_agency_trend(frame, {b["agency"] for b in benchmark})
                   if frame is not None else {}),
+        "agency_forecast": _load_agency_forecast(
+            os.path.join(forecast_dir, "agency_predictions.json")),
     }
     # the JSON blob must never break out of its <script> tag (mirrors __pageData)
     blob = json.dumps(risk_data).replace("</", "<\\/")

@@ -95,6 +95,7 @@
   var table = document.getElementById("risk-table");
   var detail = document.getElementById("agency-detail");
   var trend = data.trend || {};
+  var agencyFc = data.agency_forecast || {};
 
   function showAgency(agency) {
     var b = null;
@@ -105,13 +106,50 @@
     var share = b.share == null ? "\u2014" : Math.round(b.share * 100) + "%";
     var tier = b.tier || "low";
     var tr = trend[agency] || [];
+    var afc = agencyFc[agency] || [];
+    var fcHtml = "";
+    if (afc.length) {
+      var fcText = afc.map(function (p) {
+        return p.fy + ": " + Math.round(p.value).toLocaleString();
+      }).join(", ");
+      fcHtml = '<p>Forecast requests received: <strong>' + fcText +
+        '</strong>.</p><div class="chartbox chartbox-sm" id="agency-fc-chart"></div>';
+    }
     detail.innerHTML = '<div class="report-card"><h3>' + agency + '</h3>' +
       '<p><strong>' + share + '</strong> of decisions were made within the ' +
       'statutory period this year' +
       (b.decided ? ' (' + b.decided.toLocaleString() + ' decisions)' : '') +
       '. Next-year expectation: <span class="tier tier-' + tier + '">' +
       (tierLabel[tier] || tier) + '</span>.</p>' +
+      fcHtml +
       '<div class="chartbox chartbox-sm" id="agency-trend-chart"></div></div>';
+
+    // per-agency request-volume forecast (actual + forecast bars)
+    var fcEl = document.getElementById("agency-fc-chart");
+    if (fcEl && afc.length) {
+      var fcCh = echarts.init(fcEl);
+      var actVals = tr.map(function (t) { return t.received == null ? null : t.received; });
+      var fcVals = tr.map(function () { return null; })
+        .concat(afc.map(function (p) { return Math.round(p.value); }));
+      var fcCats = tr.map(function (t) { return t.fy; })
+        .concat(afc.map(function (p) { return p.fy; }));
+      fcCh.setOption({
+        color: [ink, brand],
+        grid: { left: 64, right: 16, top: 24, bottom: 32 },
+        tooltip: { trigger: "axis" },
+        legend: { data: ["Actual", "Forecast"], top: 0 },
+        xAxis: { type: "category", data: fcCats, axisLabel: { color: ink2 } },
+        yAxis: { type: "value", name: "Requests received",
+                 axisLabel: { color: ink2 }, splitLine: { lineStyle: { color: grid } } },
+        series: [
+          { name: "Actual", type: "bar", data: actVals, barMaxWidth: 24,
+            itemStyle: { color: ink } },
+          { name: "Forecast", type: "bar", data: fcVals, barMaxWidth: 24,
+            itemStyle: { color: brand } }
+        ]
+      });
+    }
+
     var el = document.getElementById("agency-trend-chart");
     if (el && tr.length) {
       var ch = echarts.init(el);

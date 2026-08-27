@@ -21,6 +21,24 @@ def build_forecast_series(facts, measure):
             "values": [round(by[y], 3) if y in by else None for y in cats]}
 
 
+def build_agency_series(facts, measure):
+    """Per-agency annual series — {agency: {"fy": [...], "values": [...]}}.
+
+    The per-agency volume forecast fits ONE global Chronos model over every
+    agency's own series, so each agency gets its own next-FY forecast instead of
+    sharing the single total. Missing years are None (sparse agencies simply
+    contribute fewer points to the multi-series frame).
+    """
+    rows = [f for f in facts if f["quarter"] is None
+            and f["measure"] == measure and f["bucket"] == "total"]
+    by_agency = {}
+    for f in rows:
+        by_agency.setdefault(f["agency_name"], {})[f["fy"]] = f["value"]
+    cats = sorted({f["fy"] for f in facts if f["quarter"] is None})
+    return {a: {"fy": cats, "values": [by_agency[a].get(y) for y in cats]}
+            for a in by_agency}
+
+
 def build_agency_features(facts):
     rows = [
         {"agency": f["agency_name"], "fy": f["fy"], "measure": f["measure"],

@@ -41,7 +41,8 @@ import pandas as pd  # noqa: E402
 
 import config  # noqa: E402
 from ingest.normalise import normalise_all  # noqa: E402
-from risk.features import build_agency_features, build_forecast_series  # noqa: E402
+from risk.features import (build_agency_features, build_agency_series,  # noqa: E402
+                           build_forecast_series)
 from storage.frame import Frame  # noqa: E402
 from storage.facts import canonical_hash  # noqa: E402
 
@@ -229,6 +230,71 @@ def fit_forecast(series: dict, time_limit: int = FORECAST_TIME_LIMIT):
     return points, type(raw).__name__
 
 
+def _agency_to_tsdf(agency_series: dict):
+    """Wrap the per-agency series dict into one multi-item TimeSeriesDataFrame.
+
+    One item per agency; sparse agencies contribute only the years they report.
+    """
+    from autogluon.timeseries import TimeSeriesDataFrame
+    rows = []
+    for agency, series in agency_series.items():
+        for fy, v in zip(series["fy"], series["values"]):
+            if v is None:
+                continue
+            rows.append({
+                "item_id": agency,
+                "timestamp": pd.Timestamp(year=int(fy[:4]), month=7, day=1),
+                "values": float(v),
+            })
+    if not rows:
+        raise ValueError("no agency series to fit")
+    df = pd.DataFrame(rows)
+    df["item_id"] = df["item_id"].astype(str)
+    df = df.set_index(["item_id", "timestamp"])
+    return TimeSeriesDataFrame(df)
+
+
+def _item_and_fy(idx):
+    """(item_id, fy) from a predict-output index entry, regardless of whether
+    AutoGluon emits (item_id, timestamp) or (timestamp, item_id) order."""
+    a, b = idx
+    ts = a if isinstance(a, pd.Timestamp) else (b if isinstance(b, pd.Timestamp) else None)
+    if ts is None:
+        raise ValueError(f"unexpected forecast index {idx!r}: no pd.Timestamp")
+    item = b if ts is a else a
+    return str(item), _ts_to_fy(ts)
+
+
+def fit_agency_forecast(agency_series: dict, time_limit: int = FORECAST_TIME_LIMIT):
+    """Fit the per-agency Chronos forecast and write forecast/agency_predictions.json.
+
+    ONE global model over every agency's own series — the efficient shape for
+    many short, related series. The renderer reads the sidecar only (never
+    loads the predictor); forecast/agency_model/ keeps it for reproducibility.
+    """
+    from autogluon.timeseries import TimeSeriesPredictor
+    tsdf = _agency_to_tsdf(agency_series)
+    model_dir = FORECAST_DIR / "agency_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    predictor = TimeSeriesPredictor(
+        path=str(model_dir), target="values",
+        prediction_length=PREDICTION_LENGTH, freq="YS-JUL",
+        quantile_levels=QUANTILE_LEVELS)
+    predictor.fit(train_data=tsdf, presets=FORECAST_PRESET, time_limit=time_limit)
+    raw = predictor.predict(tsdf)
+    out: dict = {}
+    for idx, row in raw.iterrows():
+        item, fy = _item_and_fy(idx)
+        out.setdefault(item, []).append({
+            "fy": fy,
+            "value": float(row["mean"]),
+            "lo": float(row[str(QUANTILE_LEVELS[0])]),
+            "hi": float(row[str(QUANTILE_LEVELS[1])]),
+        })
+    _write_json(FORECAST_DIR / "agency_predictions.json", out)
+    return out, type(raw).__name__
+
+
 # --------------------------------------------------------------------------- #
 # classify (AutoGluon-Tabular)                                                #
 # --------------------------------------------------------------------------- #
@@ -383,6 +449,7 @@ def dry_run() -> int:
     autogluon import, nothing written — safe to run on any machine."""
     facts = load_facts()
     series = build_forecast_series(facts, MEASURE)
+    agency_series = build_agency_series(facts, MEASURE)
     features = build_agency_features(facts)
     if features.empty:
         print("error: no annual agency feature rows — nothing to fit", file=sys.stderr)
@@ -392,7 +459,8 @@ def dry_run() -> int:
     print(f"facts: {len(facts)} canonical (rows_hash {canonical_hash(facts)[:12]}...)")
     print(f"forecast series: {len(series['fy'])} FY points "
           f"({series['fy'][0]}..{series['fy'][-1]})")
-    print(f"agency feature rows: {len(features)} over {len(features['agency'].unique())} agencies")
+    print(f"agency series: {len(agency_series)} agencies for the per-agency "
+          f"volume forecast")
     print(f"label rows: {len(labeled)} (final FY {final_fy} unlabeled, excluded "
           f"from training)")
     train = labeled[labeled["fy"] <= SPLIT_FY]
@@ -426,6 +494,7 @@ def main(argv=None) -> int:
     print("fit_risk_models: loading canonical facts (golden gate) ...")
     facts = load_facts()
     series = build_forecast_series(facts, MEASURE)
+    agency_series = build_agency_series(facts, MEASURE)
     features = build_agency_features(facts)
     if features.empty:
         print("error: no annual agency feature rows — nothing to fit", file=sys.stderr)
@@ -442,6 +511,12 @@ def main(argv=None) -> int:
     points, forecast_raw = fit_forecast(series)
     print(f"[forecast] wrote {FORECAST_DIR}/ + predictions.json "
           f"({len(points)} FY points)")
+
+    print(f"\n[agency forecast] fitting per-agency series "
+          f"({len(agency_series)} agencies) ...")
+    agency_out, agency_raw = fit_agency_forecast(agency_series)
+    print(f"[agency forecast] wrote {FORECAST_DIR}/agency_predictions.json "
+          f"({len(agency_out)} agencies)")
 
     print(f"\n[classify] fitting {CLASSIFY_PRESETS} over {len(labeled)} "
           f"labeled rows ...")
