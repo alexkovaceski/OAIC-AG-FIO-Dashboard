@@ -71,9 +71,10 @@ data, not a hang.
 Owned by `root:algolotl`, `0640`. Read by the unit via `EnvironmentFile`:
 
 ```bash
-# LLM endpoint for /ask. Defaults (code-side) are shown; set at least FOI_LLM_MODEL.
+# LLM is resolved by ROLE via axoquant_llm (see note below) — these two are
+# vestigial and no longer read by app code.
 FOI_LLM_URL=http://idc-1:8012/v1/chat/completions
-FOI_LLM_MODEL=qwen3next-80b-a3b-q4
+FOI_LLM_MODEL=qwen3.8-27b-fp8
 FOI_PG_DSN=postgresql://algolotl:<real-role-password>@localhost:5432/horizon
 FOI_PORT=8097
 FOI_SESSION_SECRET=<generated-on-idc-1, never committed>
@@ -81,27 +82,28 @@ FOI_SESSION_SECRET=<generated-on-idc-1, never committed>
 
 | Variable | Default (code) | Purpose |
 |---|---|---|
-| `FOI_LLM_URL` | `http://idc-1:8012/v1/chat/completions` | The local model endpoint `/ask` calls. |
-| `FOI_LLM_MODEL` | `qwen3next-80b` | The model name in the completion payload. **Must be the model idc-1 actually serves.** |
+| `FOI_LLM_URL` | (unused) | Vestigial — the app resolves the endpoint by role via `axoquant_llm`. |
+| `FOI_LLM_MODEL` | (unused) | Vestigial — the app resolves the model by role via `axoquant_llm`. |
 | `FOI_PG_DSN` | `postgresql://algolotl:algolotl@localhost:5432/horizon` | Postgres for auth, chat audit + lineage (fail-open if unreachable). |
 | `FOI_PORT` | `8095` | The port the service binds (must match the tunnel ingress). |
 | `FOI_SESSION_SECRET` | `dev-insecure-secret` (insecure) | Signs login sessions. Must be a real secret in prod. |
 | `FOI_LEDGER` | `data/generated/lineage.jsonl` | JSONL lineage firehose path (relative to the working dir). |
 
-**`FOI_LLM_MODEL` is the one that bites.** The default `qwen3next-80b` 404s on
-idc-1:8012 — the endpoint answers but rejects that model name, so every `/ask`
-falls back to the deterministic canned spec. The demo still 200s, but the "real
-LLM completion" never happens. The model idc-1 serves is
-`qwen3next-80b-a3b-q4` (Qwen3-Next-80B-A3B Q4_K_XL, the `algolotl-llm-author`
-unit on :8012). Verify after deploy:
+**The LLM is resolved by ROLE, not by these env vars.** The app calls
+`axoquant_llm.chat("author", …)`, and the `axoquant_llm` registry maps `author`
+to `idc-1:8012` (the haproxy front for the `algolotl-llm-27b` unit on :8112),
+which now serves **Qwen3.8-27B-FP8** — the fleet consolidated the old
+Qwen3-Next-80B-A3B MoE into a dense 27B on 2026-08-26. `FOI_LLM_URL` /
+`FOI_LLM_MODEL` above are kept only for compatibility and are not read by the
+app, so a stale value cannot cause the silent canned-spec fallback the old note
+warned about. Verify the served model:
 
 ```bash
 ssh 100.86.3.50 "curl -s http://localhost:8012/v1/models"
-# find the exact id, then:
-grep '^FOI_LLM_MODEL=' /etc/foi-insights.env
 ```
 
-`scripts/deploy.py --check` runs this check for you and flags a missing/wrong pin.
+`scripts/deploy.py --check` now probes the served model list directly (not the
+env file) and flags a missing `qwen3.8-27b-fp8`.
 
 **`FOI_PG_DSN` carries the real credential.** The documented default
 `algolotl:algolotl` does NOT authenticate over the network — the horizon

@@ -14,13 +14,15 @@ is no password prompt. The public hostname (foi.axoquant.com) is NOT touched by
 this script - the Cloudflare Worker + tunnel route is one-time setup, documented
 in docs/deploy.md.
 
-Why the FOI_LLM_MODEL check matters: the demo's /ask path calls the local model
-at FOI_LLM_URL and falls back to a deterministic canned spec on any failure. If
-FOI_LLM_MODEL is not the model idc-1 actually serves (qwen3next-80b-a3b-q4),
-the endpoint answers 404 and every request silently demos the canned spec - the
-demo still 200s, but the "real LLM completion" never happens. The deploy script
-flags a missing/wrong FOI_LLM_MODEL in /etc/foi-insights.env rather than hiding
-it.
+Why the model check matters: the demo's /ask and /chat paths call the local
+model through axoquant_llm.chat("author", ...) — resolved by ROLE, not by URL or
+a model name. That role now serves Qwen3.8-27B-FP8 (the fleet consolidated the
+old Qwen3-Next-80B MoE into a dense 27B). A wrong/stale role registration means
+every request silently falls back to the deterministic canned spec — the demo
+still 200s, but the "real LLM completion" never happens. The --check probe curls
+the served model list and flags it rather than hiding it. The old
+FOI_LLM_MODEL/FOI_LLM_URL env vars are no longer read by the app; they are
+vestigial.
 """
 from __future__ import annotations
 
@@ -38,7 +40,11 @@ REMOTE = "/home/algolotl/foi-insights"
 UNIT = "foi-insights"
 ENV_FILE = "/etc/foi-insights.env"
 ORIGIN_PORT = "8097"          # the service's systemd port on idc-1 (FOI_PORT)
-KNOWN_GOOD_MODEL = "qwen3next-80b-a3b-q4"   # what idc-1:8012 serves today
+# The model the "author" role actually serves. The app resolves the model by
+# ROLE (axoquant_llm.chat("author", ...)), not by URL or by this name — the
+# old FOI_LLM_MODEL/FOI_LLM_URL env vars are no longer read by app code. This
+# constant is only a --check probe against the served model list.
+KNOWN_GOOD_MODEL = "qwen3.8-27b-fp8"       # what idc-1:8012 serves today
 
 # Service code + pinned data. data/generated/ is deliberately excluded - the
 # JSONL lineage ledger is a runtime firehose regenerated per boot; copying a
@@ -139,10 +145,10 @@ def main() -> int:
         cmd = (
             f"systemctl is-active {UNIT}; "
             f"test -f {ENV_FILE} && echo 'env file: present' || echo 'env file: MISSING'; "
-            f"v=$(grep '^FOI_LLM_MODEL=' {ENV_FILE} 2>/dev/null | cut -d= -f2); "
-            f"if [ \"$v\" = \"{KNOWN_GOOD_MODEL}\" ]; then "
-            f"echo \"FOI_LLM_MODEL: pinned ({KNOWN_GOOD_MODEL})\"; else "
-            f"echo \"FOI_LLM_MODEL: NOT pinned to {KNOWN_GOOD_MODEL} (got '$v')\"; fi; "
+            f"m=$(curl -s --max-time 10 http://localhost:8012/v1/models 2>/dev/null | grep -c '{KNOWN_GOOD_MODEL}'); "
+            f"if [ \"$m\" -gt 0 ]; then "
+            f"echo \"author model: {KNOWN_GOOD_MODEL} served\"; else "
+            f"echo \"author model: MISSING ({KNOWN_GOOD_MODEL} not in :8012/v1/models; check the algolotl-llm unit)\"; fi; "
             f"cd {REMOTE} && .venv/bin/python -c \"import autogluon; "
             f"from autogluon.common import __version__ as v; print('autogluon:', v)\" "
             f"2>/dev/null && echo 'autogluon: installed' || "

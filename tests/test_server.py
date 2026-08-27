@@ -404,6 +404,26 @@ def test_complete_fn_passes_through_model_text(monkeypatch):
     assert out == "hello"
 
 
+def test_complete_fn_returns_fallback_on_truncated(monkeypatch):
+    # finish_reason="length" means the model hit its token budget mid-spec: the
+    # text is a cut-off (unparseable) JSON spec. axoquant_llm marks this with
+    # Response.truncated; _complete_fn must treat it as a failure, never ship a
+    # half dashboard.
+    import axoquant_llm
+
+    def _truncated_chat(*a, **k):
+        class _R:
+            text = '{"title": "half a dashboard'
+            truncated = True
+        return _R()
+
+    monkeypatch.setattr(axoquant_llm, "chat", _truncated_chat)
+    out = asyncio.run(app_mod._complete_fn([{"role": "user", "content": "x"}]))
+    spec = json.loads(out)
+    assert spec["title"] == "FOI request summary"
+    assert "panels" in spec
+
+
 def test_golden_gate_aborts_on_bad_data(monkeypatch):
     # Reviewer (c): the boot data-integrity gate must abort loudly (SystemExit)
     # when the normaliser emits data that fails the golden check — the app must

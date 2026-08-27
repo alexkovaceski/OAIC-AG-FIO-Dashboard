@@ -110,11 +110,16 @@ async def _complete(messages: list[dict]) -> str:
     from axoquant_llm import chat as axq_chat
 
     def _call():
-        resp = axq_chat("author", messages, app="foi-insights/chat",
+        return axq_chat("author", messages, app="foi-insights/chat",
                         temperature=0.2, no_thinking=True)
-        return resp.text
 
-    text = await asyncio.to_thread(_call)
+    resp = await asyncio.to_thread(_call)
+    if getattr(resp, "truncated", False):
+        # finish_reason="length": the answer is cut off mid-sentence. Raising
+        # routes it to the chat pipeline's deterministic fallback rather than
+        # publishing a half answer.
+        raise RuntimeError("model truncated the answer (finish_reason=length)")
+    text = resp.text
     if text is None:
         raise RuntimeError("model returned None")
     return text

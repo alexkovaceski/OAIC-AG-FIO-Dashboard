@@ -130,22 +130,18 @@ The chat and agentic builder are hard-scoped to this use case, defence-in-depth:
   platform-computed figures at boot; the chat/LLM path can be dead and every
   page still 200s.
 
-### Deploy note: FOI_LLM_MODEL
+### Deploy note: LLM resolution
 
-The demo's `/ask` calls the local model endpoint and falls back to a
-deterministic canned spec on **any** failure. The default model name
-(`qwen3next-80b`) is **not** what idc-1 serves, so unless the deploy sets
-`FOI_LLM_MODEL` to the actual served model, every request silently demos the
-canned spec (the demo still 200s, but the real completion never happens).
+The demo's `/ask` and `/chat` call the local model through
+`axoquant_llm.chat("author", …)` — resolved by **role**, not by URL or a model
+name. The `author` role now serves **Qwen3.8-27B-FP8** (the fleet consolidated
+the old Qwen3-Next-80B-A3B MoE into a dense 27B on 2026-08-26). The
+`FOI_LLM_URL`/`FOI_LLM_MODEL` env vars are vestigial and no longer read by the
+app; a stale value cannot cause the silent canned-spec fallback the old note
+warned about.
 
-On the origin set:
-
-```
-FOI_LLM_MODEL=qwen3next-80b-a3b-q4    # the model idc-1:8012 actually serves
-FOI_LLM_URL=http://idc-1:8012/v1/chat/completions   # default; override only if it moves
-```
-
-`scripts/deploy.py --check` verifies the pin and flags a missing/wrong value.
+`scripts/deploy.py --check` probes the served model list directly and flags a
+missing `qwen3.8-27b-fp8`.
 
 ## Layout
 

@@ -805,11 +805,21 @@ async def _complete_fn(messages):
         from axoquant_llm import chat
 
         def _call():
-            resp = chat("author", messages, app="foi-insights/ask",
+            return chat("author", messages, app="foi-insights/ask",
                         temperature=0.2, no_thinking=True)
-            return resp.text
 
-        text = await asyncio.to_thread(_call)
+        resp = await asyncio.to_thread(_call)
+        text = resp.text
+        if getattr(resp, "truncated", False):
+            # finish_reason="length": the model spent its token budget and the
+            # dashboard spec is cut short — a truncated JSON spec is not a spec.
+            # The library flags this explicitly (Response.truncated) because a
+            # half-artefact passed downstream as a whole one is exactly the
+            # silent-wrong class this demo must never ship. Same failure class
+            # as an unreachable endpoint.
+            _LOGGER.warning("_complete_fn: model truncated the answer "
+                            "(finish_reason=length); using deterministic fallback")
+            return _FALLBACK_SPEC
         if not text or not isinstance(text, str):
             # content=null (tool-call turn), "" or a malformed non-string is not
             # a usable spec — same failure class as an unreachable endpoint.
