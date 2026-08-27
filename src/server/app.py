@@ -65,7 +65,8 @@ from ingest.normalise import normalise_all  # noqa: E402
 from storage.frame import Frame  # noqa: E402
 from storage.db import get_conn, ensure_schema  # noqa: E402
 from storage.facts import ingest_facts  # noqa: E402
-from storage.lineage import Ledger, record_artifact, record_op, update_artifact  # noqa: E402
+from storage.lineage import (Ledger, record_artifact, record_op,  # noqa: E402
+                             update_artifact, list_artifacts)
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
 from site.templates import chrome  # noqa: E402
@@ -273,6 +274,67 @@ def _record_figure_ops(conn, frame, artifact_id, dataset_id, spec) -> None:
                   row_count=stat.get("source_rows"),
                   rows_hash=stat.get("rows_hash"),
                   result_value=stat.get("value"))
+
+
+async def _build_dashboard(frame, request_text: str) -> dict:
+    """Build a dashboard for `request_text` via the LLM builder, persist it as a
+    lineage artifact, and return {artifact_id, dashboard_url, lineage_url, error}.
+
+    Shared by /ask (the builder endpoint) and /report (which falls back here when
+    the deterministic router cannot map a query, so "top 5 agencies" builds a real
+    dashboard instead of escalating to email). Fail-open everywhere: an
+    unreachable DB or a build failure never kills the caller — `error` is set and
+    the artifact (if any) is flipped to status="error".
+    """
+    ledger = _get_ledger()
+    build_id = None
+    dataset_id = None
+    response_id = f"local-{len((request_text or '').encode('utf-8')):x}"
+    conn = None
+    raw = None
+    try:
+        try:
+            raw = get_conn()
+            ensure_schema(raw)
+            dataset_id = _dataset_id_for(raw)
+        except (RuntimeError, psycopg2.OperationalError):
+            raw = None
+        if raw is not None:
+            if dataset_id is not None:
+                build_id = record_artifact(
+                    raw, artifact_type="builder_request",
+                    artifact_key=(request_text or "")[:40], user_id=None,
+                    dataset_id=dataset_id, request_text=request_text,
+                    spec_json={}, model="fartkraft", status="building")
+            if build_id is not None:
+                conn = raw
+                response_id = build_id
+            else:
+                conn = None
+        try:
+            spec = await build_spec(
+                request_text, frame, _complete_fn, ledger, conn,
+                max_turns=6, artifact_id=build_id)
+        except Exception as exc:
+            if conn is not None and isinstance(build_id, int):
+                try:
+                    update_artifact(conn, build_id, status="error")
+                except Exception:
+                    pass
+            return {"artifact_id": response_id, "dashboard_url": None,
+                    "lineage_url": None, "error": str(exc)}
+        if conn is not None and isinstance(build_id, int):
+            update_artifact(conn, build_id, spec_json=spec, status="ready")
+            _record_figure_ops(conn, frame, build_id, dataset_id, spec)
+        return {"artifact_id": response_id,
+                "dashboard_url": f"/dashboards/{response_id}",
+                "lineage_url": f"/lineage/{response_id}", "error": None}
+    finally:
+        if raw is not None:
+            try:
+                raw.close()
+            except Exception:
+                pass
 
 
 def _load_dashboard(artifact_id, conn):
@@ -591,7 +653,16 @@ def create_app():
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(reports_page(user))
+        artifacts = []
+        try:
+            conn = get_conn()
+            try:
+                artifacts = list_artifacts(conn)
+            finally:
+                conn.close()
+        except (RuntimeError, psycopg2.OperationalError):
+            artifacts = []
+        return HTMLResponse(reports_page(user, artifacts))
 
     @app.get("/risk.html")
     def risk_gated(request: Request):
@@ -614,11 +685,22 @@ def create_app():
         return out
 
     @app.post("/report")
-    def report_route(request: Request, req: ReportBody):
+    async def report_route(request: Request, req: ReportBody):
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
         out = build_report(req.request, frame)
+        # The deterministic router maps text to the ~12 fixed figures. A query it
+        # cannot map ("how many requests by the top 5 agencies" — only top 20 is a
+        # fixed figure) comes back as model="no-match". Instead of escalating to
+        # email, fall back to the LLM builder, which CAN build the ranking and
+        # persists it as a lineage artifact with a durable /dashboards/{id} link.
+        if out.get("model") == "no-match":
+            result = await _build_dashboard(frame, req.request)
+            if result["error"] is None:
+                _record_message(user["id"], "report", req.request)
+                return {"built": True, "dashboard_url": result["dashboard_url"],
+                        "lineage_url": result["lineage_url"]}
         _record_message(user["id"], "report", req.request)
         return out
 
@@ -646,91 +728,13 @@ def create_app():
         except ScopeRefusal as exc:
             return {"error": str(exc), "artifact_id": None,
                     "dashboard_url": None, "lineage_url": None}
-        ledger = _get_ledger()
-        # build_id is what build_spec receives; response_id is what the client
-        # gets. build_id is a real int only when a lineage_artifacts row truly
-        # exists (or None otherwise) — never a synthetic string. `conn` is the
-        # conn handed to build_spec (None on any fail-open); `raw` is the actual
-        # psycopg2 conn, always closed in the finally below.
-        build_id = None
-        dataset_id = None
-        response_id = f"local-{len((req.request or '').encode('utf-8')):x}"
-        conn = None
-        raw = None
-        try:
-            try:
-                raw = get_conn()
-                ensure_schema(raw)
-                # C1: the boot seed (or this lazy resolve) supplies the real
-                # foi_datasets id, so record_artifact's NOT NULL FK resolves —
-                # no more ForeignKeyViolation 500 on a live-but-unseeded DB.
-                dataset_id = _dataset_id_for(raw)
-            except (RuntimeError, psycopg2.OperationalError):
-                # I2: fail-open — an unreachable DB (connect or schema) must not
-                # kill /ask. No artifact row exists, so the builder gets
-                # conn=None + build_id=None (its None-path skips tool-call
-                # writes, never NULLing the NOT NULL FK) and the client gets a
-                # deterministic synthetic id so the lineage URL stays stable.
-                raw = None
-            if raw is not None:
-                # Task 6 carry-forward: the artifact row is PRE-CREATED
-                # (record_artifact returns its real id) and that id is passed
-                # into build_spec, so the builder's tool_calls key to THIS row —
-                # never to a second artifact. The row (id, status="building")
-                # must exist before any tool call is recorded:
-                # lineage_tool_calls.artifact_id is a NOT NULL FK.
-                if dataset_id is not None:
-                    build_id = record_artifact(
-                        raw, artifact_type="builder_request",
-                        artifact_key=(req.request or "")[:40], user_id=None,
-                        dataset_id=dataset_id, request_text=req.request,
-                        spec_json={}, model="fartkraft", status="building")
-                if build_id is not None:
-                    conn = raw  # a real artifact row exists — the builder may write tool calls
-                    response_id = build_id
-                else:
-                    # I1: the artifact INSERT failed open to None (or no dataset
-                    # is seeded on this conn). No real row exists — give the
-                    # builder the None-path. Never hand build_spec a synthetic
-                    # string as a real artifact_id with a live conn: a recovered
-                    # DB would make the builder's record_tool_call hit "invalid
-                    # input syntax for type integer" (a non-Operational
-                    # psycopg2.Error) and re-raise, aborting the build.
-                    conn = None
-            try:
-                spec = await build_spec(
-                    req.request, frame, _complete_fn, ledger, conn,
-                    max_turns=6, artifact_id=build_id)
-            except Exception as exc:
-                # a genuine build error (not a refusal — those were screened
-                # above): flip any real row to status="error" so it is not stuck
-                # "building"
-                if conn is not None and isinstance(build_id, int):
-                    try:
-                        update_artifact(conn, build_id, status="error")
-                    except Exception:
-                        pass  # best-effort: the error response always wins
-                return {"error": str(exc), "artifact_id": response_id,
-                        "dashboard_url": None, "lineage_url": None}
-            if conn is not None and isinstance(build_id, int):
-                update_artifact(conn, build_id, spec_json=spec, status="ready")
-                # I3: per-figure lineage — record each computed figure as a
-                # lineage_ops row (kind='figure', op=key, result + rows_hash) so
-                # the viewer's "Computed figures" is populated and replay can
-                # run. Best-effort inside record_op.
-                _record_figure_ops(conn, frame, build_id, dataset_id, spec)
-            # I4: point at the artifact's own dashboard, rendered from its
-            # durable spec_json + transcript on GET /dashboards/{id} — not the
-            # static at-a-glance page.
-            return {"artifact_id": response_id,
-                    "dashboard_url": f"/dashboards/{response_id}",
-                    "lineage_url": f"/lineage/{response_id}"}
-        finally:
-            if raw is not None:
-                try:
-                    raw.close()
-                except Exception:
-                    pass
+        result = await _build_dashboard(frame, req.request)
+        if result["error"] is not None:
+            return {"error": result["error"], "artifact_id": result["artifact_id"],
+                    "dashboard_url": None, "lineage_url": None}
+        return {"artifact_id": result["artifact_id"],
+                "dashboard_url": result["dashboard_url"],
+                "lineage_url": result["lineage_url"]}
 
     @app.get("/lineage/{artifact_id}")
     def lineage(artifact_id: str):

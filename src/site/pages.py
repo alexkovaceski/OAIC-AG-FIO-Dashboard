@@ -1183,13 +1183,24 @@ def chat_page(user) -> str:
                   scripts=_asset_link("chat.js"))
 
 
-def reports_page(user) -> str:
+def reports_page(user, artifacts=None) -> str:
     """The gated reports page body. Rendered on demand."""
+    artifacts = artifacts or []
+    built = ""
+    if artifacts:
+        items = "".join(
+            f'<li><a href="/dashboards/{a["id"]}">'
+            f'{html.escape(a["request_text"])}</a>'
+            f' <span class="meta">({html.escape(a["status"])})</span></li>'
+            for a in artifacts)
+        built = (f'<h2>Your reports</h2><ul class="reports-list">{items}</ul>'
+                 f'<p class="hint">Built reports are stored and linked here — '
+                 f'each has its own dashboard and lineage page.</p>')
     body = f"""
     <h1>Reports</h1>
     <p class="intro">Describe the FOI figure you want and this page returns the
-    real number, computed from the published data. Custom or complex reports
-    are handled by email.</p>
+    real number, computed from the published data. Anything it cannot map to a
+    fixed figure is built into a dashboard and stored below.</p>
     <div class="report-input">
       <input id="report-in" type="text" placeholder="e.g. 'how many requests were received last quarter?'" autocomplete="off">
       <button id="report-send" type="button">Generate</button>
@@ -1197,6 +1208,7 @@ def reports_page(user) -> str:
     <div id="report-out" class="report-out" role="region" aria-live="polite"></div>
     <p class="hint">Try "top agencies for requests decided", "share of
     decisions refused", "timeliness within statutory".</p>
+    {built}
     """
     return chrome("Reports", body, page_key=None, user=user,
                   scripts=_asset_link("report.js"))

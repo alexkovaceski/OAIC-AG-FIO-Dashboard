@@ -132,6 +132,27 @@ def update_artifact(conn, artifact_id, *, spec_json=None, status=None):
         raise
 
 
+def list_artifacts(conn, *, limit=12, artifact_type="builder_request") -> list[dict]:
+    """Recent artifacts of a type, newest first — the user's built reports.
+
+    Best-effort: OperationalError -> [] (an unreachable DB must not break the
+    reports page); any other psycopg2.Error raises so a schema/programming error
+    is not hidden. Ordered by id DESC (id is monotonic, so this is newest-first).
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, request_text, status
+                FROM horizon.lineage_artifacts
+                WHERE artifact_type = %s
+                ORDER BY id DESC LIMIT %s
+            """, (artifact_type, limit))
+            return [{"id": r[0], "request_text": r[1] or "",
+                     "status": r[2] or ""} for r in cur.fetchall()]
+    except psycopg2.OperationalError:
+        return []
+
+
 def record_op(conn, *, artifact_id, dataset_id, kind, op, params, row_count, rows_hash, result_value):
     """Insert a lineage_ops row. Best-effort, same split as record_artifact."""
     try:
