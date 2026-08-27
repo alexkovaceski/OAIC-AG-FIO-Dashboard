@@ -280,6 +280,61 @@ def test_report_requests_by_agency_gets_top20():
     assert out["stat_key"] == "received_top20"
     assert out["escalate"] is False
 
+
+def test_report_named_agencies_gets_the_deterministic_table():
+    # "compare Home Affairs and Services Australia" used to reach the LLM
+    # builder (which failed) and then narrative prose that could not quote any
+    # per-agency figure. It now answers deterministically off the frame.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("compare Home Affairs and Services Australia", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "agency_compare"
+    c = out["data"]["compare"]
+    assert "Department of Home Affairs" in c["agencies"]
+    assert "Services Australia" in c["agencies"]
+    assert c["fys"] == ["2023-24", "2024-25"]
+    assert out["dataset_registry"]["rows_hash"]
+    row = next(r for r in c["rows"]
+               if r["measure"] == "received" and r["fy"] == "2024-25")
+    idx = c["agencies"].index("Department of Home Affairs")
+    assert row["values"][idx] == 17120  # the published 2024-25 total
+
+
+def test_report_single_named_agency_gets_the_table():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("how many requests did Home Affairs receive?", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "agency_compare"
+    assert out["data"]["compare"]["agencies"] == ["Department of Home Affairs"]
+
+
+def test_report_named_agency_quarterly_gets_table_with_annual_note():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("quarterly requests for Home Affairs", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "agency_compare"
+    assert "annual" in out["note"]
+
+
+def test_report_named_agency_does_not_hijack_provenance():
+    # provenance wording about a named agency still goes to the provenance
+    # subject gate (which answers or declines), never to the agency table
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("where does the Home Affairs data come from?", frame)
+    assert out.get("stat_key") != "agency_compare"
+
 def test_report_unmappable_request_escalates():
     from ingest.normalise import normalise_all
     from storage.frame import Frame

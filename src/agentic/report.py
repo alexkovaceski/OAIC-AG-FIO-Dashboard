@@ -31,7 +31,8 @@ import re
 
 from provenance import ProvenanceError, describe
 from stats.catalog import (FIG_CAPTIONS, FIG_KEYS, FIGURE_SPECS, STAT_KEYS,
-                           foi_stats)
+                           LATEST_COMPLETE_FY, _previous_complete_fy,
+                           foi_stats, hash_rows, is_reporting_agency)
 from agentic.guardrails import (check_request, ScopeRefusal, _FOI_TERMS,
                                 _FUZZY_TERM_WORDS, _levenshtein)
 
@@ -164,6 +165,10 @@ def _normalise_request(text: str) -> str:
     def repl(match):
         token = match.group(0)
         if len(token) < 4:
+            return token
+        if token.endswith("ly"):
+            # adverb forms are real words ("quarterly", "monthly", "weekly"):
+            # trimming them to "quarter" would defeat the granularity screen
             return token
         slack = 2 if len(token) >= 8 else 1
         best = None
@@ -739,6 +744,87 @@ def _provenance_report(request: str, frame, key: str | None) -> dict:
 
 # ------------------------------------------------------------ the router -----
 
+_ANNUAL_NOTE = (
+    "The published FOI statistics are annual (financial-year) figures — "
+    "quarter-by-quarter series are not published, only the current year's "
+    "Q1 headline figures and its Q1–Q3 cumulative file. "
+)
+
+# The measures a named-agency table shows, in reading order.
+_AGENCY_MEASURES = ("received", "decided", "within_statutory",
+                    "granted_full", "granted_part", "refused", "withdrawn")
+
+
+def _named_agencies(request: str, frame) -> list[str]:
+    """Reporting agencies a request names. Two ways to match, case-insensitive:
+    the full published name appears in the request ('minister for home affairs'),
+    or the name's distinctive tail appears ('home affairs' matches 'Department of
+    Home Affairs' without the reader typing the portfolio prefix). When a
+    minister's office and a department share a tail, the department wins. The
+    pseudo 'Total' agency is excluded via is_reporting_agency."""
+    lowered = (request or "").lower()
+    exact = {f["agency_name"] for f in frame.facts
+             if is_reporting_agency(f["agency_name"])
+             and f["agency_name"].lower() in lowered}
+    tails: dict[str, str] = {}
+    for f in frame.facts:
+        name = f["agency_name"]
+        if not is_reporting_agency(name):
+            continue
+        tail = name.lower()
+        for prefix in ("assistant minister for ", "minister for ",
+                       "department of "):
+            if tail.startswith(prefix):
+                tail = tail[len(prefix):]
+                break
+        if not tail or tail not in lowered:
+            continue
+        prev = tails.get(tail)
+        if prev is None or (not prev.lower().startswith("department of ")
+                            and name.lower().startswith("department of ")):
+            tails[tail] = name
+    return sorted(exact | set(tails.values()))
+
+
+def _agency_table_answer(request: str, frame, agencies,
+                         granularity: bool = False) -> dict:
+    """The deterministic answer for a question that names specific agencies:
+    each agency's annual counts for the two latest complete financial years,
+    straight off the frame. No LLM, no builder: this is the reliable path for
+    'compare Home Affairs and Services Australia' and for single-agency
+    questions ('how many requests did Home Affairs receive?'), which the
+    builder used to fail and the narrative used to answer with 'no context'."""
+    fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
+    consumed = [f for f in frame.facts
+                if f["quarter"] is None and f["bucket"] == "total"
+                and f["agency_name"] in agencies and f["fy"] in (fy_a, fy_b)]
+    by = {}
+    for f in consumed:
+        key = (f["fy"], f["measure"], f["agency_name"])
+        by[key] = by.get(key, 0.0) + f["value"]
+    rows = []
+    for fy in (fy_a, fy_b):
+        for measure in _AGENCY_MEASURES:
+            values = [by.get((fy, measure, agency)) for agency in agencies]
+            rows.append({"measure": measure, "fy": fy,
+                         "values": [round(v) if v is not None else None
+                                    for v in values]})
+    note = None
+    if granularity:
+        note = (_ANNUAL_NOTE + "This table is the annual view of the agencies "
+                "you named.")
+    return {"request": request, "stat_key": "agency_compare",
+            "stat_label": " and ".join(agencies) + ", by year",
+            "data": {"compare": {"agencies": agencies,
+                                 "fys": [fy_a, fy_b], "rows": rows}},
+            "basis": "fy",
+            "dataset_registry": {"source_rows": len(consumed),
+                                 "rows_hash": hash_rows(consumed)},
+            "note": note,
+            "model": "deterministic router (figures from the platform frame, "
+                     "not the LLM)", "escalate": False}
+
+
 def _granularity_answer(request: str, frame) -> dict:
     """A request for a quarter/month/week series — granularity the source does
     not publish. The honest answer is not the generic escalation: say what
@@ -748,11 +834,6 @@ def _granularity_answer(request: str, frame) -> dict:
     received between the two latest complete financial years (the current
     2025-26 file is a partial and cannot join a full-year comparison).
     """
-    annual_note = (
-        "The published FOI statistics are annual (financial-year) figures — "
-        "quarter-by-quarter series are not published, only the current year's "
-        "Q1 headline figures and its Q1–Q3 cumulative file. "
-    )
     growth = re.search(r"grow|increas|decreas|declin|chang|trend|more|less",
                        request, re.I)
     if growth:
@@ -766,7 +847,7 @@ def _granularity_answer(request: str, frame) -> dict:
                 "basis": stat["basis"],
                 "dataset_registry": {"source_rows": stat["source_rows"],
                                      "rows_hash": stat["rows_hash"]},
-                "note": (annual_note
+                "note": (_ANNUAL_NOTE
                          + "This table is the closest computable view: the "
                            "change in requests received per agency between the "
                            "two latest complete financial years "
@@ -775,7 +856,7 @@ def _granularity_answer(request: str, frame) -> dict:
                          "frame, not the LLM)", "escalate": False}
     return {"request": request, "stat_key": None, "stat_label": None,
             "data": None, "basis": None, "dataset_registry": {},
-            "note": (annual_note
+            "note": (_ANNUAL_NOTE
                      + "Ask for annual figures instead — for example "
                        "'requests received by year', 'agencies with growing "
                        "requests', or a named agency's trend."),
@@ -790,10 +871,24 @@ def build_report(request: str, frame) -> dict:
                 "data": None, "basis": None, "dataset_registry": {},
                 "model": "scope", "escalate": True, "error": f"{exc} {_ESCALATION}"}
     # routing works on the typo-normalised text; the echoed request keeps the
-    # reader's own words
+    # reader's own words. Intent screens (provenance, granularity) run on the
+    # ORIGINAL text: the normaliser rewrites "quarterly" to "quarter", which
+    # would otherwise defeat the series-granularity screen.
     route_text = _normalise_request(request)
-    if _SERIES_GRANULARITY_RE.search(route_text) \
-            and not _PROVENANCE_RE.search(route_text):
+    prov_intent = bool(_PROVENANCE_RE.search(request))
+    granularity = bool(_SERIES_GRANULARITY_RE.search(request)) \
+        and not prov_intent
+    if not prov_intent:
+        # A question that names specific agencies ("compare Home Affairs and
+        # Services Australia", "how many requests did Home Affairs receive?")
+        # gets the deterministic per-agency table: the LLM builder used to fail
+        # these and the narrative used to answer "no context". Provenance
+        # wording is excluded — the subject gate owns those.
+        named = _named_agencies(route_text, frame)
+        if named:
+            return _agency_table_answer(request, frame, named,
+                                        granularity=granularity)
+    if granularity:
         # answered BEFORE the router loop: the stat patterns must not grab a
         # "quarter by quarter" request and silently answer a different
         # granularity, and the no-match -> LLM-builder fallback must not either

@@ -908,24 +908,21 @@ def test_ask_question_builds_dashboard_on_explicit_intent(monkeypatch):
     assert captured["user_id"] == 1
 
 
-def test_ask_question_compare_builds_a_dashboard(monkeypatch):
-    # a two-agency comparison is data work: it goes to the builder, not prose
+def test_ask_question_compare_is_deterministic(monkeypatch):
+    # a named-agency comparison answers deterministically off the frame (the
+    # agency table), never through the LLM builder and never as prose that
+    # cannot quote figures
     import server.app as app_mod
     c = TestClient(create_app())
     app_mod = _ask_session(monkeypatch, c)
-
-    async def fake_build(frame, request_text, user_id=None):
-        return {"artifact_id": 7, "dashboard_url": "/dashboards/7",
-                "lineage_url": "/lineage/7", "error": None}
-
-    monkeypatch.setattr(app_mod, "_build_dashboard", fake_build)
     monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
     r = c.post("/ask-question",
                json={"question": "compare Home Affairs and Services Australia"})
     assert r.status_code == 200
     body = r.json()
-    assert body["kind"] == "dashboard"
-    assert body["dashboard_url"] == "/dashboards/7"
+    assert body["kind"] == "stat"
+    assert body["stat_key"] == "agency_compare"
+    assert "Department of Home Affairs" in body["data"]["compare"]["agencies"]
 
 
 def test_ask_question_failed_build_falls_back_to_the_router(monkeypatch):

@@ -31,11 +31,13 @@ import re
 from agentic.guardrails import check_request, ScopeRefusal
 
 # Explicit dashboard intent. Compared against the original question before the
-# router runs. "compare/versus/vs" counts as build intent: a two-agency
-# comparison is a data job for the builder, not a prose question.
+# router runs. "compare" is deliberately NOT here: a comparison that names
+# agencies is answered deterministically by the router's agency table, and one
+# that does not ("compare refusal rates FY23 vs FY24") is a fixed figure the
+# router should answer instantly.
 _WANTS_BUILD_RE = re.compile(
     r"\b(?:build|create|make|chart|graph|dashboard|plot|visuali[sz]e|panel|"
-    r"report on|compare|versus|vs\.?)\b",
+    r"report on)\b",
     re.I)
 
 

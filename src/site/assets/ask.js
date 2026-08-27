@@ -54,6 +54,21 @@
       var head = keys.map(function (k) { return "<th>" + esc(k) + "</th>"; }).join("");
       return '<table class="report-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>";
     }
+    if (data.compare) {
+      // named-agency table: Measure | FY | one column per agency
+      var c = data.compare;
+      var head = "<tr><th>Measure</th><th>FY</th>" +
+        c.agencies.map(function (a) { return "<th>" + esc(a) + "</th>"; }).join("") +
+        "</tr>";
+      var crows = c.rows.map(function (r) {
+        return "<tr><td>" + esc(r.measure) + "</td><td>" + esc(r.fy) +
+          "</td>" + r.values.map(function (v) {
+            return "<td>" + (v == null ? "—" : num(v)) + "</td>";
+          }).join("") + "</tr>";
+      }).join("");
+      return '<table class="report-table"><thead>' + head +
+        "</thead><tbody>" + crows + "</tbody></table>";
+    }
     if (data.movers) {
       var shown = data.movers.slice(0, 10);
       var mrows = shown.map(function (m) {
