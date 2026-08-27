@@ -204,14 +204,15 @@ def main() -> int:
          f"sudo systemctl restart {UNIT} && systemctl --no-pager status {UNIT}"],
         dry_run=args.dry_run, description="restart foi-insights")
 
-    # 4. Post-deploy guard: confirm the model pin, so the demo is not silently
-    #    running on the canned fallback.
+    # 4. Post-deploy guard: confirm the author model is actually served, so the
+    #    demo is not silently running on the canned fallback.
     run(["ssh", ssh_target(),
-         f"grep -q '^FOI_LLM_MODEL={KNOWN_GOOD_MODEL}$' {ENV_FILE} && "
-         f"echo 'FOI_LLM_MODEL: pinned ({KNOWN_GOOD_MODEL})' || "
-         f"echo 'WARNING: FOI_LLM_MODEL in {ENV_FILE} is not {KNOWN_GOOD_MODEL} "
-         f"- /ask will fall back to the canned spec every time'"],
-        dry_run=args.dry_run, description="check FOI_LLM_MODEL pin")
+         f"m=$(curl -s --max-time 10 http://localhost:8012/v1/models 2>/dev/null | grep -c '{KNOWN_GOOD_MODEL}'); "
+         f"if [ \"$m\" -gt 0 ]; then "
+         f"echo 'author model: {KNOWN_GOOD_MODEL} served'; else "
+         f"echo 'WARNING: author model {KNOWN_GOOD_MODEL} not in :8012/v1/models - "
+         f"/ask will fall back to the canned spec every time'; fi"],
+        dry_run=args.dry_run, description="check author model is served")
 
     if args.dry_run:
         print("\n--dry-run: nothing was executed. Remove the flag to deploy for "
