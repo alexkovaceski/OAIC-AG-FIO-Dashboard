@@ -71,6 +71,29 @@ def test_published_measures_render_real_series():
     assert corr is not None and -1 <= corr <= 1
 
 
+def test_received_movers_are_volume_growth_between_two_fys():
+    # the count-shaped sibling of the rate movers: per-agency change in requests
+    # received between the two latest complete FYs, growth first, both years'
+    # counts carried, and the exact source rows hashed for replay.
+    f = Frame(normalise_all())
+    stat = foi_stats(f, "received_movers")
+    value = stat["value"]
+    assert value["fy_a"] == "2023-24" and value["fy_b"] == "2024-25"
+    assert stat["basis"] == "fy"
+    assert stat["source_rows"] and len(stat["rows_hash"]) == 64
+    movers = value["movers"]
+    assert movers, "expected per-agency movers"
+    first = movers[0]
+    assert set(first) == {"agency", "fy_a_value", "fy_b_value", "change"}
+    assert first["change"] == first["fy_b_value"] - first["fy_a_value"]
+    # growth first: sorted by change descending
+    changes = [m["change"] for m in movers]
+    assert changes == sorted(changes, reverse=True)
+    # Home Affairs is the biggest published grower in this frame
+    home = next(m for m in movers if m["agency"] == "Department of Home Affairs")
+    assert home["change"] > 0
+
+
 def test_empty_row_hash_is_not_a_replay_pass():
     # hash_rows([]) is a truthy 64-char string, so replay_verify's old
     # `bool(stored) and rows_hash == stored` compared the sentinel to a

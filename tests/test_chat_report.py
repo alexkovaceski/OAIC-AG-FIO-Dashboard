@@ -146,6 +146,62 @@ def test_report_decision_outcomes_provenance_names_the_trend_figure():
     assert out["escalate"] is False
     assert out["provenance"]["figure"]["key"] == "decision_outcomes_trend"
 
+
+def test_report_growing_requests_routes_to_received_movers():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("which agencies are growing requests?", frame)
+    assert out["stat_key"] == "received_movers"
+    assert out["escalate"] is False
+    assert out["dataset_registry"]["rows_hash"]
+
+
+def test_report_quarter_by_quarter_is_answered_not_escalated():
+    # The user's phrasing: a quarter-by-quarter growth series. The source
+    # publishes annual FY figures only, so the honest answer explains that AND
+    # delivers the closest computable view (per-agency annual growth), instead of
+    # the generic "email us" escalation.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report(
+        "can you write a report that shows the agencies with growing FOI "
+        "requests on a quarter by quarter basis for the last three years",
+        frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "received_movers"
+    assert "annual" in out["note"]
+    assert "quarter" in out["note"]
+    movers = out["data"]["movers"]
+    assert movers and len(movers) <= 10
+    assert all(m["change"] > 0 for m in movers)  # growers only
+
+
+def test_report_monthly_series_explains_annual_only():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("show requests received by month", frame)
+    assert out["escalate"] is False
+    assert out["data"] is None
+    assert "annual" in out["note"]
+
+
+def test_report_last_quarter_still_routes_to_q1_stat():
+    # The granularity screen must not swallow the single-point phrasings that
+    # map to the golden Q1 figures.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("how many requests were received last quarter?", frame)
+    assert out["stat_key"] == "requests_received_q1"
+    assert out["escalate"] is False
+
 def test_report_unmappable_request_escalates():
     from ingest.normalise import normalise_all
     from storage.frame import Frame

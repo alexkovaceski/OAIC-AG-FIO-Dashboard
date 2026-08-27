@@ -34,6 +34,7 @@ _STAT_LABELS = {
     "withdrawn_q1": "Share of decisions withdrawn",
     "refusal_rate_change_fy23_fy24": "Refusal rate change, FY23 vs FY24, top agencies",
     "timeliness_slippage_corr": "Timeliness slippage correlation",
+    "received_movers": "Agencies with growing requests received, year on year",
 }
 
 def _documents() -> list[dict]:

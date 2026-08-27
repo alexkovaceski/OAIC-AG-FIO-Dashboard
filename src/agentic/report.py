@@ -79,8 +79,27 @@ _ROUTER: list[tuple[re.Pattern, str]] = [
     # refused / withdrawn by FY), not the Q1 decided count — so it must win over
     # the bare "decided?|decision" pattern below it.
     (re.compile(r"decision outcome", re.I), "decision_outcomes_trend"),
+    # per-agency request-volume growth, before the bare "received" pattern
+    (re.compile(r"grow(?:ing|th|n)\b|increas(?:e|ed|ing)", re.I),
+     "received_movers"),
+    (re.compile(r"received", re.I), "requests_received_q1"),
+    (re.compile(r"finalis", re.I), "requests_finalised_q1"),
+    (re.compile(r"refus", re.I), "refused_share_q1"),
     (re.compile(r"decided?|decision", re.I), "decided_q1"),
 ]
+
+# A request for a periodic SERIES the source does not publish. The FOI
+# statistics are annual (financial year); the only finer granularity published
+# is the current year's Q1 headline figures and its Q1-Q3 cumulative file. A
+# single point ("last quarter", "Q1") is NOT this — those resolve to the golden
+# Q1 stats below. This matches series phrasings: "quarter by quarter",
+# "quarterly", "month by month", "monthly", "weekly".
+_SERIES_GRANULARITY_RE = re.compile(
+    r"quarter\s+by\s+quarter|quarter\s+over\s+quarter|by\s+quarter|quarterly|"
+    r"per\s+quarter|each\s+quarter|every\s+quarter|qoq|"
+    r"month\s+by\s+month|month\s+over\s+month|by\s+month|monthly|per\s+month|"
+    r"week\s+by\s+week|week\s+over\s+week|by\s+week|weekly",
+    re.I)
 
 _LABELS = {
     "requests_received_q1": "Requests received, Q1 2025-26",
@@ -104,6 +123,7 @@ _LABELS = {
     # here; that is stats/catalog.py's to decide.
     "refusal_rate_change_fy23_fy24": "Refusal rate, top movers",
     "timeliness_slippage_corr": "Timeliness slippage correlation",
+    "received_movers": "Agencies with growing FOI requests received",
     "received_top20": "Top 20 agencies by requests received, FY 2024-25",
     "decided_top20": "Top 20 agencies by requests decided, FY 2024-25",
 }
@@ -644,6 +664,49 @@ def _provenance_report(request: str, frame, key: str | None) -> dict:
 
 # ------------------------------------------------------------ the router -----
 
+def _granularity_answer(request: str, frame) -> dict:
+    """A request for a quarter/month/week series — granularity the source does
+    not publish. The honest answer is not the generic escalation: say what
+    granularity DOES exist (annual FY, plus the current year's Q1 and Q1-Q3
+    cumulative), and when the request is about growth or change, answer the
+    closest computable version — per-agency year-on-year change in requests
+    received between the two latest complete financial years (the current
+    2025-26 file is a partial and cannot join a full-year comparison).
+    """
+    annual_note = (
+        "The published FOI statistics are annual (financial-year) figures — "
+        "quarter-by-quarter series are not published, only the current year's "
+        "Q1 headline figures and its Q1–Q3 cumulative file. "
+    )
+    growth = re.search(r"grow|increas|decreas|declin|chang|trend|more|less",
+                       request, re.I)
+    if growth:
+        stat = foi_stats(frame, "received_movers")
+        value = stat["value"]
+        movers = [m for m in value["movers"] if m["change"] > 0][:10]
+        return {"request": request, "stat_key": "received_movers",
+                "stat_label": _LABELS["received_movers"],
+                "data": {"fy_a": value["fy_a"], "fy_b": value["fy_b"],
+                         "measure": "received", "movers": movers},
+                "basis": stat["basis"],
+                "dataset_registry": {"source_rows": stat["source_rows"],
+                                     "rows_hash": stat["rows_hash"]},
+                "note": (annual_note
+                         + "This table is the closest computable view: the "
+                           "change in requests received per agency between the "
+                           "two latest complete financial years "
+                           f"({value['fy_a']} → {value['fy_b']})."),
+                "model": "deterministic router (figures from the platform "
+                         "frame, not the LLM)", "escalate": False}
+    return {"request": request, "stat_key": None, "stat_label": None,
+            "data": None, "basis": None, "dataset_registry": {},
+            "note": (annual_note
+                     + "Ask for annual figures instead — for example "
+                       "'requests received by year', 'agencies with growing "
+                       "requests', or a named agency's trend."),
+            "model": "deterministic", "escalate": False}
+
+
 def build_report(request: str, frame) -> dict:
     try:
         check_request(request)
@@ -651,6 +714,16 @@ def build_report(request: str, frame) -> dict:
         return {"request": request, "stat_key": None, "stat_label": None,
                 "data": None, "basis": None, "dataset_registry": {},
                 "model": "scope", "escalate": True, "error": f"{exc} {_ESCALATION}"}
+    if _SERIES_GRANULARITY_RE.search(request) and not _PROVENANCE_RE.search(request):
+        # answered BEFORE the router loop: the stat patterns must not grab a
+        # "quarter by quarter" request and silently answer a different
+        # granularity, and the no-match -> LLM-builder fallback must not either
+        # (the builder cannot produce quarterly series the data does not have).
+        # Provenance wording ("where does the quarterly rainfall total come
+        # from?") is EXCLUDED: the router's provenance subject gate owns those —
+        # it must keep declining foreign subjects rather than have the
+        # granularity note answer them.
+        return _granularity_answer(request, frame)
     key = None
     # Only meaningful once `key == _PROVENANCE`: which figure the reader is
     # asking about, or None for the platform as a whole. It is resolved by

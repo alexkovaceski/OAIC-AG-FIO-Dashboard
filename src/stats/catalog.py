@@ -27,6 +27,7 @@ STAT_KEYS = (
     "within_statutory_pct_q1", "granted_full_share_q1", "granted_part_share_q1",
     "refused_share_q1", "withdrawn_q1", "refusal_rate_change_fy23_fy24",
     "timeliness_slippage_corr", "refusal_rate_movers", "timeliness_movers",
+    "received_movers",
 )
 FIG_CAPTIONS = {
     "requests_received_trend": "Requests received, FY trend",
@@ -374,6 +375,47 @@ def _refusal_rate_movers(frame, fy_a: str, fy_b: str) -> list[dict]:
     return _rate_movers(frame, "refused", "decided", fy_a, fy_b)
 
 
+def _volume_movers(frame, measure, fy_a, fy_b) -> list[dict]:
+    """Per-agency VOLUME change in one measure between two FYs, sorted by change
+    descending (biggest growth first).
+
+    The rate-movers machinery computes shares; this is the count-shaped sibling
+    for "which agencies are growing requests". No floor is needed: counts are
+    absolute, so a tiny agency cannot monopolise the ranking the way a 0%->100%
+    rate flip on one decision does. Each row carries both years' counts so a
+    reader can judge the row without leaving the table; `change` is the
+    difference (b - a) in requests, so positive rows are growth.
+    """
+    totals = {}
+    for f in _movers_source_rows(frame, measure, measure, fy_a, fy_b):
+        totals.setdefault((f["fy"], f["agency_name"]), 0.0)
+        totals[(f["fy"], f["agency_name"])] += f["value"]
+    a_counts = {ag: v for (fy, ag), v in totals.items() if fy == fy_a}
+    b_counts = {ag: v for (fy, ag), v in totals.items() if fy == fy_b}
+    movers = []
+    for agency, va in a_counts.items():
+        if agency not in b_counts:
+            continue
+        vb = b_counts[agency]
+        movers.append({"agency": agency,
+                       "fy_a_value": round(va),
+                       "fy_b_value": round(vb),
+                       "change": round(vb - va)})
+    movers.sort(key=lambda m: m["change"], reverse=True)
+    return movers
+
+
+def _volume_movers_stat(frame, measure) -> dict:
+    """The standard result contract for a volume-movers stat (see _movers_stat):
+    the two latest complete FYs, their movers (growth first), and the exact
+    source rows consumed so replay_verify can recompute the hash."""
+    fy_a, fy_b = _previous_complete_fy(frame), LATEST_COMPLETE_FY
+    rows = _movers_source_rows(frame, measure, measure, fy_a, fy_b)
+    return {"value": {"fy_a": fy_a, "fy_b": fy_b, "measure": measure,
+                      "movers": _volume_movers(frame, measure, fy_a, fy_b)},
+            "basis": "fy", "source_rows": len(rows), "rows_hash": hash_rows(rows)}
+
+
 def _movers_stat(frame, num_measure, den_measure,
                  min_denominator: float = MOVERS_MIN_DENOMINATOR) -> dict:
     """The standard result contract for an FY-pair movers stat: the two latest
@@ -593,6 +635,8 @@ def foi_stats(frame, key) -> dict:
         return _movers_stat(frame, "refused", "decided")
     if key == "timeliness_movers":
         return _movers_stat(frame, "within_statutory", "decided")
+    if key == "received_movers":
+        return _volume_movers_stat(frame, "received")
     if key == "timeliness_slippage_corr":
         # Pearson correlation between the within-statutory FY series and the
         # received FY series, both computed by _fy_series over the annual files.

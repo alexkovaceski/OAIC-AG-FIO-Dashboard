@@ -38,6 +38,22 @@
       var head = keys.map(function (k) { return "<th>" + esc(k) + "</th>"; }).join("");
       return '<table class="report-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>";
     }
+    if (data.movers) {
+      // per-agency volume/rate movers: agency, both years, change (top 10)
+      var shown = data.movers.slice(0, 10);
+      var mrows = shown.map(function (m) {
+        var ch = (m.change > 0 ? "+" : "") + num(m.change);
+        return "<tr><td>" + esc(m.agency) + "</td><td>" + num(m.fy_a_value) +
+          "</td><td>" + num(m.fy_b_value) + "</td><td>" + ch + "</td></tr>";
+      }).join("");
+      var mfoot = data.movers.length > shown.length
+        ? '<p class="fignote">Top ' + shown.length + " of " +
+          data.movers.length + " agencies.</p>" : "";
+      return '<table class="report-table"><thead><tr><th>Agency</th><th>' +
+        esc(data.fy_a) + " requests</th><th>" + esc(data.fy_b) +
+        " requests</th><th>Change</th></tr></thead><tbody>" + mrows +
+        "</tbody></table>" + mfoot;
+    }
     if (data.categories && data.series) {
       var series = data.series[0] || { name: "", values: [] };
       var rows2 = data.categories.map(function (c, i) {
@@ -63,10 +79,17 @@
         ' <a href="mailto:contact@bluebirdadvisory.com.au">contact@bluebirdadvisory.com.au</a></div>';
       return;
     }
+    var noteHtml = r.note ? '<p class="note">' + esc(r.note) + "</p>" : "";
+    if (r.data === null || r.data === undefined) {
+      out.innerHTML = noteHtml ||
+        '<p class="nodata">No figure could be computed for this request.</p>';
+      return;
+    }
     var reg = r.dataset_registry || {};
     out.innerHTML =
       '<div class="report-card">' +
       "<h2>" + esc(r.stat_label || r.stat_key) + "</h2>" +
+      noteHtml +
       renderData(r.data) +
       '<p class="basis">basis: ' + esc(r.basis || "") + "</p>" +
       '<p class="cite">sources: ' + esc(reg.source_rows || 0) +
