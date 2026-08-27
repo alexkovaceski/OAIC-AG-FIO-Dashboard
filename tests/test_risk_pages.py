@@ -71,6 +71,31 @@ def test_fitted_classify_renders_tiers(tmp_path):
     assert "62%" in html                        # the timeliness share, not confidence
     assert "tabpfn" not in html                 # model name hidden
     assert "12359" not in html
+    # the table drills down, sorts and filters (the client wires the handlers)
+    assert 'data-agency="A"' in html and 'role="button"' in html
+    assert 'class="sortable" data-sort="agency"' in html
+    assert 'class="sortable" data-sort="share"' in html
+    assert 'class="sortable" data-sort="tier"' in html
+    assert 'data-share="0.62"' in html and 'data-tier="medium"' in html
+    assert 'id="risk-tier-filter"' in html
+    assert 'id="agency-detail"' in html
+
+
+def test_agency_forecast_table_lists_top_ten_clickable():
+    # the forecast section drills into agencies: largest forecast first, rows
+    # clickable into the same per-agency detail
+    from risk.load import _agency_forecast_table
+    fc = {"A": [{"fy": "2026-27", "value": 10.0, "lo": 1.0, "hi": 20.0},
+                {"fy": "2028-29", "value": 30.0, "lo": 1.0, "hi": 40.0}],
+          "B": [{"fy": "2028-29", "value": 50.0, "lo": 1.0, "hi": 60.0}]}
+    html = _agency_forecast_table(fc, top=2)
+    assert 'id="agency-fc-table"' in html
+    assert 'data-agency="B"' in html and 'data-agency="A"' in html
+    assert html.index('data-agency="B"') < html.index('data-agency="A"')
+    assert "Forecast by agency" in html
+    assert "50" in html                       # the final forecast year's value
+    assert _agency_forecast_table({}) == ""
+    assert _agency_forecast_table({"A": []}) == ""
 
 
 def test_missing_or_malformed_sidecar_renders_not_fitted(tmp_path):

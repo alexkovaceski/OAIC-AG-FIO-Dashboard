@@ -112,6 +112,38 @@ def _load_agency_forecast(path):
         return {}
 
 
+def _agency_forecast_table(agency_forecast, top=10) -> str:
+    """The forecast section's drill-down into agencies: the largest ten by their
+    latest forecast year, each row clickable to the same per-agency detail the
+    risk table uses. Empty when the sidecar is absent."""
+    if not agency_forecast:
+        return ""
+    rows = []
+    for agency, pts in agency_forecast.items():
+        if pts:
+            last = pts[-1]
+            rows.append((agency, last["fy"], float(last["value"])))
+    rows.sort(key=lambda r: r[2], reverse=True)
+    rows = rows[:top]
+    if not rows:
+        return ""
+    body = "".join(
+        f'<tr class="agency-fc-row" data-agency="{html.escape(a)}" '
+        f'tabindex="0" role="button" aria-label="View {html.escape(a)}">'
+        f'<td>{html.escape(a)}</td><td>{html.escape(fy)}</td>'
+        f'<td>{value:,.0f}</td></tr>'
+        for a, fy, value in rows)
+    return (
+        '<details class="risk-details" open><summary>Forecast by agency '
+        '(top 10)</summary>'
+        '<p class="hint">Forecast requests received in the final forecast year, '
+        'largest first. Click a row to see that agency&rsquo;s detail.</p>'
+        '<table class="report-table risk-table" id="agency-fc-table">'
+        '<thead><tr><th>Agency</th><th>FY</th><th>Forecast</th></tr></thead>'
+        f'<tbody>{body}</tbody></table></details>'
+    )
+
+
 def _fitted_page(user, frame, artifacts):
     base = artifacts.get("base", "")
     forecast_dir = os.path.join(base, "forecast")
@@ -120,6 +152,8 @@ def _fitted_page(user, frame, artifacts):
               if frame is not None else None)
     forecast_html, points = render_forecast_section(artifacts, forecast_dir,
                                                     series)
+    agency_fc = _load_agency_forecast(
+        os.path.join(forecast_dir, "agency_predictions.json"))
     benchmark = (_agency_benchmark(frame) if frame is not None else [])
     classify_html, tiers = render_classify_section(artifacts, classify_dir,
                                                    benchmark)
@@ -129,8 +163,7 @@ def _fitted_page(user, frame, artifacts):
         "benchmark": benchmark,
         "trend": (_agency_trend(frame, {b["agency"] for b in benchmark})
                   if frame is not None else {}),
-        "agency_forecast": _load_agency_forecast(
-            os.path.join(forecast_dir, "agency_predictions.json")),
+        "agency_forecast": agency_fc,
     }
     # the JSON blob must never break out of its <script> tag (mirrors __pageData)
     blob = json.dumps(risk_data).replace("</", "<\\/")
@@ -140,7 +173,7 @@ def _fitted_page(user, frame, artifacts):
         '<p class="intro">Forward-looking views over the published FOI '
         "statistics &mdash; a forecast of request volume and a risk rating for "
         "each agency, explained in plain language.</p>"
-        + forecast_html + classify_html
+        + forecast_html + _agency_forecast_table(agency_fc) + classify_html
         + '<p class="provenance">Last updated '
         + html.escape(updated)
         + ". Forecasts and risk ratings refresh when the source data is "

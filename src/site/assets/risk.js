@@ -90,12 +90,92 @@
     });
   }
 
-  // ---- searchable ranking + per-agency detail ----
+  // ---- sortable, filterable ranking + per-agency detail ----
   var search = document.getElementById("risk-search-in");
+  var tierFilter = document.getElementById("risk-tier-filter");
   var table = document.getElementById("risk-table");
   var detail = document.getElementById("agency-detail");
   var trend = data.trend || {};
   var agencyFc = data.agency_forecast || {};
+  var sortCol = null;
+  var sortDir = "asc";
+  var selectedRow = null;
+
+  function tierOrder(t) {
+    return t === "low" ? 0 : t === "medium" ? 1 : t === "high" ? 2 : 3;
+  }
+
+  function rowKey(tr, col) {
+    if (col === "agency") return (tr.getAttribute("data-name") || "").toLowerCase();
+    if (col === "tier") return tierOrder(tr.getAttribute("data-tier"));
+    var s = tr.getAttribute("data-share");
+    return s === null || s === "" ? null : parseFloat(s);
+  }
+
+  function applyFilters() {
+    var q = search && search.value ? search.value.trim().toLowerCase() : "";
+    var tq = tierFilter && tierFilter.value ? tierFilter.value : "";
+    var rows = table.querySelectorAll("tbody tr");
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i].getAttribute("data-name") || "";
+      var tier = rows[i].getAttribute("data-tier") || "";
+      var ok = (!q || name.indexOf(q) !== -1) && (!tq || tier === tq);
+      rows[i].style.display = ok ? "" : "none";
+    }
+  }
+
+  function sortRows(col) {
+    if (sortCol === col) { sortDir = sortDir === "asc" ? "desc" : "asc"; }
+    else { sortCol = col; sortDir = "asc"; }
+    var tbody = table.querySelector("tbody");
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+    rows.sort(function (a, b) {
+      var va = rowKey(a, col);
+      var vb = rowKey(b, col);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;   // missing values always last
+      if (vb == null) return -1;
+      var cmp = va < vb ? -1 : va > vb ? 1 : 0;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    for (var i = 0; i < rows.length; i++) tbody.appendChild(rows[i]);
+    var heads = table.querySelectorAll("thead th.sortable");
+    for (var j = 0; j < heads.length; j++) {
+      var h = heads[j];
+      h.classList.remove("sort-asc", "sort-desc");
+      h.removeAttribute("aria-sort");
+      if (h.getAttribute("data-sort") === sortCol) {
+        h.classList.add(sortDir === "asc" ? "sort-asc" : "sort-desc");
+        h.setAttribute("aria-sort",
+                       sortDir === "asc" ? "ascending" : "descending");
+      }
+    }
+  }
+
+  function closeDetail() {
+    if (selectedRow) { selectedRow.classList.remove("selected"); selectedRow = null; }
+    if (detail) detail.innerHTML = "";
+  }
+
+  function openAgency(agency) {
+    if (!agency) return;
+    if (table) {
+      var rows = table.querySelectorAll("tbody tr");
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute("data-agency") === agency) {
+          if (selectedRow) selectedRow.classList.remove("selected");
+          selectedRow = rows[i];
+          rows[i].classList.add("selected");
+          if (rows[i].style.display === "none") rows[i].style.display = "";
+          break;
+        }
+      }
+    }
+    showAgency(agency);
+    if (detail && detail.scrollIntoView) {
+      detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
 
   function showAgency(agency) {
     var b = null;
@@ -115,7 +195,8 @@
       fcHtml = '<p>Forecast requests received: <strong>' + fcText +
         '</strong>.</p><div class="chartbox chartbox-sm" id="agency-fc-chart"></div>';
     }
-    detail.innerHTML = '<div class="report-card"><h3>' + agency + '</h3>' +
+    detail.innerHTML = '<div class="report-card"><h3>' + agency +
+      '<button class="detail-close" type="button">Close</button></h3>' +
       '<p><strong>' + share + '</strong> of decisions were made within the ' +
       'statutory period this year' +
       (b.decided ? ' (' + b.decided.toLocaleString() + ' decisions)' : '') +
@@ -179,20 +260,49 @@
     }
   }
 
-  if (search && table) {
-    search.addEventListener("input", function () {
-      var q = search.value.trim().toLowerCase();
-      var rows = table.querySelectorAll("tbody tr");
-      for (var i = 0; i < rows.length; i++) {
-        var name = rows[i].getAttribute("data-name") || "";
-        rows[i].style.display = (q && name.indexOf(q) === -1) ? "none" : "";
-      }
-    });
+  if (search) search.addEventListener("input", applyFilters);
+  if (tierFilter) tierFilter.addEventListener("change", applyFilters);
+  if (table) {
     table.addEventListener("click", function (ev) {
+      var th = ev.target.closest("th");
+      if (th && th.classList.contains("sortable")) {
+        sortRows(th.getAttribute("data-sort"));
+        applyFilters();
+        return;
+      }
       var tr = ev.target.closest("tr");
       if (tr && tr.getAttribute("data-agency")) {
-        showAgency(tr.getAttribute("data-agency"));
+        openAgency(tr.getAttribute("data-agency"));
+      }
+    });
+    table.addEventListener("keydown", function (ev) {
+      var tr = ev.target.closest("tr");
+      if (tr && tr.getAttribute("data-agency") &&
+          (ev.key === "Enter" || ev.key === " ")) {
+        ev.preventDefault();
+        openAgency(tr.getAttribute("data-agency"));
       }
     });
   }
+  // the forecast section's top-10 agency table drills into the same detail
+  var fcTable = document.getElementById("agency-fc-table");
+  if (fcTable) {
+    fcTable.addEventListener("click", function (ev) {
+      var tr = ev.target.closest("tr");
+      if (tr && tr.getAttribute("data-agency")) {
+        openAgency(tr.getAttribute("data-agency"));
+      }
+    });
+    fcTable.addEventListener("keydown", function (ev) {
+      var tr = ev.target.closest("tr");
+      if (tr && tr.getAttribute("data-agency") &&
+          (ev.key === "Enter" || ev.key === " ")) {
+        ev.preventDefault();
+        openAgency(tr.getAttribute("data-agency"));
+      }
+    });
+  }
+  document.addEventListener("click", function (ev) {
+    if (ev.target.closest && ev.target.closest(".detail-close")) closeDetail();
+  });
 })();
