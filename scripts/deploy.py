@@ -98,8 +98,10 @@ def _remote_dir(item: str) -> str:
     the stale `data/corpus` and a newly-added registry file (data/corpus/provenance)
     is never served. The destination must carry the parent prefix back.
     """
-    parent = item.replace("\\", "/").rsplit("/", 1)[0]
-    return f"{REMOTE}/{parent}/" if parent else f"{REMOTE}/"
+    normalized = item.replace("\\", "/")
+    if "/" in normalized:
+        return f"{REMOTE}/{normalized.rsplit('/', 1)[0]}/"
+    return f"{REMOTE}/"
 
 
 def run(cmd: list[str], dry_run: bool, description: str) -> None:
