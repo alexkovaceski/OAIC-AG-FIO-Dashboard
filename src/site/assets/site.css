@@ -441,7 +441,54 @@ h1 {
   padding: 0.9rem 1.1rem;
   max-width: 70ch;
 }
+.risk-summary { font-size: 1.02rem; color: var(--ink); max-width: 70ch; }
 .provenance { color: var(--ink-2); font-size: 0.8rem; margin: 1.5rem 0 0; }
+
+.risk-details { margin: 1rem 0 0; font-size: 0.85rem; color: var(--ink-2); }
+.risk-details summary { cursor: pointer; color: var(--link); font-weight: 600; }
+.risk-details .provenance { margin: 0.5rem 0 0; font-size: 0.78rem; }
+
+/* risk-tier badges — the reader-facing rating, not the model internals */
+.tier {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+}
+.tier-low    { background: #e7f6ec; color: #15803d; }
+.tier-medium { background: #fdeede; color: #c2410c; }
+.tier-high   { background: #fee9e9; color: #b91c1c; }
+
+.risk-search { max-width: 26rem; margin: 0.5rem 0; }
+.risk-search input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: var(--page);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+.risk-search input:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(7, 135, 217, 0.14);
+}
+
+.chartbox-sm { min-height: 220px; }
+
+/* report + risk data tables (rendered by report.js / risk.js) */
+.report-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+.report-table th, .report-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+.report-table th { font-size: 0.78rem; color: var(--ink-2); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.02em; }
+.report-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
 
 /* --- ECharts containers ---------------------------------------------------- */
 

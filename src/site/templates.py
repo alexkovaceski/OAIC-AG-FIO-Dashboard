@@ -43,6 +43,7 @@ SIDENAV_GROUPS = [
                    ("how-to-use", "How to use"),
                    ("api", "API access"),
                    ("provenance", "Data provenance")]),
+    ("Risk & Forecast", [("risk", "Risk & Forecast")]),
 ]
 
 BREADCRUMB = ("Bluebird FOI Insights › FOI statistics")
@@ -96,16 +97,22 @@ def nav_html(active_nav: str | None = None) -> str:
     return "\n".join(links)
 
 
-def sidenav_html(page_key: str) -> str:
+def sidenav_html(page_key: str, user: dict | None = None) -> str:
     # layout is Tailwind utilities (fixed 216px column, sticky); the inner
     # .group/.navbtn styling stays in site.css. Class names are static literals
     # so Tailwind's content scan compiles them. The 216px width is the
     # w-sidenav theme token (see tailwind/input.css) — Tailwind's arbitrary
     # values are flaky under the v4 content scan, named tokens are not.
+    #
+    # The "Risk & Forecast" group is a signed-in section: it is rendered only
+    # when a user is present, so the public (boot-rendered) pages do not
+    # advertise the internal risk views to anonymous visitors.
     out = ['<nav class="sidenav shrink-0 w-sidenav sticky top-0 self-start '
            'max-h-screen overflow-y-auto pt-6 pr-4 pb-8 pl-8" '
            'aria-label="FOI statistics">']
     for group, items in SIDENAV_GROUPS:
+        if group == "Risk & Forecast" and user is None:
+            continue
         out.append(f'<div class="group">{html.escape(group)}</div>')
         for key, label in items:
             cls = "navbtn active" if key == page_key else "navbtn"
@@ -168,7 +175,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <div class="hairlines"></div>
 <div class="breadcrumb text-sm px-8 py-2">{BREADCRUMB}</div>
 <div class="layout flex items-start max-w-layout mx-auto">
-  {sidenav_html(page_key)}
+  {sidenav_html(page_key, user)}
   <main id="main" class="flex-1 max-w-main mx-auto px-8 py-8 min-h-main">{body_html}</main>
 </div>
 <footer class="sitefoot text-sm px-8 py-7">

@@ -499,11 +499,6 @@ def _login_page(error: str | None = None) -> str:
     return chrome("Log in", body)
 
 
-def risk_not_authorized() -> str:
-    return ("<h1>Not authorised</h1>"
-            "<p>Your account does not have access to internal risk views.</p>")
-
-
 class AskRequest(BaseModel):
     request: str
 
@@ -669,8 +664,6 @@ def create_app():
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        if user.get("role") != "internal":
-            return HTMLResponse(risk_not_authorized(), status_code=403)
         return HTMLResponse(risk_page_html(user, _FRAME,
                                            artifacts=load_risk_artifacts()))
 
