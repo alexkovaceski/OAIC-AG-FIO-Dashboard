@@ -65,11 +65,10 @@ def test_fitted_classify_renders_tiers(tmp_path):
             "basis": "fy", "source_rows": 100, "rows_hash": "abc"}
     html, tiers = cmod.render_classify_section(
         meta, str(model_dir),
-        __import__("pandas").DataFrame({"agency": ["A"], "fy": ["2020-21"],
-                                        "received": [20.0]}))
+        [{"agency": "A", "share": 0.62, "decided": 100, "received": 200}])
     assert tiers is not None and len(tiers) == 1
     assert "Medium risk" in html                # end-user tier label
-    assert "62%" in html
+    assert "62%" in html                        # the timeliness share, not confidence
     assert "tabpfn" not in html                 # model name hidden
     assert "12359" not in html
 

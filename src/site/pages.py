@@ -1028,23 +1028,17 @@ curl https://foi.axoquant.com/api/</code></pre>
 
 
 def _page_provenance(frame, key=None) -> str:
-    """The public data-provenance page: the curated registry a human wrote,
-    plus — when `key` names a figure — that figure's measured live layer.
+    """The public data-provenance page, in end-user language.
 
-    It reuses the SAME honest renderer the /report answer uses
-    (agentic.report._figure_rows + _registry_rows), so the page can never
-    diverge from the chat answer: the workbook list under a named figure is
-    marked (this figure)/(other years)/(not this figure) exactly as the report
-    answer marks it. Re-using the renderer is what guarantees that — a page
-    that listed seven unmarked workbooks under a one-year chart's heading would
-    be the false claim by juxtaposition the whole campaign exists to prevent.
-
-    `key` is None at boot (render_all_pages); a reader following a figure card's
-    "where did this come from" link arrives with ?key=<figure> and the route
-    re-renders this page with the live layer added.
+    The reader sees: a one-line statement of where the data comes from, the
+    source dataset and the workbooks (by name and period, no hashes), and the
+    plain-language curation decisions. The hashes and sheet mappings are tucked
+    into a collapsed "Technical details" block so the page reads like an answer,
+    not a registry dump. The honest marking ("this figure"/"other years") is
+    preserved in the technical block via agentic.report._registry_rows.
     """
     import provenance as prov
-    from agentic.report import _figure_rows, _registry_rows, _figure_label
+    from agentic.report import _registry_rows, _figure_label
     unknown_key = None
     try:
         payload = prov.describe(frame, key=key)
@@ -1052,36 +1046,71 @@ def _page_provenance(frame, key=None) -> str:
         payload = prov.describe(frame)
         unknown_key = key
     figure = payload.get("figure")
+
+    figure_html = ""
     if figure is not None:
-        rows, _ = _figure_rows(figure)
-        rows += _registry_rows(payload, figure["default_view"])
-        heading = f"Where {_figure_label(figure)} comes from"
-        intro = ("This is the measured basis behind one figure, plus the "
-                 "registry that describes where this platform's data comes "
-                 "from.")
-    else:
-        rows = _registry_rows(payload, None)
-        heading = "Where this data comes from"
-        intro = ("Every source file this platform reads, the sheet each "
-                 "measure is read from, and the curation decisions behind "
-                 "them — with the content hash that pins each file.")
-    table = "".join(
-        f'<tr><th>{html.escape(row["part"])}</th>'
-        f'<td>{html.escape(row["detail"])}</td></tr>'
-        for row in rows)
+        view = figure.get("default_view") or {}
+        rows = figure.get("source_rows")
+        bits = []
+        if view.get("measures"):
+            bits.append("the measures " + ", ".join(view["measures"]))
+        if view.get("financial_years"):
+            bits.append("financial year " + ", ".join(view["financial_years"]))
+        if view.get("distinct_agencies"):
+            bits.append(f"across {view['distinct_agencies']} reporting agencies")
+        what = (" (" + "; ".join(bits) + ")") if bits else ""
+        figure_html = (
+            f'<h2>Where {html.escape(_figure_label(figure))} comes from</h2>'
+            f'<p>This figure is computed from <strong>{rows:,} published fact '
+            f'rows</strong>{what}.</p>'
+            f'<p class="hint">{html.escape(str(figure.get("qualifier") or ""))}</p>'
+        )
+
+    sources = payload.get("sources") or []
+    refs = [s for s in sources if not s.get("ingested_as")]
+    files = [s for s in sources if s.get("ingested_as")]
+    source_html = ""
+    if refs or files:
+        lis = []
+        for s in refs:
+            lis.append(f'<li>{html.escape(s.get("title") or "")} &mdash; '
+                       f'<a href="{html.escape(s.get("url") or "#")}">'
+                       f'{html.escape(s.get("url") or "")}</a></li>')
+        for s in files:
+            covers = ", ".join(s.get("covers") or [])
+            lis.append(f'<li>{html.escape(s.get("title") or "")}'
+                       f' <span class="meta">(covers {html.escape(covers)})</span></li>')
+        source_html = '<h2>The source</h2><ul>' + "".join(lis) + "</ul>"
+
+    decisions = payload.get("decisions") or []
+    dec_html = ""
+    if decisions:
+        decs = "".join(f'<li>{html.escape(d.get("title") or "")}</li>'
+                       for d in decisions)
+        dec_html = '<h2>How we handle the data</h2><ul>' + decs + "</ul>"
+
+    tech_rows = _registry_rows(payload,
+                               figure.get("default_view") if figure else None)
+    tech_table = "".join(
+        f'<tr><th>{html.escape(r["part"])}</th>'
+        f'<td>{html.escape(r["detail"])}</td></tr>' for r in tech_rows)
+    tech = ('<details class="risk-details"><summary>Technical details '
+            '(hashes and sheet mappings)</summary>'
+            f'<table class="apitable provenance">{tech_table}</table></details>')
+
     unknown = (f'<p class="note">No figure named '
                f'<code>{html.escape(str(unknown_key))}</code> is published on '
-               f'this site, so the registry below is shown without a figure '
-               f'basis.</p>' if unknown_key is not None else "")
-    body = f"""
-    <h1>Data provenance</h1>
-    {unknown}
-    <p class="intro">{intro} Nothing here is generated: every value is either
-    curated text a human wrote into the registry, or a number measured from
-    the platform's own published facts.</p>
-    <h2>{html.escape(heading)}</h2>
-    <table class="apitable provenance">{table}</table>
-    """
+               f'this site, so the source information below is shown without a '
+               f'figure basis.</p>' if unknown_key is not None else "")
+
+    body = (
+        '<h1>Where our data comes from</h1>'
+        f'{unknown}'
+        '<p class="intro">Every figure on this site is computed from the '
+        'Australian Government&rsquo;s published freedom-of-information (FOI) '
+        'statistics &mdash; no number is typed in by hand.</p>'
+        + figure_html + source_html + dec_html + tech
+    )
     return chrome("Data provenance", body, page_key="provenance")
 
 

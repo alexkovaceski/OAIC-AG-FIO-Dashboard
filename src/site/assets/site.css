@@ -506,6 +506,67 @@ h1 {
   text-transform: uppercase; letter-spacing: 0.02em; }
 .report-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
 
+/* --- reports page (deterministic lookup + built dashboard) --- */
+.report-input {
+  max-width: 760px;
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.report-input input {
+  flex: 1;
+  padding: 0.6rem 0.8rem;
+  background: var(--page);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.95rem;
+}
+.report-input input:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(7, 135, 217, 0.14);
+}
+.report-input button {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.report-input button:hover { background: var(--blue); }
+
+.report-out { max-width: 760px; }
+.report-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1rem 1.25rem 1.1rem;
+  margin: 1rem 0;
+}
+.report-card h2 { margin-top: 0; }
+.report-card .value { font-size: 2rem; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums; margin: 0.2rem 0; }
+.report-card .basis { color: var(--ink-2); font-size: 0.8rem; }
+.report-card .cite { color: var(--muted); font-size: 0.76rem; }
+.report-card .cta {
+  display: inline-block;
+  margin-top: 0.6rem;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  text-decoration: none;
+}
+.report-card .cta:hover { background: var(--blue); }
+
 /* --- ECharts containers ---------------------------------------------------- */
 
 .chartbox { min-height: 320px; }

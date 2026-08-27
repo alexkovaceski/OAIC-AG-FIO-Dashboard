@@ -53,10 +53,9 @@
     if (!r) return;  // blank input -> generate() returns undefined; never crash
     if (r.built) {
       out.innerHTML = '<div class="report-card"><h2>Report built</h2>' +
-        '<p>The deterministic router could not map this to a fixed figure, so it ' +
-        'was built from the published data. ' +
-        '<a href="' + r.dashboard_url + '">Open the dashboard</a> &middot; ' +
-        '<a href="' + r.lineage_url + '">View lineage</a></p></div>';
+        '<p>This query was built into a dashboard from the published data.</p>' +
+        '<a class="cta" href="' + r.dashboard_url + '">Open the dashboard</a> ' +
+        '<a class="nav-link" href="' + r.lineage_url + '">View lineage</a></div>';
       return;
     }
     if (r.escalate) {

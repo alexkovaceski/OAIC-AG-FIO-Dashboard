@@ -4,6 +4,7 @@
   if (!data || typeof echarts === "undefined") return;
 
   var ink = "#0f1e33", ink2 = "#4a5a72", brand = "#5d4fff", grid = "#e4eaf2";
+  var tierLabel = { low: "Low risk", medium: "Medium risk", high: "High risk" };
 
   // ---- request-volume forecast (actual bars + forecast bars + range band) ----
   var f = data.forecast || {};
@@ -64,32 +65,82 @@
     });
   }
 
-  // ---- agency risk-tier distribution ----
-  var tiers = data.tiers || [];
-  var counts = { low: 0, medium: 0, high: 0 };
-  tiers.forEach(function (t) { if (counts[t.tier] != null) counts[t.tier] += 1; });
+  // ---- timeliness distribution (histogram, 10% bins) ----
+  var benchmark = data.benchmark || [];
+  var shares = benchmark.map(function (b) { return b.share; })
+    .filter(function (s) { return s != null; });
+  var bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  shares.forEach(function (s) { bins[Math.min(9, Math.floor(s * 10))] += 1; });
+  var binLabels = ["0-10", "10-20", "20-30", "30-40", "40-50", "50-60",
+                   "60-70", "70-80", "80-90", "90-100"];
 
   var tcEl = document.getElementById("tier-chart");
-  if (tcEl && tiers.length) {
+  if (tcEl && shares.length) {
     var tc = echarts.init(tcEl);
     tc.setOption({
-      color: ["#16a34a", "#ea580c", "#dc2626"],
-      grid: { left: 48, right: 16, top: 24, bottom: 32 },
+      color: [brand],
+      grid: { left: 48, right: 16, top: 24, bottom: 40 },
       tooltip: { trigger: "axis" },
-      xAxis: { type: "category",
-               data: ["Low risk", "Medium risk", "High risk"],
-               axisLabel: { color: ink2 } },
+      xAxis: { type: "category", data: binLabels, name: "Within statutory %",
+               nameLocation: "middle", nameGap: 30,
+               axisLabel: { color: ink2, rotate: 45 } },
       yAxis: { type: "value", name: "Agencies", axisLabel: { color: ink2 },
                splitLine: { lineStyle: { color: grid } } },
-      series: [{ type: "bar", data: [counts.low, counts.medium, counts.high],
-                 barMaxWidth: 48, label: { show: true, position: "top",
-                                          color: ink2 } }]
+      series: [{ type: "bar", data: bins, barMaxWidth: 40 }]
     });
   }
 
-  // ---- searchable agency table ----
+  // ---- searchable ranking + per-agency detail ----
   var search = document.getElementById("risk-search-in");
   var table = document.getElementById("risk-table");
+  var detail = document.getElementById("agency-detail");
+  var trend = data.trend || {};
+
+  function showAgency(agency) {
+    var b = null;
+    for (var i = 0; i < benchmark.length; i++) {
+      if (benchmark[i].agency === agency) { b = benchmark[i]; break; }
+    }
+    if (!b) return;
+    var share = b.share == null ? "\u2014" : Math.round(b.share * 100) + "%";
+    var tier = b.tier || "low";
+    var tr = trend[agency] || [];
+    detail.innerHTML = '<div class="report-card"><h3>' + agency + '</h3>' +
+      '<p><strong>' + share + '</strong> of decisions were made within the ' +
+      'statutory period this year' +
+      (b.decided ? ' (' + b.decided.toLocaleString() + ' decisions)' : '') +
+      '. Next-year expectation: <span class="tier tier-' + tier + '">' +
+      (tierLabel[tier] || tier) + '</span>.</p>' +
+      '<div class="chartbox chartbox-sm" id="agency-trend-chart"></div></div>';
+    var el = document.getElementById("agency-trend-chart");
+    if (el && tr.length) {
+      var ch = echarts.init(el);
+      var fys = tr.map(function (t) { return t.fy; });
+      var vals = tr.map(function (t) {
+        return t.share == null ? null : Math.round(t.share * 100);
+      });
+      ch.setOption({
+        color: [brand],
+        grid: { left: 48, right: 16, top: 24, bottom: 32 },
+        tooltip: {
+          trigger: "axis",
+          formatter: function (p) {
+            var r = tr[p[0].dataIndex];
+            var s = r.share == null ? "\u2014" : Math.round(r.share * 100) + "%";
+            var out = fys[p[0].dataIndex] + "<br>Within statutory: " + s;
+            if (r.decided != null) out += "<br>Decisions: " + r.decided.toLocaleString();
+            if (r.received != null) out += "<br>Received: " + r.received.toLocaleString();
+            return out;
+          }
+        },
+        xAxis: { type: "category", data: fys, axisLabel: { color: ink2 } },
+        yAxis: { type: "value", name: "Within statutory %", min: 0, max: 100,
+                 axisLabel: { color: ink2 }, splitLine: { lineStyle: { color: grid } } },
+        series: [{ type: "line", data: vals, name: "Within statutory" }]
+      });
+    }
+  }
+
   if (search && table) {
     search.addEventListener("input", function () {
       var q = search.value.trim().toLowerCase();
@@ -97,6 +148,12 @@
       for (var i = 0; i < rows.length; i++) {
         var name = rows[i].getAttribute("data-name") || "";
         rows[i].style.display = (q && name.indexOf(q) === -1) ? "none" : "";
+      }
+    });
+    table.addEventListener("click", function (ev) {
+      var tr = ev.target.closest("tr");
+      if (tr && tr.getAttribute("data-agency")) {
+        showAgency(tr.getAttribute("data-agency"));
       }
     });
   }

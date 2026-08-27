@@ -48,6 +48,60 @@ def _plain_date(iso) -> str:
         return str(iso or "unknown")
 
 
+def _agency_benchmark(frame):
+    """Per-agency latest-FY timeliness share, for a discriminative ranking.
+
+    The classifier's confidence score is not what distinguishes agencies (nearly
+    everyone is 93-96% "low"). What actually varies is each agency's timeliness
+    — the share of decisions made within the statutory period. Rank on that.
+    Returns [{agency, share, decided, received}], share = within/decided (None
+    when undecidable).
+    """
+    rows = [f for f in frame.facts if f["quarter"] is None
+            and f["bucket"] == "total"]
+    fys = sorted({f["fy"] for f in rows})
+    latest = fys[-1] if fys else None
+    within, decided, received = {}, {}, {}
+    for f in rows:
+        if f["fy"] != latest:
+            continue
+        if f["measure"] == "within_statutory":
+            within[f["agency_name"]] = f["value"]
+        elif f["measure"] == "decided":
+            decided[f["agency_name"]] = f["value"]
+        elif f["measure"] == "received":
+            received[f["agency_name"]] = f["value"]
+    out = []
+    for agency, d in decided.items():
+        w = within.get(agency, 0)
+        out.append({"agency": agency,
+                    "share": (round(w / d, 3) if d else None),
+                    "decided": d, "received": received.get(agency)})
+    return out
+
+
+def _agency_trend(frame, agencies):
+    """Per-agency FY-by-FY timeliness share + volume, for the detail panel."""
+    rows = [f for f in frame.facts if f["quarter"] is None
+            and f["bucket"] == "total"]
+    by_agency = {}
+    for f in rows:
+        if f["agency_name"] not in agencies:
+            continue
+        by_agency.setdefault(f["agency_name"], {}).setdefault(
+            f["fy"], {})[f["measure"]] = f["value"]
+    out = {}
+    for agency, fys in by_agency.items():
+        trend = []
+        for fy in sorted(fys):
+            w = fys[fy].get("within_statutory", 0)
+            d = fys[fy].get("decided", 0)
+            trend.append({"fy": fy, "share": (round(w / d, 3) if d else None),
+                          "received": fys[fy].get("received"), "decided": d})
+        out[agency] = trend
+    return out
+
+
 def _fitted_page(user, frame, artifacts):
     base = artifacts.get("base", "")
     forecast_dir = os.path.join(base, "forecast")
@@ -56,10 +110,15 @@ def _fitted_page(user, frame, artifacts):
               if frame is not None else None)
     forecast_html, points = render_forecast_section(artifacts, forecast_dir,
                                                     series)
-    classify_html, tiers = render_classify_section(artifacts, classify_dir)
+    benchmark = (_agency_benchmark(frame) if frame is not None else [])
+    classify_html, tiers = render_classify_section(artifacts, classify_dir,
+                                                   benchmark)
     risk_data = {
         "forecast": {"historical": series, "points": points or []},
         "tiers": tiers or [],
+        "benchmark": benchmark,
+        "trend": (_agency_trend(frame, {b["agency"] for b in benchmark})
+                  if frame is not None else {}),
     }
     # the JSON blob must never break out of its <script> tag (mirrors __pageData)
     blob = json.dumps(risk_data).replace("</", "<\\/")
