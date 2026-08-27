@@ -549,10 +549,18 @@ def test_assets_carry_revalidation_cache_header():
 
 def test_gated_pages_redirect_when_anonymous():
     c = TestClient(create_app())
-    for path in ["/chat.html", "/reports.html"]:
+    for path in ["/ask.html"]:
         r = c.get(path, follow_redirects=False)
         assert r.status_code == 303
         assert "/login" in r.headers.get("location", "")
+
+def test_legacy_pages_redirect_to_ask():
+    # Chat and Reports collapsed into the Ask page; the old URLs stay alive.
+    c = TestClient(create_app())
+    for path in ["/chat.html", "/reports.html"]:
+        r = c.get(path, follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers.get("location") == "/ask.html"
 
 def test_gated_page_serves_with_valid_session(monkeypatch):
     from storage import auth
@@ -563,9 +571,9 @@ def test_gated_page_serves_with_valid_session(monkeypatch):
     token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
     c = TestClient(create_app())
     c.cookies.set("foi_session", token)
-    r = c.get("/chat.html")
+    r = c.get("/ask.html")
     assert r.status_code == 200
-    assert 'id="chat-log"' in r.text
+    assert 'id="ask-log"' in r.text
 
 def test_session_user_defaults_role_to_viewer(monkeypatch):
     # Task 1: a session minted before the role column existed (payload lacks
@@ -590,7 +598,7 @@ def test_gated_page_rejects_cookie_minted_with_default_secret(monkeypatch):
     token = auth.encode_session(1, "alice", "viewer", "dev-insecure-secret")
     c = TestClient(create_app())
     c.cookies.set("foi_session", token)
-    r = c.get("/chat.html", follow_redirects=False)
+    r = c.get("/ask.html", follow_redirects=False)
     assert r.status_code == 303
     assert "/login" in r.headers.get("location", "")
 
@@ -646,7 +654,7 @@ def test_login_sets_session_cookie(monkeypatch):
     r = c.post("/login", data={"username": "alice", "password": "x"},
                follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers.get("location") == "/chat.html"
+    assert r.headers.get("location") == "/ask.html"
     assert "foi_session" in r.cookies
 
 def test_login_wrong_password_rejected(monkeypatch):
@@ -716,6 +724,107 @@ def test_chat_route_returns_grounded_answer(monkeypatch):
     body = r.json()
     assert captured["query"] == "how many requests were received?"
     assert body["citations"] == ["catalog:requests_received_q1"]
+
+
+def _ask_session(monkeypatch, c):
+    from storage import auth
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
+    c.cookies.set("foi_session", token)
+    return app_mod
+
+
+def test_ask_question_routes_stat_kind(monkeypatch):
+    # The unified ask endpoint: a stat-shaped question comes back as kind "stat"
+    # with the platform-computed figure (same contract the reports page had).
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    r = c.post("/ask-question",
+               json={"question": "how many requests were received last quarter?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "stat"
+    assert body["stat_key"] == "requests_received_q1"
+    assert body["data"] == 12359
+    assert body["dataset_registry"]["rows_hash"]
+
+
+def test_ask_question_routes_note_kind_for_quarterly(monkeypatch):
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    r = c.post("/ask-question",
+               json={"question": "show requests received by month"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "note"
+    assert "annual" in body["note"]
+    assert body["escalate"] is False
+
+
+def test_ask_question_routes_provenance_kind(monkeypatch):
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    r = c.post("/ask-question", json={"question": "where does the data come from?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "provenance"
+    assert "Where this data comes from" in body["answer"]
+
+
+def test_ask_question_falls_back_to_narrative(monkeypatch):
+    # An in-scope question the router cannot map and that has no build intent
+    # answers in grounded prose (never the old "email us" escalation). The ask
+    # pipeline imports chat lazily, so patch agentic.chat.chat itself.
+    import agentic.chat as chat_mod
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+
+    async def fake_chat(query, history=None, frame=None):
+        return {"answer": "The dataset holds agency-level FOI statistics.",
+                "citations": ["data/corpus/data-notes.md"],
+                "provider": "sovereign", "escalate": False}
+
+    monkeypatch.setattr(chat_mod, "chat", fake_chat)
+    r = c.post("/ask-question",
+               json={"question": "what does the FOI dataset contain?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "narrative"
+    assert body["escalate"] is False
+    assert "agency-level" in body["answer"]
+
+
+def test_ask_question_builds_dashboard_on_explicit_intent(monkeypatch):
+    # "build a dashboard…" goes to the builder; the returned kind carries the
+    # durable dashboard link, and the build is stamped with the caller's id.
+    import server.app as app_mod
+    c = TestClient(create_app())
+    app_mod = _ask_session(monkeypatch, c)
+    captured = {}
+
+    async def fake_build(frame, request_text, user_id=None):
+        captured["user_id"] = user_id
+        return {"artifact_id": 42, "dashboard_url": "/dashboards/42",
+                "lineage_url": "/lineage/42", "error": None}
+
+    monkeypatch.setattr(app_mod, "_build_dashboard", fake_build)
+    monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
+    r = c.post("/ask-question",
+               json={"question": "build a dashboard of requests by agency"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "dashboard"
+    assert body["dashboard_url"] == "/dashboards/42"
+    assert captured["user_id"] == 1
+
+
+def test_ask_question_requires_session():
+    c = TestClient(create_app())
+    r = c.post("/ask-question", json={"question": "how many requests?"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
 
 def test_risk_page_internal_renders(monkeypatch):
     from storage import auth

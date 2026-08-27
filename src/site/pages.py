@@ -1283,3 +1283,40 @@ def reports_page(user, artifacts=None) -> str:
     """
     return chrome("Reports", body, page_key="reports", user=user,
                   scripts=_asset_link("report.js"))
+
+
+def ask_page(user, artifacts=None) -> str:
+    """The unified Ask page: one input, one thread for every answer kind, and
+    the user's report job board beneath. Chat and Reports redirect here; the
+    router (agentic.ask) decides whether a question comes back as a figure, a
+    table, an explanation, prose, or a built dashboard."""
+    artifacts = artifacts or []
+    if artifacts:
+        rows = "".join(_report_row(a) for a in artifacts)
+        board = ('<table class="report-table reports-index">'
+                 '<thead><tr><th>Report</th><th>Status</th><th>Created</th>'
+                 '<th class="actions">Actions</th></tr></thead>'
+                 f'<tbody>{rows}</tbody></table>')
+    else:
+        board = ('<p class="nodata">No reports yet. Say "build a dashboard…" '
+                 'and it will be built here.</p>')
+    body = f"""
+    <h1>Ask</h1>
+    <p class="intro">Ask anything about the published FOI statistics. The
+    answer comes back as a figure, a table, an explanation, or &mdash; for
+    &ldquo;build a dashboard&rdquo; requests &mdash; a live dashboard.</p>
+    <div class="report-input">
+      <input id="ask-in" type="text" placeholder="e.g. 'how many requests were received last quarter?'" autocomplete="off">
+      <button id="ask-send" type="button">Ask</button>
+    </div>
+    <div id="ask-log" class="chatlog" role="log" aria-live="polite"></div>
+    <p class="hint">Try "top agencies for requests decided", "which agencies
+    are growing requests?", "where does the decision outcomes data come
+    from?", or "build a dashboard of requests by agency".</p>
+    <h2>Your reports</h2>
+    <div id="ask-reports">{board}</div>
+    <p class="hint">Open a built report, or delete any report you no longer
+    want.</p>
+    """
+    return chrome("Ask", body, page_key="ask", user=user,
+                  scripts=_asset_link("ask.js"))

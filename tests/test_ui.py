@@ -340,8 +340,9 @@ def test_masthead_has_bluebird_logo():
 
 def test_masthead_user_chip_and_workspace_sidenav():
     from site.templates import _user_nav, sidenav_html
-    # the account chip is role-independent; Chat/Reports/Risk & Forecast moved
-    # to the left "Workspace" sidenav group, which is gated to signed-in users.
+    # the account chip is role-independent; the merged Ask surface + Risk &
+    # Forecast live in the left "Workspace" sidenav group, gated to signed-in
+    # users.
     assert "btn-login" in _user_nav(None)
     chip = _user_nav({"role": "internal", "username": "alex"})
     assert "user-avatar" in chip
@@ -353,8 +354,9 @@ def test_masthead_user_chip_and_workspace_sidenav():
     signed = sidenav_html("at-a-glance", {"role": "viewer", "username": "alex"})
     assert "Workspace" not in anon
     assert "Workspace" in signed
-    assert "/chat.html" in signed and "/reports.html" in signed
+    assert "/ask.html" in signed
     assert "/risk.html" in signed
+    assert "/chat.html" not in signed and "/reports.html" not in signed
 
 
 def test_top_nav_links_are_all_internal():
@@ -376,6 +378,17 @@ def test_chat_page_oaic_free_and_gated():
     html = chat_page({"username": "alice"})
     assert "oaic.gov.au" not in html and "OAIC" not in html
     assert 'id="chat-log"' in html and "chat.js" in html
+
+
+def test_ask_page_is_the_unified_surface():
+    # The merged Ask page: one input, one thread for every answer kind, and the
+    # "Your reports" job board beneath. No OAIC name, ask.js shipped.
+    from site.pages import ask_page
+    html = ask_page({"username": "alice"})
+    assert "oaic.gov.au" not in html and "OAIC" not in html
+    assert 'id="ask-in"' in html and 'id="ask-log"' in html
+    assert "ask.js" in html
+    assert "Your reports" in html and 'id="ask-reports"' in html
 
 
 def test_reports_page_oaic_free_and_gated():

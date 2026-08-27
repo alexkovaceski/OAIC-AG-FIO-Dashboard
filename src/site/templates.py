@@ -43,8 +43,7 @@ SIDENAV_GROUPS = [
                    ("how-to-use", "How to use"),
                    ("api", "API access"),
                    ("provenance", "Data provenance")]),
-    ("Workspace", [("chat", "Chat"),
-                   ("reports", "Reports"),
+    ("Workspace", [("ask", "Ask"),
                    ("risk", "Risk & Forecast")]),
 ]
 

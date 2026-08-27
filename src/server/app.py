@@ -78,8 +78,9 @@ from stats.catalog import foi_stats  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 from storage import auth  # noqa: E402
 from agentic.chat import chat as agentic_chat  # noqa: E402
+from agentic.ask import ask as agentic_ask  # noqa: E402
 from agentic.report import build_report  # noqa: E402
-from site.pages import chat_page, reports_page  # noqa: E402
+from site.pages import chat_page, reports_page, ask_page  # noqa: E402
 from risk.load import load_risk_artifacts, risk_page_html  # noqa: E402
 
 # The golden boot check runs once at import; the frame and pages are immutable
@@ -671,7 +672,7 @@ def create_app():
         if user is None:
             return HTMLResponse(_login_page("Invalid username or password"),
                                 status_code=401)
-        resp = RedirectResponse("/chat.html", status_code=303)
+        resp = RedirectResponse("/ask.html", status_code=303)
         resp.set_cookie("foi_session",
                         auth.encode_session(user["id"], user["username"],
                                             user.get("role", "viewer"),
@@ -689,28 +690,64 @@ def create_app():
     def login_page():
         return HTMLResponse(_login_page())
 
-    @app.get("/chat.html")
-    def chat_gated(request: Request):
-        user = _session_user(request)
-        if user is None:
-            return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(chat_page(user))
-
-    @app.get("/reports.html")
-    def reports_gated(request: Request):
-        user = _session_user(request)
-        if user is None:
-            return RedirectResponse("/login", status_code=303)
-        artifacts = []
+    def _user_artifacts(user):
+        """The signed-in user's built reports, newest first ([] when the DB is
+        unreachable — the ask page and the board never 500 on a down store)."""
         try:
             conn = get_conn()
             try:
-                artifacts = list_artifacts(conn, user_id=user["id"])
+                return list_artifacts(conn, user_id=user["id"])
             finally:
                 conn.close()
         except (RuntimeError, psycopg2.OperationalError):
-            artifacts = []
-        return HTMLResponse(reports_page(user, artifacts))
+            return []
+
+    @app.get("/ask.html")
+    def ask_gated(request: Request):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse(ask_page(user, _user_artifacts(user)))
+
+    @app.get("/chat.html")
+    def chat_redirect():
+        # the merged Ask page replaces the old Chat surface; keep the URL alive
+        return RedirectResponse("/ask.html", status_code=303)
+
+    @app.get("/reports.html")
+    def reports_redirect():
+        # the merged Ask page replaces the old Reports surface; keep the URL alive
+        return RedirectResponse("/ask.html", status_code=303)
+
+    @app.get("/reports.json")
+    def reports_json(request: Request):
+        # the ask page's job board refreshes from this after a build completes
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        out = []
+        for a in _user_artifacts(user):
+            created = a.get("created_at")
+            out.append({"id": a["id"], "request_text": a["request_text"],
+                        "status": a["status"], "panel_count": a["panel_count"],
+                        "created_at": (created.isoformat()
+                                       if hasattr(created, "isoformat")
+                                       else str(created or ""))})
+        return JSONResponse(out)
+
+    @app.post("/ask-question")
+    async def ask_question_route(request: Request, req: ChatBody):
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        out = await agentic_ask(
+            req.question, req.history, frame,
+            build=lambda q: _build_dashboard(frame, q, user_id=user["id"]))
+        _record_message(user["id"], "user", req.question)
+        _record_message(user["id"], "assistant",
+                        out.get("answer") or out.get("stat_label")
+                        or out.get("dashboard_url") or "")
+        return out
 
     @app.get("/risk.html")
     def risk_gated(request: Request):
