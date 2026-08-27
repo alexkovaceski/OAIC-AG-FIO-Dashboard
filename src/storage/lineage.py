@@ -132,8 +132,13 @@ def update_artifact(conn, artifact_id, *, spec_json=None, status=None):
         raise
 
 
-def list_artifacts(conn, *, limit=12, artifact_type="builder_request") -> list[dict]:
+def list_artifacts(conn, *, limit=12, artifact_type="builder_request",
+                   user_id=None) -> list[dict]:
     """Recent artifacts of a type, newest first — the user's built reports.
+
+    `user_id` scopes the list to one user's reports ("My reports"); None lists
+    every artifact of the type (the pre-scoping behaviour, kept for callers
+    without a user).
 
     Best-effort: OperationalError -> [] (an unreachable DB must not break the
     reports page); any other psycopg2.Error raises so a schema/programming error
@@ -146,13 +151,22 @@ def list_artifacts(conn, *, limit=12, artifact_type="builder_request") -> list[d
     """
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, request_text, status, created_at,
-                       COALESCE(jsonb_array_length(spec_json->'panels'), 0)
-                FROM horizon.lineage_artifacts
-                WHERE artifact_type = %s
-                ORDER BY id DESC LIMIT %s
-            """, (artifact_type, limit))
+            if user_id is not None:
+                cur.execute("""
+                    SELECT id, request_text, status, created_at,
+                           COALESCE(jsonb_array_length(spec_json->'panels'), 0)
+                    FROM horizon.lineage_artifacts
+                    WHERE artifact_type = %s AND user_id = %s
+                    ORDER BY id DESC LIMIT %s
+                """, (artifact_type, user_id, limit))
+            else:
+                cur.execute("""
+                    SELECT id, request_text, status, created_at,
+                           COALESCE(jsonb_array_length(spec_json->'panels'), 0)
+                    FROM horizon.lineage_artifacts
+                    WHERE artifact_type = %s
+                    ORDER BY id DESC LIMIT %s
+                """, (artifact_type, limit))
             return [{"id": r[0], "request_text": r[1] or "",
                      "status": r[2] or "", "created_at": r[3],
                      "panel_count": int(r[4] or 0)} for r in cur.fetchall()]
@@ -160,22 +174,33 @@ def list_artifacts(conn, *, limit=12, artifact_type="builder_request") -> list[d
         return []
 
 
-def delete_artifact(conn, artifact_id) -> bool:
+def delete_artifact(conn, artifact_id, user_id=None) -> bool:
     """Delete an artifact and its dependent lineage rows (tool calls + ops).
+
+    `user_id` scopes the delete to the caller's own reports: with it set, a row
+    owned by someone else (or unowned legacy rows) is left alone and the call
+    returns False. None deletes regardless of ownership (the pre-scoping
+    behaviour).
 
     A DELETE is a user-initiated state change, not a background write, so it does
     NOT fail open like the record_* writes: a DB error raises here so the caller
     can tell the reader the delete did not happen, rather than a row silently
     surviving. Returns True when the artifact row was deleted, False when there
-    was nothing with that id (already gone).
+    was nothing to delete (absent id, or not the caller's row).
     """
     with conn.cursor() as cur:
         cur.execute("DELETE FROM horizon.lineage_tool_calls WHERE artifact_id = %s",
                     (artifact_id,))
         cur.execute("DELETE FROM horizon.lineage_ops WHERE artifact_id = %s",
                     (artifact_id,))
-        cur.execute("DELETE FROM horizon.lineage_artifacts WHERE id = %s",
-                    (artifact_id,))
+        if user_id is None:
+            cur.execute("DELETE FROM horizon.lineage_artifacts WHERE id = %s",
+                        (artifact_id,))
+        else:
+            cur.execute(
+                "DELETE FROM horizon.lineage_artifacts "
+                "WHERE id = %s AND (user_id = %s OR user_id IS NULL)",
+                (artifact_id, user_id))
         deleted = cur.rowcount
     conn.commit()
     return deleted > 0

@@ -410,8 +410,8 @@ def test_dashboard_route_serves_empty_spec_as_empty_page(monkeypatch):
 
 
 def test_delete_report_route(monkeypatch):
-    # Deleting a report is gated on a session and routes through delete_artifact
-    # on the live conn; success returns {"deleted": true}.
+    # Deleting a report is gated on a session, routes through delete_artifact on
+    # the live conn, and is scoped to the caller's user id.
     from storage import auth
     import server.app as app_mod
     monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
@@ -420,9 +420,10 @@ def test_delete_report_route(monkeypatch):
     deleted = {}
     sentinel_conn = object()
 
-    def fake_delete_artifact(conn, artifact_id):
+    def fake_delete_artifact(conn, artifact_id, user_id=None):
         deleted["conn"] = conn
         deleted["artifact_id"] = artifact_id
+        deleted["user_id"] = user_id
         return True
 
     monkeypatch.setattr(app_mod, "get_conn", lambda: sentinel_conn)
@@ -433,6 +434,7 @@ def test_delete_report_route(monkeypatch):
     assert r.status_code == 200
     assert r.json() == {"deleted": True}
     assert deleted["artifact_id"] == 42
+    assert deleted["user_id"] == 1
     assert deleted["conn"] is sentinel_conn
 
 
@@ -604,6 +606,34 @@ def test_report_route_requires_session():
     r = c.post("/report", json={"request": "requests received"},
                follow_redirects=False)
     assert r.status_code == 303
+
+def test_report_route_threads_user_id_into_the_builder(monkeypatch):
+    # "My reports" is per-user: when the deterministic router cannot map a query,
+    # /report hands the session user's id to _build_dashboard so the artifact row
+    # is owned by the caller (and listed only on their reports page).
+    import server.app as app_mod
+    from storage import auth
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
+
+    captured = {}
+
+    async def fake_build(frame, request_text, user_id=None):
+        captured["user_id"] = user_id
+        return {"artifact_id": 1, "dashboard_url": "/dashboards/1",
+                "lineage_url": "/lineage/1", "error": None}
+
+    monkeypatch.setattr(app_mod, "build_report",
+                        lambda request, frame: {"model": "no-match",
+                                                "escalate": True, "error": "x"})
+    monkeypatch.setattr(app_mod, "_build_dashboard", fake_build)
+    monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.post("/report", json={"request": "top 5 agencies by requests"})
+    assert r.status_code == 200
+    assert r.json()["built"] is True
+    assert captured["user_id"] == 1
 
 def test_login_sets_session_cookie(monkeypatch):
     import server.app as app_mod

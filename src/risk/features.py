@@ -21,7 +21,7 @@ def build_forecast_series(facts, measure):
             "values": [round(by[y], 3) if y in by else None for y in cats]}
 
 
-def build_agency_series(facts, measure, min_history=3):
+def build_agency_series(facts, measure, min_history=3, min_last_fy=None):
     """Per-agency annual series — {agency: {"fy": [...], "values": [...]}}.
 
     The per-agency volume forecast fits ONE global Chronos model over every
@@ -33,6 +33,13 @@ def build_agency_series(facts, measure, min_history=3):
     frame contains many renamed/merged entities that report for only 1-2 years
     under an old name, and a forecast on a 1-point series is a flat past-year
     artefact, not a forecast.
+
+    `min_last_fy` drops agencies whose LAST reported year is older than that FY.
+    An agency abolished or renamed in the July 2022 restructure ends its series
+    in 2021-22 or earlier, so its 3-year "forecast" lands entirely in years
+    already past (2022-23..2024-25) — not a forecast, an artefact of the series
+    stopping. The fit script passes the second-latest annual FY so every
+    retained forecast starts in the current published FY or later.
     """
     rows = [f for f in facts if f["quarter"] is None
             and f["measure"] == measure and f["bucket"] == "total"]
@@ -43,8 +50,12 @@ def build_agency_series(facts, measure, min_history=3):
     out = {}
     for a, fyvals in by_agency.items():
         values = [fyvals.get(y) for y in cats]
-        if sum(1 for v in values if v is not None) >= min_history:
-            out[a] = {"fy": cats, "values": values}
+        present = [y for y, v in zip(cats, values) if v is not None]
+        if len(present) < min_history:
+            continue
+        if min_last_fy and (not present or present[-1] < min_last_fy):
+            continue
+        out[a] = {"fy": cats, "values": values}
     return out
 
 

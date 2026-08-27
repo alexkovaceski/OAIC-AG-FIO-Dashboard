@@ -84,6 +84,22 @@ def load_facts() -> list[dict]:
     return frame.facts
 
 
+def _agency_min_last_fy(facts) -> str | None:
+    """The oldest last-reported FY an agency may have and still get a forecast:
+    the second-latest annual FY in the frame.
+
+    The per-agency forecast horizon is the three years AFTER an agency's last
+    reported year. An agency whose series ended before the second-latest annual
+    FY (typically a pre-July-2022 name abolished in the machinery-of-government
+    restructure) would be "forecast" into years already past, so it is dropped.
+    With the current frame (annual years ..2024-25, 2025-26) this keeps agencies
+    last reporting in 2024-25 or 2025-26 — every retained forecast starts in the
+    current published FY (2025-26) or later.
+    """
+    annual = sorted({f["fy"] for f in facts if f["quarter"] is None})
+    return annual[-2] if len(annual) >= 2 else None
+
+
 def _next_fy(fy: str) -> str:
     """The FY one year later. '2019-20' -> '2020-21' (end year = start + 2)."""
     start = int(fy.split("-")[0])
@@ -449,7 +465,9 @@ def dry_run() -> int:
     autogluon import, nothing written — safe to run on any machine."""
     facts = load_facts()
     series = build_forecast_series(facts, MEASURE)
-    agency_series = build_agency_series(facts, MEASURE)
+    min_last_fy = _agency_min_last_fy(facts)
+    agency_series = build_agency_series(facts, MEASURE,
+                                        min_last_fy=min_last_fy)
     features = build_agency_features(facts)
     if features.empty:
         print("error: no annual agency feature rows — nothing to fit", file=sys.stderr)
@@ -460,7 +478,8 @@ def dry_run() -> int:
     print(f"forecast series: {len(series['fy'])} FY points "
           f"({series['fy'][0]}..{series['fy'][-1]})")
     print(f"agency series: {len(agency_series)} agencies for the per-agency "
-          f"volume forecast")
+          f"volume forecast (min_history=3, last reported year >= "
+          f"{min_last_fy})")
     print(f"label rows: {len(labeled)} (final FY {final_fy} unlabeled, excluded "
           f"from training)")
     train = labeled[labeled["fy"] <= SPLIT_FY]
@@ -497,7 +516,9 @@ def main(argv=None) -> int:
     print("fit_risk_models: loading canonical facts (golden gate) ...")
     facts = load_facts()
     series = build_forecast_series(facts, MEASURE)
-    agency_series = build_agency_series(facts, MEASURE)
+    min_last_fy = _agency_min_last_fy(facts)
+    agency_series = build_agency_series(facts, MEASURE,
+                                        min_last_fy=min_last_fy)
     features = build_agency_features(facts)
     if features.empty:
         print("error: no annual agency feature rows — nothing to fit", file=sys.stderr)

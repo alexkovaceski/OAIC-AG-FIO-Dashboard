@@ -205,16 +205,42 @@ def test_list_artifacts_returns_created_at_and_panel_count():
             return False
 
         def execute(self, sql, params=None):
-            pass
+            self.sql = sql
+            self.params = params
 
         def fetchall(self):
             return rows
 
-    conn = _FakeConn(_Cursor())
+    cur = _Cursor()
+    conn = _FakeConn(cur)
     out = lineage_mod.list_artifacts(conn)
     assert out == [{"id": 22, "request_text": "breakup by compliance",
                     "status": "ready", "created_at": "2026-08-27T09:00:00+00:00",
                     "panel_count": 0}]
+    assert "user_id" not in cur.sql  # unscoped listing keeps the old shape
+
+
+def test_list_artifacts_scopes_to_one_user():
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+
+        def fetchall(self):
+            return []
+
+    cur = _Cursor()
+    conn = _FakeConn(cur)
+    assert lineage_mod.list_artifacts(conn, user_id=7) == []
+    assert "user_id = %s" in cur.sql
+    assert cur.params[0] == "builder_request"
+    assert cur.params[1] == 7
 
 
 def test_list_artifacts_fails_open_on_operational_error():
@@ -255,6 +281,29 @@ def test_delete_artifact_deletes_children_then_row_and_commits():
     assert "lineage_tool_calls" in cur.sqls[0]
     assert "lineage_ops" in cur.sqls[1]
     assert "lineage_artifacts" in cur.sqls[2]
+
+
+def test_delete_artifact_scoped_to_caller_guards_ownership():
+    class _Cursor:
+        def __init__(self):
+            self.sqls = []
+            self.rowcount = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sqls.append((sql, params))
+
+    cur = _Cursor()
+    conn = _FakeConn(cur)
+    assert lineage_mod.delete_artifact(conn, 42, user_id=7) is False
+    sql, params = cur.sqls[2]
+    assert "user_id = %s OR user_id IS NULL" in sql
+    assert params == (42, 7)
 
 
 def test_delete_artifact_returns_false_when_row_absent():

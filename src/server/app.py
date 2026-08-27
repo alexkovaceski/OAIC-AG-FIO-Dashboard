@@ -277,15 +277,18 @@ def _record_figure_ops(conn, frame, artifact_id, dataset_id, spec) -> None:
                   result_value=stat.get("value"))
 
 
-async def _build_dashboard(frame, request_text: str) -> dict:
+async def _build_dashboard(frame, request_text: str, user_id=None) -> dict:
     """Build a dashboard for `request_text` via the LLM builder, persist it as a
     lineage artifact, and return {artifact_id, dashboard_url, lineage_url, error}.
 
     Shared by /ask (the builder endpoint) and /report (which falls back here when
     the deterministic router cannot map a query, so "top 5 agencies" builds a real
-    dashboard instead of escalating to email). Fail-open everywhere: an
-    unreachable DB or a build failure never kills the caller — `error` is set and
-    the artifact (if any) is flipped to status="error".
+    dashboard instead of escalating to email). `user_id` stamps the artifact with
+    its owner, so the gated reports page lists each user's own builds; /ask passes
+    None (it is the unauthenticated legacy endpoint).
+
+    Fail-open everywhere: an unreachable DB or a build failure never kills the
+    caller — `error` is set and the artifact (if any) is flipped to status="error".
     """
     ledger = _get_ledger()
     build_id = None
@@ -304,7 +307,7 @@ async def _build_dashboard(frame, request_text: str) -> dict:
             if dataset_id is not None:
                 build_id = record_artifact(
                     raw, artifact_type="builder_request",
-                    artifact_key=(request_text or "")[:40], user_id=None,
+                    artifact_key=(request_text or "")[:40], user_id=user_id,
                     dataset_id=dataset_id, request_text=request_text,
                     spec_json={}, model="fartkraft", status="building")
             if build_id is not None:
@@ -702,7 +705,7 @@ def create_app():
         try:
             conn = get_conn()
             try:
-                artifacts = list_artifacts(conn)
+                artifacts = list_artifacts(conn, user_id=user["id"])
             finally:
                 conn.close()
         except (RuntimeError, psycopg2.OperationalError):
@@ -739,7 +742,8 @@ def create_app():
         # email, fall back to the LLM builder, which CAN build the ranking and
         # persists it as a lineage artifact with a durable /dashboards/{id} link.
         if out.get("model") == "no-match":
-            result = await _build_dashboard(frame, req.request)
+            result = await _build_dashboard(frame, req.request,
+                                            user_id=user["id"])
             if result["error"] is None:
                 _record_message(user["id"], "report", req.request)
                 return {"built": True, "dashboard_url": result["dashboard_url"],
@@ -837,8 +841,10 @@ def create_app():
     @app.post("/dashboards/{artifact_id}/delete")
     def dashboard_delete(artifact_id: str, request: Request):
         # Delete a built report (and its lineage rows). Gated on a session like
-        # the reports page it lives on; a delete is a state change, so a storage
-        # error returns an error status rather than a silent success.
+        # the reports page it lives on, and scoped to the caller's own reports
+        # (an unowned legacy row is also deletable, so pre-scoping artifacts can
+        # be cleaned up). A delete is a state change, so a storage error returns
+        # an error status rather than a silent success.
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
@@ -856,7 +862,7 @@ def create_app():
                                      "error": "storage unavailable"},
                                     status_code=503)
             try:
-                deleted = delete_artifact(conn, aid)
+                deleted = delete_artifact(conn, aid, user_id=user["id"])
             except psycopg2.Error:
                 return JSONResponse({"deleted": False, "error": "delete failed"},
                                     status_code=500)
