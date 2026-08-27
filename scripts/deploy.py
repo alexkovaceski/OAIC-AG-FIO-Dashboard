@@ -89,6 +89,19 @@ def ssh_target() -> str:
     return f"{REMOTE_USER}@{IDC1}"
 
 
+def _remote_dir(item: str) -> str:
+    """The remote directory an item belongs in, preserving its parent prefix.
+
+    `scp -r data/corpus host:/rem/` copies the SOURCE's basename to `/rem/corpus/`
+    — the `data/` prefix is dropped. The app reads `data/corpus`, so pushing a
+    nested item to the target root silently misses it: the service boots against
+    the stale `data/corpus` and a newly-added registry file (data/corpus/provenance)
+    is never served. The destination must carry the parent prefix back.
+    """
+    parent = item.replace("\\", "/").rsplit("/", 1)[0]
+    return f"{REMOTE}/{parent}/" if parent else f"{REMOTE}/"
+
+
 def run(cmd: list[str], dry_run: bool, description: str) -> None:
     print(f"[{description}] $ {' '.join(cmd)}", flush=True)
     if not dry_run:
@@ -158,7 +171,7 @@ def main() -> int:
         if not src.exists():
             print(f"skip {item} (missing locally)", flush=True)
             continue
-        run(["scp", "-r", str(src), f"{ssh_target()}:{REMOTE}/"],
+        run(["scp", "-r", str(src), f"{ssh_target()}:{_remote_dir(item)}"],
             dry_run=args.dry_run, description=f"push {item}")
 
     # 2. Install/refresh the venv (idempotent; first deploy creates it).

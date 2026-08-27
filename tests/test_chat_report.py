@@ -290,18 +290,22 @@ def test_deixis_is_never_admitted():
     # is to drop "last" into _FRAME_WORDS, which silently re-opens the
     # out-of-coverage class ("next year's FOI requests data"). The membership
     # asserts below fail if anyone does.
+    #
+    # "coming" is NOT an exception. It was, once: as the gerund of "come" it sat
+    # in _FRAME_WORDS alongside _NEVER_ADMITTED, so a frame-word match stripped
+    # it before the vocabulary gate and _NEVER_ADMITTED never fired — "where did
+    # the coming year's FOI data come from" came back as the whole-platform
+    # lineage (7 workbooks + 7 sha256) for a future year the platform does not
+    # publish. Measured 2026-08-27. It now lives only in _NEVER_ADMITTED, so
+    # every deixis word is uniformly out of both sets.
     from agentic.report import (_FRAME_WORDS, _NEVER_ADMITTED, _VOCABULARY,
                                 build_report)
     for word in _NEVER_ADMITTED:
         assert word not in _VOCABULARY, f"{word!r} must not be vocabulary"
-    # "coming" is the one exception to "neither set": it is also the gerund of
-    # "come" and belongs in _FRAME_WORDS for "where is this coming from". As
-    # future deixis ("the coming year") it is still declined, by the
-    # citable-subject condition rather than the vocabulary one.
-    for word in _NEVER_ADMITTED - {"coming"}:
         assert word not in _FRAME_WORDS, f"{word!r} must not be a frame word"
     for question in ("where did last year's FOI requests data come from?",
-                     "where does next quarter's FOI data come from?"):
+                     "where does next quarter's FOI data come from?",
+                     "where did the coming year's FOI data come from?"):
         out = build_report(question, _frame())
         assert out["escalate"] is True, question
         assert out.get("provenance") is None, question

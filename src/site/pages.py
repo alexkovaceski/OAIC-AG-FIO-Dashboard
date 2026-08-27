@@ -1044,7 +1044,7 @@ def _page_provenance(frame, key=None) -> str:
     re-renders this page with the live layer added.
     """
     import provenance as prov
-    from agentic.report import _figure_rows, _registry_rows
+    from agentic.report import _figure_rows, _registry_rows, _figure_label
     unknown_key = None
     try:
         payload = prov.describe(frame, key=key)
@@ -1055,7 +1055,7 @@ def _page_provenance(frame, key=None) -> str:
     if figure is not None:
         rows, _ = _figure_rows(figure)
         rows += _registry_rows(payload, figure["default_view"])
-        heading = f"Where {figure.get('caption') or figure['key']} comes from"
+        heading = f"Where {_figure_label(figure)} comes from"
         intro = ("This is the measured basis behind one figure, plus the "
                  "registry that describes where this platform's data comes "
                  "from.")

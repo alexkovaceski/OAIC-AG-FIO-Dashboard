@@ -155,7 +155,7 @@ _FRAME_WORDS = frozenset("""
 a an the this that these those there here
 where what which who whom whose when why how
 is are was were be been being am do does did done
-come comes came coming get gets got go goes went
+come comes came get gets got go goes went
 from of for in on at to by with about into over under out up off
 and or but nor so than then if as
 i me my mine we us our ours you your yours they them their it its
@@ -563,7 +563,8 @@ def _frame_rows(frame, registry: dict) -> tuple[list[dict], dict]:
         f"the default "
         "view of it: the pages ship facts for every financial year and re-derive "
         "in the browser when a reader sets a filter, so the server never "
-        "computes a filtered basis. Ask about a named figure to get its.")
+        "computes a filtered basis. Ask about a named figure to get its own "
+        "row count and hash.")
 
 
 class _UnknownFigure(LookupError):
