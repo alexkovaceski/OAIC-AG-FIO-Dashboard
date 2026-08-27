@@ -182,6 +182,25 @@ def main() -> int:
         run(["scp", "-r", str(src), f"{ssh_target()}:{_remote_dir(item)}"],
             dry_run=args.dry_run, description=f"push {item}")
 
+    # 1b. Push the house-style repo (linked at .house-style/). The LLM prompts
+    #     read these files at boot, so a style edit propagates on the next
+    #     deploy. Copied file by file: the local link is a Windows junction,
+    #     which `scp -r` is not guaranteed to follow.
+    style_dir = ROOT / ".house-style"
+    if style_dir.is_dir():
+        run(["ssh", ssh_target(), f"mkdir -p {REMOTE}/.house-style"],
+            dry_run=args.dry_run, description="ensure .house-style on idc-1")
+        for name in ("voice.md", "tropes.md", "prose.md", "lrs.md", "README.md"):
+            src = style_dir / name
+            if not src.is_file():
+                continue
+            run(["scp", str(src), f"{ssh_target()}:{REMOTE}/.house-style/"],
+                dry_run=args.dry_run, description=f"push .house-style/{name}")
+    else:
+        print("note: .house-style link absent — LLM prompts fall back to the "
+              "built-in style summary (link the repo with house-style/"
+              "install.ps1 -Project to ship the live style)", flush=True)
+
     # 2. Install/refresh the venv (idempotent; first deploy creates it).
     # axoquant-llm is installed from the LOCAL clone on idc-1
     # (/home/algolotl/axoquant-llm, pinned to 235ce71) — the git+https line in

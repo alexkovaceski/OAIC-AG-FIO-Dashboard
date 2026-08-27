@@ -51,6 +51,15 @@ def test_chat_sovereign_path_returns_model_text(monkeypatch):
     assert out["escalate"] is False
     assert out["citations"]  # retrieved docs carried through
 
+
+def test_chat_system_prompt_carries_house_style():
+    # The chat prompt appends the house-style block (live .house-style/ files or
+    # the built-in fallback); the grounding rules still lead the prompt.
+    from agentic import chat as chat_mod
+    system = chat_mod._SYSTEM
+    assert "house style" in system.lower()
+    assert system.index("Never write a digit") < system.index("house style")
+
 def test_chat_answers_provenance_from_the_library():
     # "where does the data come from" has no FOI noun and would be refused by
     # the scope screen, but the chat routes provenance intent to the provenance

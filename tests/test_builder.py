@@ -179,6 +179,10 @@ def test_builder_advertises_the_provenance_op():
         "requests received", Frame(normalise_all()),
         capture, Ledger(ledger_path=tempfile.mktemp()), None))
     assert "provenance" in captured["system"]
+    # the house-style block rides the same prompt, after the tooling rules
+    assert "house style" in captured["system"]
+    assert captured["system"].index("provenance") < \
+        captured["system"].index("house style")
 
 
 def test_transcript_captured():
