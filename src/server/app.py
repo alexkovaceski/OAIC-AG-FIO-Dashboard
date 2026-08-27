@@ -608,7 +608,7 @@ def create_app():
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        out = await agentic_chat(req.question, req.history)
+        out = await agentic_chat(req.question, req.history, frame)
         _record_message(user["id"], "user", req.question)
         _record_message(user["id"], "assistant", out.get("answer", ""))
         return out

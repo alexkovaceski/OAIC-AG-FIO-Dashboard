@@ -60,7 +60,7 @@ def _deterministic_answer(query: str, hits: list[dict]) -> dict:
             "provider": "deterministic", "escalate": False}
 
 
-async def chat(query: str, history: list[dict] | None = None) -> dict:
+async def chat(query: str, history: list[dict] | None = None, frame=None) -> dict:
     history = history or []
     try:
         check_request(query)
@@ -68,7 +68,7 @@ async def chat(query: str, history: list[dict] | None = None) -> dict:
         return {"answer": f"{exc} {_ESCALATION}", "citations": [],
                 "provider": "scope", "escalate": True}
     hits = search_corpus(query, top_n=6)
-    context = _render_context(hits)
+    context = _render_context(hits, frame)
     messages = [{"role": "system", "content": _SYSTEM}]
     for m in history[-6:]:
         messages.append({"role": m.get("role", "user"),
@@ -88,13 +88,21 @@ async def chat(query: str, history: list[dict] | None = None) -> dict:
         return _deterministic_answer(query, hits)
 
 
-def _render_context(hits: list[dict]) -> str:
+def _render_context(hits: list[dict], frame=None) -> str:
     from pathlib import Path
     ROOT = Path(__file__).resolve().parent.parent.parent
+    # The catalog hits carry the platform's computed figures; the corpus hits
+    # carry verbatim notes. Lead with the figures so a long data-notes doc does
+    # not bury the numbers the model is asked to quote.
+    ordered = ([h for h in hits if h["path"].startswith("catalog:")]
+               + [h for h in hits if not h["path"].startswith("catalog:")])
     parts = []
-    for h in hits:
+    for h in ordered:
         if h["path"].startswith("catalog:"):
-            parts.append(f"### {h['path']}\n{h['title']}")
+            key = h["path"].split(":", 1)[1]
+            value = _figure_prose(frame, key)
+            body = f"{h['title']}\n{value}" if value else h["title"]
+            parts.append(f"### {h['path']}\n{body}")
             continue
         try:
             p = ROOT / h["path"]
@@ -102,6 +110,46 @@ def _render_context(hits: list[dict]) -> str:
         except Exception:
             continue
     return "\n\n".join(parts) if parts else "No context documents retrieved."
+
+
+def _figure_prose(frame, key: str) -> str:
+    """The platform's own number(s) for a catalog key, as prose for the prompt.
+
+    This is what makes the chat answer with real figures instead of "the
+    context does not contain the specific numbers": a catalog hit used to carry
+    only its label, so the model was grounded on a name with nothing to quote.
+    Every value here is computed by stats.catalog.foi_stats from the same frame
+    the pages render — never authored at answer time.
+    """
+    if frame is None:
+        return ""
+    from stats.catalog import foi_stats
+    try:
+        stat = foi_stats(frame, key)
+    except Exception:
+        return ""
+    value = stat["value"]
+    basis = stat.get("basis", "")
+    if isinstance(value, dict):
+        if "categories" in value:
+            cats = value.get("categories") or []
+            series = value.get("series") or []
+            rows = []
+            for s in series:
+                name = s.get("name") or s.get("measure") or ""
+                vals = s.get("values") or []
+                pairs = ", ".join(f"{c}={v}" for c, v in zip(cats, vals)
+                                  if v is not None)
+                if pairs:
+                    rows.append((f"{name}: " if name else "") + pairs)
+            body = "; ".join(rows) if rows else "no published data"
+        else:
+            body = f"(computed value: {', '.join(sorted(value.keys()))})"
+    elif isinstance(value, (int, float)):
+        body = f"{value:,.0f}"
+    else:
+        body = str(value)
+    return f"basis: {basis}; value: {body}"
 
 
 async def _complete(messages: list[dict]) -> str:

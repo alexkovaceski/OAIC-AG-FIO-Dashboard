@@ -578,7 +578,7 @@ def test_chat_route_returns_grounded_answer(monkeypatch):
     token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
     captured = {}
 
-    async def fake_chat(query, history=None):
+    async def fake_chat(query, history=None, frame=None):
         captured["query"] = query
         return {"answer": "12,359 requests were received in Q1 2025-26.",
                 "citations": ["catalog:requests_received_q1"],

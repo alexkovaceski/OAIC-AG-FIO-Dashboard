@@ -4,14 +4,52 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
+
+  function inline(s) {
+    // escape first, then the two markdown spans the model actually emits
+    return esc(s)
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  }
+
+  function mdToHtml(text) {
+    // Minimal markdown: escape, then bold/italic, bullets and paragraphs.
+    // Everything is escaped before any tag is added, so model output cannot
+    // inject markup.
+    var lines = String(text || "").split("\n");
+    var out = [], inList = false;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^\s*[-*]\s+/.test(line)) {
+        if (!inList) { out.push("<ul>"); inList = true; }
+        out.push("<li>" + inline(line.replace(/^\s*[-*]\s+/, "")) + "</li>");
+      } else {
+        if (inList) { out.push("</ul>"); inList = false; }
+        if (line.trim()) out.push("<p>" + inline(line) + "</p>");
+      }
+    }
+    if (inList) out.push("</ul>");
+    return out.join("");
+  }
+
+  function citeHref(path) {
+    if (path.indexOf("catalog:") === 0) {
+      return "/provenance.html?key=" + encodeURIComponent(path.slice(8));
+    }
+    if (path.indexOf("data/corpus/data-notes.md") === 0) {
+      return "/data-notes.html";
+    }
+    return null;
+  }
+
   var log = document.getElementById("chat-log");
   var input = document.getElementById("chat-in");
   var send = document.getElementById("chat-send");
 
-  function addMsg(role, text) {
+  function addMsg(role, text, asHtml) {
     var d = document.createElement("div");
     d.className = "msg " + role;
-    d.textContent = text;
+    if (asHtml) { d.innerHTML = text; } else { d.textContent = text; }
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
     return d;
@@ -38,12 +76,15 @@
   function renderAnswer(a) {
     var d = document.createElement("div");
     d.className = "msg assistant";
-    d.textContent = a.answer || "";
+    d.innerHTML = mdToHtml(a.answer || "");
     var cites = a.citations || [];
     if (cites.length) {
       var c = document.createElement("div");
       c.className = "cite";
-      c.textContent = "Sources: " + cites.join(" · ");
+      c.innerHTML = "Sources: " + cites.map(function (p) {
+        var href = citeHref(p);
+        return href ? '<a href="' + href + '">' + esc(p) + '</a>' : esc(p);
+      }).join(" &middot; ");
       d.appendChild(c);
     }
     log.appendChild(d);
