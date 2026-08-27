@@ -21,13 +21,18 @@ def build_forecast_series(facts, measure):
             "values": [round(by[y], 3) if y in by else None for y in cats]}
 
 
-def build_agency_series(facts, measure):
+def build_agency_series(facts, measure, min_history=3):
     """Per-agency annual series — {agency: {"fy": [...], "values": [...]}}.
 
     The per-agency volume forecast fits ONE global Chronos model over every
     agency's own series, so each agency gets its own next-FY forecast instead of
     sharing the single total. Missing years are None (sparse agencies simply
     contribute fewer points to the multi-series frame).
+
+    `min_history` drops agencies with too few annual points to forecast — the
+    frame contains many renamed/merged entities that report for only 1-2 years
+    under an old name, and a forecast on a 1-point series is a flat past-year
+    artefact, not a forecast.
     """
     rows = [f for f in facts if f["quarter"] is None
             and f["measure"] == measure and f["bucket"] == "total"]
@@ -35,8 +40,12 @@ def build_agency_series(facts, measure):
     for f in rows:
         by_agency.setdefault(f["agency_name"], {})[f["fy"]] = f["value"]
     cats = sorted({f["fy"] for f in facts if f["quarter"] is None})
-    return {a: {"fy": cats, "values": [by_agency[a].get(y) for y in cats]}
-            for a in by_agency}
+    out = {}
+    for a, fyvals in by_agency.items():
+        values = [fyvals.get(y) for y in cats]
+        if sum(1 for v in values if v is not None) >= min_history:
+            out[a] = {"fy": cats, "values": values}
+    return out
 
 
 def build_agency_features(facts):

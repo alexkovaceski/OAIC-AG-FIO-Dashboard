@@ -486,6 +486,9 @@ def main(argv=None) -> int:
     parser.add_argument("--skip-lineage", action="store_true",
                         help="fit + write artifacts but skip the Postgres "
                              "provenance record")
+    parser.add_argument("--forecast-only", action="store_true",
+                        help="fit only the two forecasts (total + per-agency) "
+                             "and stop; skip the classifier and metadata")
     args = parser.parse_args(argv)
 
     if args.dry_run:
@@ -517,6 +520,11 @@ def main(argv=None) -> int:
     agency_out, agency_raw = fit_agency_forecast(agency_series)
     print(f"[agency forecast] wrote {FORECAST_DIR}/agency_predictions.json "
           f"({len(agency_out)} agencies)")
+
+    if args.forecast_only:
+        print("\n[forecast-only] stopping after the forecasts (classifier + "
+              "metadata untouched).")
+        return 0
 
     print(f"\n[classify] fitting {CLASSIFY_PRESETS} over {len(labeled)} "
           f"labeled rows ...")
