@@ -1080,7 +1080,7 @@ def _page_provenance(frame, key=None) -> str:
             covers = ", ".join(s.get("covers") or [])
             lis.append(f'<li>{html.escape(s.get("title") or "")}'
                        f' <span class="meta">(covers {html.escape(covers)})</span></li>')
-        source_html = '<h2>The source</h2><ul>' + "".join(lis) + "</ul>"
+        source_html = '<h2>The sources</h2><ul>' + "".join(lis) + "</ul>"
 
     decisions = payload.get("decisions") or []
     dec_html = ""
