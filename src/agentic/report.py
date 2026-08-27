@@ -239,12 +239,15 @@ last next previous prior current latest recent future upcoming coming
 today yesterday tomorrow now soon
 """.split())
 
-# The whole-platform subject, enumerated. Not a bare noun: each alternative
-# names THIS platform — its FOI subject, the OAIC, or the site itself. The
+# The whole-platform subject, enumerated. Each alternative names THIS platform
+# — its FOI subject, the OAIC, the site itself, or (bare) "the/this data". The
 # closed-vocabulary check has already removed any foreign modifier by the time
-# this runs ("the Irish FOI request data" never gets here), so this pattern's job
-# is only to insist the reader named the platform's subject at all rather than
-# some in-vocabulary phrase like "the top rate data".
+# this runs ("the Irish FOI request data", "the tourism data", "the share
+# portfolio data" never get here — their foreign words are out of vocabulary),
+# so a BARE "the data"/"this data" can only be this platform's data, and the
+# pattern's job is to insist the reader named the platform's subject at all
+# rather than some in-vocabulary phrase like "the top rate data" (where "the"
+# and "data" are separated, so the bare alternative still does not match).
 _PLATFORM_SUBJECT_RE = re.compile(
     r"\b(?:(?:australian government|australian|commonwealth|oaic|agency|agencies)"
     r"\s+)?(?:foi|freedom of information)\s+"
@@ -254,7 +257,8 @@ _PLATFORM_SUBJECT_RE = re.compile(
     r"|\b(?:this|the)\s+(?:site|dashboard|platform|service)(?:'s)?\s+"
     r"(?:data|datasets?|statistics|stats|figures?|numbers?)\b"
     r"|\b(?:the\s+)?(?:oaic|australian government)(?:'s)?\s+"
-    r"(?:data|datasets?|statistics|stats|figures?|numbers?)\b",
+    r"(?:data|datasets?|statistics|stats|figures?|numbers?)\b"
+    r"|\b(?:the|this)\s+(?:data|datasets?|corpus)\b",
     re.I)
 
 _FY_TOKEN_RE = re.compile(r"\b(?:19|20)\d{2}-\d{2}\b")

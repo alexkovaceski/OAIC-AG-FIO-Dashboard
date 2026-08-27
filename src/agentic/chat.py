@@ -62,6 +62,9 @@ def _deterministic_answer(query: str, hits: list[dict]) -> dict:
 
 async def chat(query: str, history: list[dict] | None = None, frame=None) -> dict:
     history = history or []
+    prov = _provenance_answer(query, frame)
+    if prov is not None:
+        return prov
     try:
         check_request(query)
     except ScopeRefusal as exc:
@@ -86,6 +89,46 @@ async def chat(query: str, history: list[dict] | None = None, frame=None) -> dic
     except Exception as exc:
         _LOGGER.warning("chat: LLM failed (%s); deterministic fallback", exc)
         return _deterministic_answer(query, hits)
+
+
+def _provenance_answer(query: str, frame) -> dict | None:
+    """A provenance-intent question answered straight from the provenance
+    library, or None to fall through to the normal chat pipeline.
+
+    This mirrors report.build_report's provenance route but runs BEFORE the
+    scope screen: "where does the data come from" has no FOI noun, so
+    check_request refuses it before the router ever runs. For provenance
+    questions the subject gate (report._provenance_subject — the universal
+    vocabulary + citable-subject rule) is the tighter authority, so it decides
+    here. A foreign subject ("where did the tourism data come from") returns
+    None, and the scope screen refuses it as usual.
+    """
+    if frame is None:
+        return None
+    from agentic.report import (_PROVENANCE_RE, _provenance_subject,
+                                _figure_rows, _registry_rows, _figure_label)
+    if not _PROVENANCE_RE.search(query or ""):
+        return None
+    answerable, figure_key = _provenance_subject(query, frame)
+    if not answerable:
+        return None
+    from provenance import describe
+    payload = describe(frame, key=figure_key)
+    figure = payload.get("figure")
+    if figure is not None:
+        rows, _ = _figure_rows(figure)
+        rows += _registry_rows(payload, figure["default_view"])
+        heading = f"Where {_figure_label(figure)} comes from"
+    else:
+        rows = _registry_rows(payload, None)
+        heading = "Where this data comes from"
+    lines = [f"**{heading}**", ""]
+    for r in rows:
+        lines.append(f"- **{r['part']}**: {r['detail']}")
+    citations = [s["ingested_as"] for s in payload["sources"]
+                 if s.get("ingested_as")]
+    return {"answer": "\n".join(lines), "citations": citations,
+            "provider": "provenance", "escalate": False}
 
 
 def _render_context(hits: list[dict], frame=None) -> str:

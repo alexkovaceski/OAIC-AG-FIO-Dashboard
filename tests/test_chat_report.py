@@ -51,6 +51,26 @@ def test_chat_sovereign_path_returns_model_text(monkeypatch):
     assert out["escalate"] is False
     assert out["citations"]  # retrieved docs carried through
 
+def test_chat_answers_provenance_from_the_library():
+    # "where does the data come from" has no FOI noun and would be refused by
+    # the scope screen, but the chat routes provenance intent to the provenance
+    # library BEFORE the screen, so it answers with the platform's own lineage.
+    out = asyncio.run(chat_mod.chat("where does the data come from?", [], _frame()))
+    assert out["provider"] == "provenance"
+    assert out["escalate"] is False
+    assert "Where this data comes from" in out["answer"]
+    assert "agency-foi-data" in out["answer"]
+    assert out["citations"]
+
+
+def test_chat_provenance_still_refuses_foreign_subjects():
+    out = asyncio.run(chat_mod.chat("where did the tourism data come from?", [],
+                                    _frame()))
+    assert out["provider"] == "scope"
+    assert out["escalate"] is True
+    assert "contact@bluebirdadvisory.com.au" in out["answer"]
+
+
 def test_report_routes_to_real_figure():
     from ingest.normalise import normalise_all
     from storage.frame import Frame
