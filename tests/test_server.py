@@ -953,6 +953,94 @@ def test_ask_question_requires_session():
     assert r.status_code == 303
     assert "/login" in r.headers.get("location", "")
 
+
+def test_ask_question_queues_build_when_worker_enabled(monkeypatch):
+    # With the worker on (FOI_WORKER=1), build intent returns kind "queued"
+    # immediately: the page then polls /dashboards/{id}/status for the theatre.
+    import server.app as app_mod
+    c = TestClient(create_app())
+    app_mod = _ask_session(monkeypatch, c)
+    monkeypatch.setattr(app_mod, "WORKER_ENABLED", True)
+    captured = {}
+
+    def fake_enqueue(frame, request_text, user_id=None):
+        captured["user_id"] = user_id
+        captured["request_text"] = request_text
+        return {"queued": True, "job_id": 5, "dashboard_url": "/dashboards/5",
+                "lineage_url": "/lineage/5", "error": None}
+
+    monkeypatch.setattr(app_mod, "_enqueue_dashboard", fake_enqueue)
+    monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
+    r = c.post("/ask-question",
+               json={"question": "build a dashboard of requests by agency"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "queued"
+    assert body["job_id"] == 5
+    assert body["dashboard_url"] == "/dashboards/5"
+    assert captured["user_id"] == 1
+
+
+def test_dashboard_status_endpoint(monkeypatch):
+    import server.app as app_mod
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return ("building",
+                    [{"step": "queued", "detail": "waiting for the builder"},
+                     {"step": "building", "detail": "turn 1 of 6"}], {})
+
+    class _Conn:
+        def cursor(self):
+            return _Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_mod, "get_conn", lambda: _Conn())
+    r = c.get("/dashboards/42/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "building"
+    assert body["progress"][-1]["detail"] == "turn 1 of 6"
+    assert body["dashboard_url"] == "/dashboards/42"
+
+
+def test_dashboard_status_requires_session():
+    c = TestClient(create_app())
+    r = c.get("/dashboards/42/status", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_dashboard_retry_endpoint(monkeypatch):
+    import server.app as app_mod
+    c = TestClient(create_app())
+    app_mod = _ask_session(monkeypatch, c)
+    captured = {}
+
+    def fake_requeue(conn, artifact_id, user_id=None):
+        captured["user_id"] = user_id
+        captured["id"] = artifact_id
+        return True
+
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())
+    monkeypatch.setattr(app_mod, "requeue_job", fake_requeue)
+    r = c.post("/dashboards/42/retry")
+    assert r.status_code == 200
+    assert r.json() == {"queued": True}
+    assert captured == {"user_id": 1, "id": 42}
+
 def test_risk_page_internal_renders(monkeypatch):
     from storage import auth
     monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")

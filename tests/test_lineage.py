@@ -195,7 +195,7 @@ def test_record_op_fails_open_on_operational_error():
 
 def test_list_artifacts_returns_created_at_and_panel_count():
     rows = [(22, "breakup by compliance", "ready",
-             "2026-08-27T09:00:00+00:00", 0)]
+             "2026-08-27T09:00:00+00:00", 0, [])]
 
     class _Cursor:
         def __enter__(self):
@@ -216,7 +216,7 @@ def test_list_artifacts_returns_created_at_and_panel_count():
     out = lineage_mod.list_artifacts(conn)
     assert out == [{"id": 22, "request_text": "breakup by compliance",
                     "status": "ready", "created_at": "2026-08-27T09:00:00+00:00",
-                    "panel_count": 0}]
+                    "panel_count": 0, "progress": []}]
     assert "user_id" not in cur.sql  # unscoped listing keeps the old shape
 
 
@@ -322,6 +322,139 @@ def test_delete_artifact_returns_false_when_row_absent():
 
     conn = _FakeConn(_Cursor())
     assert lineage_mod.delete_artifact(conn, 999) is False
+
+
+def test_append_progress_appends_a_step():
+    class _Cursor:
+        def __init__(self):
+            self.sqls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sqls.append((sql, params))
+
+    conn = _FakeConn(_Cursor())
+    lineage_mod.append_progress(conn, 42, "building", "turn 1 of 6")
+    assert conn.committed
+    assert any("progress_json" in sql for sql, _ in conn._cursor.sqls)
+
+
+def test_claim_next_job_claims_the_oldest_queued():
+    class _Cursor:
+        def __init__(self):
+            self.sqls = []
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sqls.append((sql, params))
+
+        def fetchone(self):
+            return (42, "build x", None, 1)
+
+    conn = _FakeConn(_Cursor())
+    job = lineage_mod.claim_next_job(conn)
+    assert job == {"id": 42, "request_text": "build x",
+                   "user_id": None, "dataset_id": 1}
+    assert conn.committed
+    assert any("status = 'building'" in sql for sql, _ in conn._cursor.sqls)
+
+
+def test_claim_next_job_none_when_queue_empty():
+    class _Cursor:
+        def __init__(self):
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return None
+
+    assert lineage_mod.claim_next_job(_FakeConn(_Cursor())) is None
+
+
+def test_requeue_job_scoped_to_caller():
+    class _Cursor:
+        def __init__(self, rowcount):
+            self.rowcount = rowcount
+            self.sql = None
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+
+    cur = _Cursor(rowcount=1)
+    conn = _FakeConn(cur)
+    assert lineage_mod.requeue_job(conn, 42, user_id=7) is True
+    assert "user_id = %s OR user_id IS NULL" in cur.sql
+    assert cur.params == (42, 7)
+    assert lineage_mod.requeue_job(_FakeConn(_Cursor(rowcount=0)), 42) is False
+
+
+def test_get_job_status_returns_the_theatre_payload():
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return ("building",
+                    [{"step": "queued", "detail": "waiting for the builder"}],
+                    {})
+
+    out = lineage_mod.get_job_status(_FakeConn(_Cursor()), 42)
+    assert out["status"] == "building"
+    assert out["progress"][0]["detail"] == "waiting for the builder"
+    assert out["result"] == {}
+
+
+def test_mark_interrupted_flips_stuck_building_rows():
+    class _Cursor:
+        def __init__(self):
+            self.sql = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+
+    conn = _FakeConn(_Cursor())
+    lineage_mod.mark_interrupted(conn)
+    assert "status = 'error'" in conn._cursor.sql
+    assert "progress_json" in conn._cursor.sql
 
 
 # --- Static schema-vs-INSERT checks (the load_facts UndefinedColumn class) ----

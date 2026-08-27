@@ -160,20 +160,129 @@
     refreshBoard();
   }
 
+  // ---- the build theatre: a queued job card that ticks through steps ----
+  function jobStatusLabel(s) {
+    return s === "building" ? "Building…" : s === "ready" ? "Ready"
+      : s === "queued" ? "Queued" : s === "error" ? "Failed" : String(s || "…");
+  }
+
+  function jobStepsHtml(progress) {
+    var steps = (progress || []).slice(-8);
+    if (!steps.length) return "";
+    return '<ul class="job-steps">' + steps.map(function (p) {
+      return "<li>" + esc(p.detail || p.step || "") + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function renderJobCard(r) {
+    var d = document.createElement("div");
+    d.className = "msg assistant";
+    d.innerHTML = '<div class="report-card job-card" id="job-' + esc(String(r.job_id)) + '">' +
+      "<h2>Building your dashboard</h2>" +
+      '<p class="statusline"><span class="spin" aria-hidden="true"></span> ' +
+      '<span class="job-status">Queued</span></p>' +
+      '<div class="job-steps-wrap">' + jobStepsHtml([{ detail: "waiting for the builder" }]) + "</div></div>";
+    log.appendChild(d);
+    pollJob(r.job_id, d.querySelector(".job-card"));
+  }
+
+  async function pollJob(jobId, card) {
+    if (!card || !card.isConnected) return;
+    try {
+      var resp = await fetch("/dashboards/" + encodeURIComponent(jobId) + "/status");
+      if (resp.redirected) { window.location = "/login"; return; }
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      var st = await resp.json();
+      var statusEl = card.querySelector(".job-status");
+      var wrap = card.querySelector(".job-steps-wrap");
+      if (st.status === "queued" || st.status === "building") {
+        if (statusEl) statusEl.textContent = jobStatusLabel(st.status);
+        if (wrap) wrap.innerHTML = jobStepsHtml(st.progress);
+        refreshBoard();
+        window.setTimeout(function () { pollJob(jobId, card); }, 1500);
+        return;
+      }
+      if (st.status === "ready") {
+        card.innerHTML = '<h2>Report built</h2>' +
+          "<p>Your dashboard is ready, built from the published data.</p>" +
+          '<a class="cta" href="' + esc(st.dashboard_url) + '">Open the dashboard</a> ' +
+          '<a class="nav-link" href="' + esc(st.lineage_url) + '">View lineage</a>' +
+          jobStepsHtml(st.progress);
+        refreshBoard();
+        return;
+      }
+      var html = "<h2>Dashboard build failed</h2>";
+      var res = st.result || {};
+      if (res.data != null || res.note) {
+        html += '<p class="note">The dashboard build did not finish, so here ' +
+          "is the computed figure for your question instead.</p>";
+        if (res.note) html += '<p class="note">' + esc(res.note) + "</p>";
+        html += "<h3>" + esc(res.stat_label || res.stat_key || "Answer") + "</h3>";
+        html += statData(res.data);
+        if (res.basis) html += '<p class="basis">basis: ' + esc(res.basis) + "</p>";
+        var reg = res.dataset_registry || {};
+        html += '<p class="cite">sources: ' + esc(reg.source_rows || 0) +
+          " rows, hash " + esc(reg.rows_hash || "") + "</p>";
+      } else {
+        html += '<p class="nodata">No dashboard and no computed figure could ' +
+          "be produced for this question.</p>";
+      }
+      html += jobStepsHtml(st.progress);
+      html += '<button class="job-retry" type="button" data-id="' +
+        esc(String(jobId)) + '">Try again</button>';
+      card.innerHTML = html;
+      refreshBoard();
+    } catch (e) {
+      // transient poll failure: keep polling, the job is in the DB
+      window.setTimeout(function () { pollJob(jobId, card); }, 3000);
+    }
+  }
+
+  // "Try again" on a failed build (delegated, like the delete handler)
+  document.addEventListener("click", async function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".job-retry") : null;
+    if (!btn) return;
+    ev.preventDefault();
+    var id = btn.getAttribute("data-id");
+    var card = btn.closest(".job-card");
+    try {
+      var resp = await fetch("/dashboards/" + encodeURIComponent(id) + "/retry",
+                             { method: "POST" });
+      if (resp.redirected) { window.location = "/login"; return; }
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      card.innerHTML = "<h2>Building your dashboard</h2>" +
+        '<p class="statusline"><span class="spin" aria-hidden="true"></span> ' +
+        '<span class="job-status">Queued</span></p>' +
+        '<div class="job-steps-wrap">' +
+        jobStepsHtml([{ detail: "waiting for the builder" }]) + "</div>";
+      pollJob(id, card);
+    } catch (e) {
+      window.alert("Could not retry the build: " + e.message);
+    }
+  });
+
   function boardRow(a) {
     var status = (a.status === "ready" && !a.panel_count) ? "error" : a.status;
-    var labels = { building: "Building…", ready: "Ready", error: "Failed" };
+    var labels = { building: "Building…", ready: "Ready", error: "Failed",
+                   queued: "Queued" };
     var cls = status === "building" ? "status-building"
       : status === "ready" ? "status-ready"
-      : status === "error" ? "status-error" : "status-unknown";
+      : status === "error" ? "status-error"
+      : status === "queued" ? "status-building" : "status-unknown";
     var open = status === "ready"
       ? '<a class="nav-link" href="/dashboards/' + a.id + '">Open</a>'
       : '<span class="meta">—</span>';
     var when = String(a.created_at || "").slice(0, 16).replace("T", " ");
+    var steps = a.progress || [];
+    var last = steps.length ? steps[steps.length - 1] : null;
+    var step = (status === "queued" || status === "building") && last
+      ? '<span class="meta job-step">' + esc(last.detail || last.step || "") + "</span>"
+      : "";
     return '<tr data-id="' + a.id + '"><td class="report-req">' +
       esc(a.request_text || "") + '</td><td><span class="status-badge ' + cls +
       '">' + esc(labels[status] || status || "Unknown") +
-      '</span></td><td class="report-when">' + esc(when) +
+      "</span> " + step +
+      '</td><td class="report-when">' + esc(when) +
       '</td><td class="report-actions">' + open +
       ' <button class="report-delete" type="button" data-id="' + a.id +
       '">Delete</button></td></tr>';
@@ -230,6 +339,9 @@
       } else if (r.kind === "dashboard") {
         renderDashboard(r);
         history.push({ role: "assistant", content: r.dashboard_url || "" });
+      } else if (r.kind === "queued") {
+        renderJobCard(r);
+        history.push({ role: "assistant", content: "queued dashboard build" });
       } else {
         renderText(r);
         history.push({ role: "assistant", content: r.answer || "" });

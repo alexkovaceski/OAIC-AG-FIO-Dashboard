@@ -160,6 +160,21 @@ def test_build_spec_handles_async_complete_fn():
     assert spec.get("title") == "Test"
 
 
+def test_build_spec_reports_progress_events():
+    # the theatre: the worker passes a progress callback and gets a per-turn
+    # event before the first completion
+    events = []
+
+    def progress(step, detail):
+        events.append((step, detail))
+
+    spec = asyncio.run(build_spec(
+        "requests received", Frame(normalise_all()), _fake_complete,
+        Ledger(ledger_path=tempfile.mktemp()), None, progress=progress))
+    assert ("building", "turn 1 of 6") in events
+    assert spec.get("title") == "Test"
+
+
 def test_build_spec_is_async():
     # the server (Task 8) calls it via await build_spec(...) — must be awaitable
     assert inspect.iscoroutinefunction(build_spec)

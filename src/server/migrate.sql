@@ -47,6 +47,16 @@ CREATE TABLE IF NOT EXISTS horizon.lineage_artifacts (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Batch theatre: the build queue lives on the artifact row itself. status gains
+-- 'queued' alongside building/ready/error; progress_json is the step list the
+-- worker appends as the build runs (the vitalrecord-style theatre), and
+-- result_json carries the deterministic fallback answer when every attempt
+-- fails to produce a renderable dashboard.
+ALTER TABLE horizon.lineage_artifacts
+  ADD COLUMN IF NOT EXISTS progress_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE horizon.lineage_artifacts
+  ADD COLUMN IF NOT EXISTS result_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 CREATE TABLE IF NOT EXISTS horizon.lineage_ops (
     id           BIGSERIAL PRIMARY KEY,
     artifact_id  BIGINT NOT NULL REFERENCES horizon.lineage_artifacts(id),

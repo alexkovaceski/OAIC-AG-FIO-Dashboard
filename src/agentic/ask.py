@@ -6,6 +6,8 @@ chosen by the reader:
 
   provenance  — curated lineage answer (registry, never the LLM)
   scope       — out-of-scope refusal + escalation
+  queued      — build intent enqueued for the background worker (the theatre;
+                the page polls /dashboards/{id}/status until ready/fallback)
   dashboard   — a built, durable dashboard spec (the multi-turn builder)
   stat        — a platform-computed figure or table (router + granularity)
   note        — a deterministic explanation with no figure (e.g. quarterly data)
@@ -26,6 +28,7 @@ old "email us" escalation — an in-scope question should get an answer, not a
 dead end.
 """
 from __future__ import annotations
+import inspect
 import re
 
 from agentic.guardrails import check_request, ScopeRefusal
@@ -58,7 +61,12 @@ async def ask(query: str, history: list[dict] | None, frame,
                 "citations": [], "escalate": True}
 
     if _WANTS_BUILD_RE.search(query or "") and build is not None:
-        result = await build(query)
+        result = build(query)
+        if inspect.isawaitable(result):
+            result = await result
+        if result.get("queued") and result.get("dashboard_url"):
+            # the theatre: the job is on the queue; the page polls its status
+            return {**result, "kind": "queued"}
         if result.get("error") is None and result.get("dashboard_url"):
             return {"kind": "dashboard",
                     "dashboard_url": result["dashboard_url"],

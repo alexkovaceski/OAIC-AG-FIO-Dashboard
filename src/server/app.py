@@ -67,7 +67,10 @@ from storage.db import get_conn, ensure_schema  # noqa: E402
 from storage.facts import ingest_facts  # noqa: E402
 from storage.lineage import (Ledger, record_artifact, record_op,  # noqa: E402
                              update_artifact, list_artifacts,
-                             delete_artifact)
+                             delete_artifact, append_progress,
+                             get_job_status, mark_interrupted, requeue_job)
+from server.dashboards import (load_dashboard as _load_dashboard,  # noqa: E402
+                               spec_renders as _spec_renders)
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
 from site.templates import chrome, _user_nav, sidenav_html  # noqa: E402
@@ -116,6 +119,13 @@ def _get_ledger() -> Ledger:
     if _LEDGER is None:
         _LEDGER = Ledger()
     return _LEDGER
+
+
+# The background build queue + theatre runs only where the operator asked for
+# it (FOI_WORKER=1 in the service env file on idc-1). Off (the default, and in
+# the test suite) build intent stays synchronous, which keeps every existing
+# test hermetic: no background task ever touches a monkeypatched conn.
+WORKER_ENABLED = os.environ.get("FOI_WORKER") == "1"
 
 
 def _boot() -> tuple[Frame, dict[str, str]]:
@@ -373,84 +383,40 @@ async def _build_dashboard(frame, request_text: str, user_id=None) -> dict:
                 pass
 
 
-def _load_dashboard(artifact_id, conn):
-    """Load (spec, transcript) for an artifact from the live DB.
-
-    The spec is the durable spec_json the builder produced; the transcript is
-    the recorded lineage_tool_calls rebuilt as {seq, tool, result} entries so
-    render_dashboard_page's citation resolver ({c:job.turn.call.field}) can
-    resolve against it. (spec, transcript) is (None, []) when the DB is
-    unreachable (fail-open) or the artifact has no durable spec — the caller
-    renders the honest degraded page instead. A schema/programming error raises
-    (fail-loud, like the lineage viewer).
-    """
-    if conn is None:
-        return None, []
-    # N1: the route passes the URL path segment as a string. A numeric string is
-    # a real artifact id; a non-numeric one (the local-<hex> synthetic id when
-    # /ask failed open) against a LIVE db would raise psycopg2.DataError
-    # (non-Operational) on the `id = %s` compare and 500. Normalize the id and
-    # degrade on anything non-numeric.
-    if isinstance(artifact_id, int):
-        pass
-    elif isinstance(artifact_id, str) and artifact_id.isdigit():
-        artifact_id = int(artifact_id)
-    else:
-        return None, []
-    spec = None
-    calls = []
+def _enqueue_dashboard(frame, request_text: str, user_id=None) -> dict:
+    """Put a build on the queue instead of running it inline: create the
+    artifact row in status 'queued' with the first theatre step and hand back
+    the job handle immediately. The background worker (server.worker) claims it,
+    runs the attempts, and writes progress + the terminal state; the Ask page
+    polls /dashboards/{id}/status for the theatre."""
+    conn = None
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT spec_json FROM horizon.lineage_artifacts WHERE id = %s",
-                (artifact_id,))
-            row = cur.fetchone()
-            if row is not None:
-                spec = row[0]
-            cur.execute(
-                "SELECT seq, tool, output_json FROM horizon.lineage_tool_calls "
-                "WHERE artifact_id = %s ORDER BY seq", (artifact_id,))
-            calls = cur.fetchall()
-    except psycopg2.OperationalError:
-        return None, []
-    except psycopg2.Error:
-        raise
-    if spec is None:
-        return None, []
-    if isinstance(spec, str):
+        conn = get_conn()
+        ensure_schema(conn)
+        dataset_id = _dataset_id_for(conn)
+    except (RuntimeError, psycopg2.OperationalError):
+        return {"queued": True, "job_id": None, "dashboard_url": None,
+                "lineage_url": None,
+                "error": "storage unavailable — try again shortly"}
+    try:
+        job_id = record_artifact(
+            conn, artifact_type="builder_request",
+            artifact_key=(request_text or "")[:40], user_id=user_id,
+            dataset_id=dataset_id, request_text=request_text,
+            spec_json={}, model="fartkraft", status="queued")
+        if job_id is None:
+            return {"queued": True, "job_id": None, "dashboard_url": None,
+                    "lineage_url": None,
+                    "error": "storage unavailable — try again shortly"}
+        append_progress(conn, job_id, "queued", "waiting for the builder")
+        return {"queued": True, "job_id": job_id,
+                "dashboard_url": f"/dashboards/{job_id}",
+                "lineage_url": f"/lineage/{job_id}", "error": None}
+    finally:
         try:
-            spec = json.loads(spec)
+            conn.close()
         except Exception:
-            return None, []  # not a spec we can render — degrade, never crash
-    transcript = []
-    for seq, tool, out in calls:
-        if isinstance(out, str):
-            try:
-                out = json.loads(out)
-            except Exception:
-                pass
-        transcript.append({"seq": seq, "tool": tool, "result": out})
-    return spec, transcript
-
-
-def _spec_renders(spec, conn, artifact_id, frame) -> bool:
-    """Does a built spec actually render against the recorded transcript?
-
-    The GET path degrades honestly when a stored spec cannot render, but the
-    build path can do better: verify BEFORE the artifact is marked ready, so a
-    model-output defect (an unresolvable {c:...} pointer, a hallucinated panel)
-    flips the row to error and the caller falls back, instead of shipping a
-    dashboard link that dies at read time. Best-effort: a verification failure
-    of any other kind returns True — verification must never fail a build.
-    """
-    try:
-        _, transcript = _load_dashboard(artifact_id, conn)
-        render_dashboard_page(spec, frame, artifact_id, transcript)
-        return True
-    except (SystemExit, KeyError, ValueError, TypeError):
-        return False
-    except Exception:
-        return True
+            pass
 
 
 def _signed_in_page(full_html: str, page_key: str, user: dict) -> str:
@@ -770,7 +736,7 @@ def create_app():
 
     @app.get("/reports.json")
     def reports_json(request: Request):
-        # the ask page's job board refreshes from this after a build completes
+        # the ask page's job board refreshes from this while jobs run
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
@@ -779,6 +745,7 @@ def create_app():
             created = a.get("created_at")
             out.append({"id": a["id"], "request_text": a["request_text"],
                         "status": a["status"], "panel_count": a["panel_count"],
+                        "progress": a.get("progress") or [],
                         "created_at": (created.isoformat()
                                        if hasattr(created, "isoformat")
                                        else str(created or ""))})
@@ -789,9 +756,15 @@ def create_app():
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        out = await agentic_ask(
-            req.question, req.history, frame,
-            build=lambda q: _build_dashboard(frame, q, user_id=user["id"]))
+
+        def build(q):
+            if WORKER_ENABLED:
+                # the theatre: enqueue and return immediately; the worker runs
+                # the attempts and the page polls /dashboards/{id}/status
+                return _enqueue_dashboard(frame, q, user_id=user["id"])
+            return _build_dashboard(frame, q, user_id=user["id"])
+
+        out = await agentic_ask(req.question, req.history, frame, build=build)
         _record_message(user["id"], "user", req.question)
         _record_message(user["id"], "assistant",
                         out.get("answer") or out.get("stat_label")
@@ -975,6 +948,82 @@ def create_app():
                     conn.close()
                 except Exception:
                     pass
+
+    @app.get("/dashboards/{artifact_id}/status")
+    def dashboard_status(artifact_id: str, request: Request):
+        # The theatre poll: the job's status, its step list, and the fallback
+        # answer when the build failed. Gated like the reports page.
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        if not (isinstance(artifact_id, int)
+                or (isinstance(artifact_id, str) and artifact_id.isdigit())):
+            return JSONResponse({"status": "missing"}, status_code=404)
+        aid = int(artifact_id)
+        conn = None
+        try:
+            try:
+                conn = get_conn()
+            except (RuntimeError, psycopg2.OperationalError):
+                return JSONResponse({"status": "unknown"}, status_code=503)
+            row = get_job_status(conn, aid)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        if row is None:
+            return JSONResponse({"status": "missing"}, status_code=404)
+        row["id"] = aid
+        row["dashboard_url"] = f"/dashboards/{aid}"
+        row["lineage_url"] = f"/lineage/{aid}"
+        return JSONResponse(row)
+
+    @app.post("/dashboards/{artifact_id}/retry")
+    def dashboard_retry(artifact_id: str, request: Request):
+        # "Try again": put a finished or failed job back on the queue.
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        if not (isinstance(artifact_id, int)
+                or (isinstance(artifact_id, str) and artifact_id.isdigit())):
+            return JSONResponse({"queued": False}, status_code=400)
+        aid = int(artifact_id)
+        conn = None
+        try:
+            try:
+                conn = get_conn()
+            except (RuntimeError, psycopg2.OperationalError):
+                return JSONResponse({"queued": False,
+                                     "error": "storage unavailable"},
+                                    status_code=503)
+            queued = requeue_job(conn, aid, user_id=user["id"])
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        return {"queued": queued}
+
+    if WORKER_ENABLED:
+        # The background build queue. Gated behind FOI_WORKER=1 so the test
+        # suite (and any checkout without the operator's env file) never starts
+        # a task that could touch monkeypatched conns or the live model.
+        @app.on_event("startup")
+        async def _start_build_worker():
+            try:
+                conn = get_conn()
+                try:
+                    mark_interrupted(conn)
+                finally:
+                    conn.close()
+            except (RuntimeError, psycopg2.OperationalError):
+                pass
+            import server.worker as worker
+            asyncio.create_task(worker.run_due_jobs(
+                frame, get_conn, _complete_fn, _get_ledger()))
 
     return app
 

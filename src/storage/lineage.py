@@ -154,7 +154,8 @@ def list_artifacts(conn, *, limit=12, artifact_type="builder_request",
             if user_id is not None:
                 cur.execute("""
                     SELECT id, request_text, status, created_at,
-                           COALESCE(jsonb_array_length(spec_json->'panels'), 0)
+                           COALESCE(jsonb_array_length(spec_json->'panels'), 0),
+                           progress_json
                     FROM horizon.lineage_artifacts
                     WHERE artifact_type = %s AND user_id = %s
                     ORDER BY id DESC LIMIT %s
@@ -162,14 +163,16 @@ def list_artifacts(conn, *, limit=12, artifact_type="builder_request",
             else:
                 cur.execute("""
                     SELECT id, request_text, status, created_at,
-                           COALESCE(jsonb_array_length(spec_json->'panels'), 0)
+                           COALESCE(jsonb_array_length(spec_json->'panels'), 0),
+                           progress_json
                     FROM horizon.lineage_artifacts
                     WHERE artifact_type = %s
                     ORDER BY id DESC LIMIT %s
                 """, (artifact_type, limit))
             return [{"id": r[0], "request_text": r[1] or "",
                      "status": r[2] or "", "created_at": r[3],
-                     "panel_count": int(r[4] or 0)} for r in cur.fetchall()]
+                     "panel_count": int(r[4] or 0),
+                     "progress": r[5] or []} for r in cur.fetchall()]
     except psycopg2.OperationalError:
         return []
 
@@ -204,6 +207,164 @@ def delete_artifact(conn, artifact_id, user_id=None) -> bool:
         deleted = cur.rowcount
     conn.commit()
     return deleted > 0
+
+
+# ----------------------------------------------- the build queue (theatre) ----
+
+def append_progress(conn, artifact_id, step: str, detail: str) -> None:
+    """Append one theatre step to an artifact's progress list. Best-effort like
+    the other writes: the build must never fail because a progress tick did."""
+    from datetime import datetime, timezone
+    row = json.dumps([{"step": step, "detail": detail,
+                       "at": datetime.now(timezone.utc).isoformat()}])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE horizon.lineage_artifacts "
+                "SET progress_json = progress_json || %s::jsonb WHERE id = %s",
+                (row, artifact_id))
+            conn.commit()
+    except psycopg2.Error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def claim_next_job(conn) -> dict | None:
+    """The oldest queued builder job, flipped to building. Returns {id,
+    request_text, user_id, dataset_id} or None when the queue is empty. A single
+    worker process runs, so select-then-update is safe; the update re-checks
+    status so a crash between the two cannot double-run."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, request_text, user_id, dataset_id FROM "
+                "horizon.lineage_artifacts "
+                "WHERE artifact_type = 'builder_request' AND status = 'queued' "
+                "ORDER BY id LIMIT 1")
+            row = cur.fetchone()
+            if row is None:
+                return None
+            aid, request_text, user_id, dataset_id = row
+            cur.execute(
+                "UPDATE horizon.lineage_artifacts SET status = 'building' "
+                "WHERE id = %s AND status = 'queued'", (aid,))
+            if cur.rowcount != 1:
+                return None
+            conn.commit()
+            return {"id": aid, "request_text": request_text or "",
+                    "user_id": user_id, "dataset_id": dataset_id}
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def requeue_job(conn, artifact_id, user_id=None) -> bool:
+    """Put a finished (or failed) job back on the queue, e.g. the Ask page's
+    'try again'. Scoped to the caller like delete_artifact. Returns True when a
+    row was re-queued."""
+    try:
+        with conn.cursor() as cur:
+            if user_id is None:
+                cur.execute(
+                    "UPDATE horizon.lineage_artifacts SET status = 'queued' "
+                    "WHERE id = %s AND artifact_type = 'builder_request' "
+                    "AND status IN ('error', 'ready')", (artifact_id,))
+            else:
+                cur.execute(
+                    "UPDATE horizon.lineage_artifacts SET status = 'queued' "
+                    "WHERE id = %s AND artifact_type = 'builder_request' "
+                    "AND status IN ('error', 'ready') "
+                    "AND (user_id = %s OR user_id IS NULL)",
+                    (artifact_id, user_id))
+            updated = cur.rowcount
+        conn.commit()
+        return updated > 0
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def reset_attempt(conn, artifact_id) -> None:
+    """Clear a job's recorded tool calls so a retry starts its own transcript
+    with sequence numbers from 1 (citation pointers resolve per attempt)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM horizon.lineage_tool_calls "
+                        "WHERE artifact_id = %s", (artifact_id,))
+            conn.commit()
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def mark_interrupted(conn) -> None:
+    """Boot recovery: a 'building' row orphaned by a restart can never finish.
+    Flip every stuck row to error with an honest step."""
+    from datetime import datetime, timezone
+    row = json.dumps([{"step": "failed", "detail": "interrupted by a restart",
+                       "at": datetime.now(timezone.utc).isoformat()}])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE horizon.lineage_artifacts "
+                "SET status = 'error', progress_json = progress_json || %s::jsonb "
+                "WHERE artifact_type = 'builder_request' AND status = 'building'",
+                (row,))
+            conn.commit()
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def set_job_result(conn, artifact_id, *, status: str, result: dict | None,
+                   step: str, detail: str) -> None:
+    """Terminal write for a job: status, the fallback answer when there is one,
+    and the closing theatre step. Best-effort."""
+    from datetime import datetime, timezone
+    row = json.dumps([{"step": step, "detail": detail,
+                       "at": datetime.now(timezone.utc).isoformat()}])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE horizon.lineage_artifacts SET status = %s, "
+                "result_json = %s::jsonb, "
+                "progress_json = progress_json || %s::jsonb WHERE id = %s",
+                (status, json.dumps(result or {}), row, artifact_id))
+            conn.commit()
+    except psycopg2.OperationalError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def get_job_status(conn, artifact_id) -> dict | None:
+    """The theatre payload for one job: status, step list, fallback result."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, progress_json, result_json FROM "
+                "horizon.lineage_artifacts WHERE id = %s "
+                "AND artifact_type = 'builder_request'", (artifact_id,))
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {"status": row[0] or "", "progress": row[1] or [],
+                "result": row[2] or {}}
+    except psycopg2.OperationalError:
+        return None
 
 
 def record_op(conn, *, artifact_id, dataset_id, kind, op, params, row_count, rows_hash, result_value):

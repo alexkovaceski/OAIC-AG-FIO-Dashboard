@@ -78,14 +78,28 @@ def _try_parse_spec(text: str) -> dict | None:
     return None
 
 
-async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifact_id=None):
+async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6,
+                     artifact_id=None, progress=None):
     """Run the builder loop over text; return the selected spec dict.
 
     Per turn the completion's tool calls are executed against the frame, every
     call is appended to the ledger as a tool_call event, and (when conn is given)
     recorded to lineage_tool_calls with the REAL artifact_id. The artifact row is
     created first when the caller has not pre-created it.
+
+    `progress` is an optional callback (step, detail) the background worker uses
+    to write the theatre steps; a raising callback is swallowed — progress must
+    never fail a build.
     """
+
+    def _progress(step, detail):
+        if progress is None:
+            return
+        try:
+            progress(step, detail)
+        except Exception:
+            pass
+
     check_request(text)
     ledger.append({"event": "request_received", "request": text,
                    "identity": IDENTITY_STOVE})
@@ -134,6 +148,7 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
     # silently resolve citations against the wrong result.
     call_seq = 0
     for turn in range(max_turns):
+        _progress("building", f"turn {turn + 1} of {max_turns}")
         if inspect.iscoroutinefunction(complete_fn):
             raw = await complete_fn(messages)
         else:
@@ -156,6 +171,7 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
                 results.append({"tool": tool, "error": "unknown tool"})
                 continue
             if tool == "query_dataset":
+                _progress("computing", call.get("op", "query_dataset"))
                 # M3: a known tool may raise on bad params (e.g. int() on a
                 # non-numeric top_n). A tool failure is a TOOL RESULT, never an
                 # escaped exception — the build must keep going.
