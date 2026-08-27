@@ -75,6 +75,10 @@ _ROUTER: list[tuple[re.Pattern, str]] = [
     (re.compile(r"finalis", re.I), "requests_finalised_q1"),
     (re.compile(r"refus", re.I), "refused_share_q1"),
     (re.compile(r"timeliness|slippage", re.I), "timeliness_slippage_corr"),
+    # "decision outcome(s)" names the outcomes trend figure (granted full / part /
+    # refused / withdrawn by FY), not the Q1 decided count — so it must win over
+    # the bare "decided?|decision" pattern below it.
+    (re.compile(r"decision outcome", re.I), "decision_outcomes_trend"),
     (re.compile(r"decided?|decision", re.I), "decided_q1"),
 ]
 
@@ -159,6 +163,7 @@ a an the this that these those there here
 where what which who whom whose when why how
 is are was were be been being am do does did done
 come comes came get gets got go goes went
+turn turns turned become becomes became
 from of for in on at to by with about into over under out up off
 and or but nor so than then if as
 i me my mine we us our ours you your yours they them their it its

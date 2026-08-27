@@ -138,19 +138,47 @@ def list_artifacts(conn, *, limit=12, artifact_type="builder_request") -> list[d
     Best-effort: OperationalError -> [] (an unreachable DB must not break the
     reports page); any other psycopg2.Error raises so a schema/programming error
     is not hidden. Ordered by id DESC (id is monotonic, so this is newest-first).
+
+    `panel_count` lets the reports page tell a genuinely built report (ready with
+    panels) from a ready-but-empty one (a failed build that was wrongly stored
+    empty before the empty-spec guard existed), and `created_at` puts a time on
+    each row.
     """
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, request_text, status
+                SELECT id, request_text, status, created_at,
+                       COALESCE(jsonb_array_length(spec_json->'panels'), 0)
                 FROM horizon.lineage_artifacts
                 WHERE artifact_type = %s
                 ORDER BY id DESC LIMIT %s
             """, (artifact_type, limit))
             return [{"id": r[0], "request_text": r[1] or "",
-                     "status": r[2] or ""} for r in cur.fetchall()]
+                     "status": r[2] or "", "created_at": r[3],
+                     "panel_count": int(r[4] or 0)} for r in cur.fetchall()]
     except psycopg2.OperationalError:
         return []
+
+
+def delete_artifact(conn, artifact_id) -> bool:
+    """Delete an artifact and its dependent lineage rows (tool calls + ops).
+
+    A DELETE is a user-initiated state change, not a background write, so it does
+    NOT fail open like the record_* writes: a DB error raises here so the caller
+    can tell the reader the delete did not happen, rather than a row silently
+    surviving. Returns True when the artifact row was deleted, False when there
+    was nothing with that id (already gone).
+    """
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM horizon.lineage_tool_calls WHERE artifact_id = %s",
+                    (artifact_id,))
+        cur.execute("DELETE FROM horizon.lineage_ops WHERE artifact_id = %s",
+                    (artifact_id,))
+        cur.execute("DELETE FROM horizon.lineage_artifacts WHERE id = %s",
+                    (artifact_id,))
+        deleted = cur.rowcount
+    conn.commit()
+    return deleted > 0
 
 
 def record_op(conn, *, artifact_id, dataset_id, kind, op, params, row_count, rows_hash, result_value):

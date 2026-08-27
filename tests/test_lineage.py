@@ -193,6 +193,88 @@ def test_record_op_fails_open_on_operational_error():
                           rows_hash="abc", result_value=12359)  # must not raise
 
 
+def test_list_artifacts_returns_created_at_and_panel_count():
+    rows = [(22, "breakup by compliance", "ready",
+             "2026-08-27T09:00:00+00:00", 0)]
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchall(self):
+            return rows
+
+    conn = _FakeConn(_Cursor())
+    out = lineage_mod.list_artifacts(conn)
+    assert out == [{"id": 22, "request_text": "breakup by compliance",
+                    "status": "ready", "created_at": "2026-08-27T09:00:00+00:00",
+                    "panel_count": 0}]
+
+
+def test_list_artifacts_fails_open_on_operational_error():
+    class _BoomCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            raise psycopg2.OperationalError("db down")
+
+    conn = _FakeConn(_BoomCursor())
+    assert lineage_mod.list_artifacts(conn) == []
+
+
+def test_delete_artifact_deletes_children_then_row_and_commits():
+    class _Cursor:
+        def __init__(self):
+            self.sqls = []
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sqls.append(sql)
+
+    cur = _Cursor()
+    conn = _FakeConn(cur)
+    assert lineage_mod.delete_artifact(conn, 42) is True
+    assert conn.committed
+    assert len(cur.sqls) == 3
+    assert "lineage_tool_calls" in cur.sqls[0]
+    assert "lineage_ops" in cur.sqls[1]
+    assert "lineage_artifacts" in cur.sqls[2]
+
+
+def test_delete_artifact_returns_false_when_row_absent():
+    class _Cursor:
+        def __init__(self):
+            self.rowcount = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+    conn = _FakeConn(_Cursor())
+    assert lineage_mod.delete_artifact(conn, 999) is False
+
+
 # --- Static schema-vs-INSERT checks (the load_facts UndefinedColumn class) ----
 
 

@@ -1212,19 +1212,58 @@ def chat_page(user) -> str:
                   scripts=_asset_link("chat.js"))
 
 
+def _fmt_when(ts) -> str:
+    """A report row's created_at, as a short reader-facing date+time. TIMESTAMPTZ
+    comes back as a tz-aware datetime from psycopg2; a missing/unparseable value
+    degrades to '—' rather than crashing the list."""
+    if not ts:
+        return "—"
+    try:
+        return ts.strftime("%d %b %Y %H:%M")
+    except Exception:
+        return str(ts)
+
+
+_REPORT_STATUS_LABEL = {"building": "Building…", "ready": "Ready",
+                        "error": "Failed"}
+_REPORT_STATUS_CLASS = {"building": "status-building", "ready": "status-ready",
+                        "error": "status-error"}
+
+
+def _report_row(a: dict) -> str:
+    """One row of the "Your reports" table. A report is openable only when it is
+    genuinely built (status "ready" AND at least one panel); a ready-but-empty row
+    is a pre-guard failed build and is shown as Failed with no Open link."""
+    status = a.get("status") or ""
+    panels = a.get("panel_count") or 0
+    if status == "ready" and panels == 0:
+        status = "error"  # ready-but-empty is a failed build, never "Open"-able
+    label = _REPORT_STATUS_LABEL.get(status, status or "Unknown")
+    cls = _REPORT_STATUS_CLASS.get(status, "status-unknown")
+    openable = status == "ready"
+    action = (f'<a class="nav-link" href="/dashboards/{a["id"]}">Open</a>'
+              if openable else '<span class="meta">—</span>')
+    return (f'<tr data-id="{a["id"]}">'
+            f'<td class="report-req">{html.escape(a.get("request_text") or "")}</td>'
+            f'<td><span class="status-badge {cls}">{html.escape(label)}</span></td>'
+            f'<td class="report-when">{html.escape(_fmt_when(a.get("created_at")))}</td>'
+            f'<td class="report-actions">{action} '
+            f'<button class="report-delete" type="button" data-id="{a["id"]}">'
+            f'Delete</button></td></tr>')
+
+
 def reports_page(user, artifacts=None) -> str:
     """The gated reports page body. Rendered on demand."""
     artifacts = artifacts or []
-    built = ""
     if artifacts:
-        items = "".join(
-            f'<li><a href="/dashboards/{a["id"]}">'
-            f'{html.escape(a["request_text"])}</a>'
-            f' <span class="meta">({html.escape(a["status"])})</span></li>'
-            for a in artifacts)
-        built = (f'<h2>Your reports</h2><ul class="reports-list">{items}</ul>'
-                 f'<p class="hint">Built reports are stored and linked here — '
-                 f'each has its own dashboard and lineage page.</p>')
+        rows = "".join(_report_row(a) for a in artifacts)
+        table = ('<table class="report-table reports-index">'
+                 '<thead><tr><th>Report</th><th>Status</th><th>Created</th>'
+                 '<th class="actions">Actions</th></tr></thead>'
+                 f'<tbody>{rows}</tbody></table>')
+    else:
+        table = ('<p class="nodata">No reports yet. Describe a figure above '
+                 'and it will be built here.</p>')
     body = f"""
     <h1>Reports</h1>
     <p class="intro">Describe the FOI figure you want and this page returns the
@@ -1237,7 +1276,10 @@ def reports_page(user, artifacts=None) -> str:
     <div id="report-out" class="report-out" role="region" aria-live="polite"></div>
     <p class="hint">Try "top agencies for requests decided", "share of
     decisions refused", "timeliness within statutory".</p>
-    {built}
+    <h2>Your reports</h2>
+    {table}
+    <p class="hint">Open a built report, or delete any report you no longer
+    want.</p>
     """
     return chrome("Reports", body, page_key="reports", user=user,
                   scripts=_asset_link("report.js"))

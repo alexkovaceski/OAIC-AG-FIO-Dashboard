@@ -71,6 +71,24 @@ def test_chat_provenance_still_refuses_foreign_subjects():
     assert "contact@bluebirdadvisory.com.au" in out["answer"]
 
 
+def test_chat_provenance_turn_into_resolves_the_figure():
+    # "where does the data come from and then how does this turn into decision
+    # outcomes" is a lineage question written with a transformation verb
+    # ("turn"), not a foreign subject — it must route to the provenance library
+    # and name the decision-outcomes figure, never fall through to the LLM (which
+    # answered vaguely and cited data/corpus/data-notes.md).
+    out = asyncio.run(chat_mod.chat(
+        "where does the data come from and then how does this turn into "
+        "decision outcomes", [], _frame()))
+    assert out["provider"] == "provenance"
+    assert out["escalate"] is False
+    assert "Decision outcomes by FY" in out["answer"]
+    assert out["citations"]
+    # citations are the published workbook titles, never internal repo paths
+    assert not any(c.startswith("data/") for c in out["citations"])
+    assert any("Agency FOI data" in c for c in out["citations"])
+
+
 def test_report_routes_to_real_figure():
     from ingest.normalise import normalise_all
     from storage.frame import Frame
@@ -112,6 +130,21 @@ def test_report_routes_timeliness_of_decisions_to_corr():
     out = build_report("timeliness of decisions", frame)
     assert out["stat_key"] == "timeliness_slippage_corr"
     assert out["escalate"] is False
+
+def test_report_decision_outcomes_provenance_names_the_trend_figure():
+    # "decision outcome(s)" names the outcomes trend figure (granted full / part
+    # / refused / withdrawn by FY), not the Q1 decided count — the specific
+    # pattern must win over the bare "decided?|decision" one.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report(
+        "where does the data come from and then how does this turn into "
+        "decision outcomes", frame)
+    assert out["stat_key"] == "provenance"
+    assert out["escalate"] is False
+    assert out["provenance"]["figure"]["key"] == "decision_outcomes_trend"
 
 def test_report_unmappable_request_escalates():
     from ingest.normalise import normalise_all

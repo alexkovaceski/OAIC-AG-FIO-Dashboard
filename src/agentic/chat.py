@@ -125,7 +125,11 @@ def _provenance_answer(query: str, frame) -> dict | None:
     lines = [f"**{heading}**", ""]
     for r in rows:
         lines.append(f"- **{r['part']}**: {r['detail']}")
-    citations = [s["ingested_as"] for s in payload["sources"]
+    # Cite the workbooks by their published TITLES, not the repo paths
+    # (`ingested_as` is data/sources/... on this machine — an internal path a
+    # reader must not be handed as a "source"; the titles are the same names
+    # data.gov.au publishes them under).
+    citations = [s["title"] for s in payload["sources"]
                  if s.get("ingested_as")]
     return {"answer": "\n".join(lines), "citations": citations,
             "provider": "provenance", "escalate": False}

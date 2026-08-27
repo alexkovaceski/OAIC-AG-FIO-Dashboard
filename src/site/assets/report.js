@@ -83,4 +83,24 @@
   input.addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); send.click(); }
   });
+
+  // Delete a report from the "Your reports" table. Delegated so rows added
+  // server-side (and any re-render) all work without per-row wiring.
+  document.addEventListener("click", async function (ev) {
+    var btn = ev.target.closest ? ev.target.closest(".report-delete") : null;
+    if (!btn) return;
+    ev.preventDefault();
+    var id = btn.getAttribute("data-id");
+    if (!window.confirm("Delete this report?")) return;
+    try {
+      var resp = await fetch("/dashboards/" + encodeURIComponent(id) + "/delete",
+                             { method: "POST" });
+      if (resp.redirected) { window.location = "/login"; return; }
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      var row = btn.closest("tr");
+      if (row) row.remove();
+    } catch (e) {
+      window.alert("Could not delete the report: " + e.message);
+    }
+  });
 })();

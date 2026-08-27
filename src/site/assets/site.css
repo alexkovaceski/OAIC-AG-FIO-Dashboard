@@ -567,6 +567,38 @@ h1 {
 }
 .report-card .cta:hover { background: var(--blue); }
 
+/* "Your reports" index table (reports page) */
+.reports-index td { vertical-align: middle; }
+.reports-index .report-req { max-width: 28rem; overflow-wrap: anywhere; }
+.reports-index .report-when { white-space: nowrap; color: var(--ink-2); font-size: 0.85rem; }
+.reports-index .report-actions { white-space: nowrap; text-align: right; }
+.reports-index .report-actions .nav-link { margin-right: 0.6rem; }
+
+.status-badge {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.status-ready    { background: #e7f6ec; color: #15803d; }
+.status-building { background: #eaf2fd; color: #1d4ed8; }
+.status-error    { background: #fee9e9; color: #b91c1c; }
+.status-unknown  { background: #f1f5f9; color: #64748b; }
+
+.report-delete {
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.report-delete:hover { border-color: #b91c1c; color: #b91c1c; }
+
 /* --- ECharts containers ---------------------------------------------------- */
 
 .chartbox { min-height: 320px; }

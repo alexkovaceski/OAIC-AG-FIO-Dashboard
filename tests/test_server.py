@@ -27,8 +27,10 @@ import server.app as app_mod
 
 async def _fake_complete(messages):
     # hermetic replacement for the real _complete_fn: no network, immediate spec
+    # (non-empty panels, so the empty-spec guard does not treat it as a failure)
     return ('{"title": "FOI request summary", '
-            '"description": "test", "panels": []}')
+            '"description": "test", '
+            '"panels": [{"figure": "kpi", "stat": "requests_received_q1"}]}')
 
 
 def test_health():
@@ -350,6 +352,95 @@ def test_dashboard_route_degrades_on_synthetic_nonint_id(monkeypatch):
     r = c.get("/dashboards/local-2c")
     assert r.status_code == 200
     assert "Dashboard unavailable" in r.text
+
+
+def test_ask_empty_spec_returns_error_not_broken_link(monkeypatch):
+    # A builder that returns no panels must not be presented as "built": the
+    # route returns an error (so /report escalates and /ask reports the failure)
+    # instead of a dashboard_url to a blank /dashboards/{id} page.
+    async def empty_build_spec(text, frame, complete_fn, ledger, conn,
+                               max_turns=6, artifact_id=None):
+        return {"panels": []}
+
+    monkeypatch.setattr(app_mod, "build_spec", empty_build_spec)
+    c = TestClient(create_app())
+    r = c.post("/ask", json={"request": "breakup of foi requests by compliance"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"]
+    assert body["dashboard_url"] is None
+
+
+def test_dashboard_route_serves_empty_spec_as_empty_page(monkeypatch):
+    # A ready-but-empty artifact (panels == []) must render the honest "no
+    # content" page, not a blank "FOI dashboard" that reads as a broken link.
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return (json.dumps({"panels": []}),)
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        def __init__(self):
+            self.closed = False
+
+        def cursor(self):
+            return _Cursor()
+
+        def close(self):
+            self.closed = True
+
+    conn = _Conn()
+    monkeypatch.setattr(app_mod, "get_conn", lambda: conn)
+    c = TestClient(create_app())
+    r = c.get("/dashboards/42")
+    assert r.status_code == 200
+    assert "This report has no content" in r.text
+    assert conn.closed
+
+
+def test_delete_report_route(monkeypatch):
+    # Deleting a report is gated on a session and routes through delete_artifact
+    # on the live conn; success returns {"deleted": true}.
+    from storage import auth
+    import server.app as app_mod
+    monkeypatch.setattr(app_mod, "SESSION_SECRET", "test-secret-0123456789abcdef")
+    token = auth.encode_session(1, "alice", "viewer", app_mod.SESSION_SECRET)
+
+    deleted = {}
+    sentinel_conn = object()
+
+    def fake_delete_artifact(conn, artifact_id):
+        deleted["conn"] = conn
+        deleted["artifact_id"] = artifact_id
+        return True
+
+    monkeypatch.setattr(app_mod, "get_conn", lambda: sentinel_conn)
+    monkeypatch.setattr(app_mod, "delete_artifact", fake_delete_artifact)
+    c = TestClient(create_app())
+    c.cookies.set("foi_session", token)
+    r = c.post("/dashboards/42/delete")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": True}
+    assert deleted["artifact_id"] == 42
+    assert deleted["conn"] is sentinel_conn
+
+
+def test_delete_report_route_requires_session():
+    c = TestClient(create_app())
+    r = c.post("/dashboards/42/delete", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
 
 
 def test_complete_fn_falls_back_when_llm_unreachable(monkeypatch):

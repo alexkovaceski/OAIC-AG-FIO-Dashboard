@@ -66,7 +66,8 @@ from storage.frame import Frame  # noqa: E402
 from storage.db import get_conn, ensure_schema  # noqa: E402
 from storage.facts import ingest_facts  # noqa: E402
 from storage.lineage import (Ledger, record_artifact, record_op,  # noqa: E402
-                             update_artifact, list_artifacts)
+                             update_artifact, list_artifacts,
+                             delete_artifact)
 from site.pages import render_all_pages  # noqa: E402
 from site.lineage_viewer import render_lineage_page  # noqa: E402
 from site.templates import chrome, _user_nav, sidenav_html  # noqa: E402
@@ -323,6 +324,22 @@ async def _build_dashboard(frame, request_text: str) -> dict:
                     pass
             return {"artifact_id": response_id, "dashboard_url": None,
                     "lineage_url": None, "error": str(exc)}
+        if not (spec.get("panels") if isinstance(spec, dict) else []):
+            # The builder returned a spec with no panels — it could not map the
+            # request to any figure. Storing that as status="ready" renders a
+            # blank /dashboards/{id} page and hands the reader a "report built"
+            # link to an empty dashboard. Mark it failed and return an error so
+            # /report escalates (and /ask reports the failure) instead.
+            if conn is not None and isinstance(build_id, int):
+                try:
+                    update_artifact(conn, build_id, status="error")
+                except Exception:
+                    pass
+            return {"artifact_id": response_id, "dashboard_url": None,
+                    "lineage_url": None,
+                    "error": ("The builder could not turn that request into a "
+                              "dashboard — it likely asks for something the "
+                              "published FOI data does not contain.")}
         if conn is not None and isinstance(build_id, int):
             update_artifact(conn, build_id, spec_json=spec, status="ready")
             _record_figure_ops(conn, frame, build_id, dataset_id, spec)
@@ -422,6 +439,21 @@ def _degraded_dashboard_page(artifact_id) -> str:
         f"unreachable or the artifact has no recorded spec.</p>"
         f'<p><a href="/">← back to at-a-glance</a></p>')
     return chrome(f"Dashboard — {artifact_id}", body)
+
+
+def _empty_dashboard_page(artifact_id) -> str:
+    """A report saved without any panels (a build that produced nothing) — not a
+    blank "FOI dashboard", which reads as a broken link. Says what happened and
+    points back at the reports list so the reader can delete it."""
+    body = (
+        f"<h1>This report has no content</h1>"
+        f"<p>Report {html.escape(str(artifact_id))} was saved without any "
+        f"panels — the builder could not turn that request into a dashboard. "
+        f"This usually means the request asked for something the published FOI "
+        f"data does not contain (for example a dimension like "
+        f"&ldquo;compliance&rdquo; that is not in the source workbooks).</p>"
+        f'<p><a href="/reports.html">← back to your reports</a></p>')
+    return chrome(f"Report — {artifact_id}", body)
 
 
 def _session_user(request: Request) -> dict | None:
@@ -788,8 +820,47 @@ def create_app():
                 spec, transcript = None, []
             if spec is None:
                 return HTMLResponse(_degraded_dashboard_page(artifact_id))
+            if not (isinstance(spec, dict) and spec.get("panels")):
+                # A ready-but-empty report (panels == []) renders as a blank
+                # "FOI dashboard" page — the reader sees a broken link. Show the
+                # honest empty page instead.
+                return HTMLResponse(_empty_dashboard_page(artifact_id))
             return HTMLResponse(
                 render_dashboard_page(spec, frame, artifact_id, transcript))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    @app.post("/dashboards/{artifact_id}/delete")
+    def dashboard_delete(artifact_id: str, request: Request):
+        # Delete a built report (and its lineage rows). Gated on a session like
+        # the reports page it lives on; a delete is a state change, so a storage
+        # error returns an error status rather than a silent success.
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        if not (isinstance(artifact_id, int)
+                or (isinstance(artifact_id, str) and artifact_id.isdigit())):
+            return JSONResponse({"deleted": False, "error": "not a valid report id"},
+                                status_code=400)
+        aid = int(artifact_id)
+        conn = None
+        try:
+            try:
+                conn = get_conn()
+            except (RuntimeError, psycopg2.OperationalError):
+                return JSONResponse({"deleted": False,
+                                     "error": "storage unavailable"},
+                                    status_code=503)
+            try:
+                deleted = delete_artifact(conn, aid)
+            except psycopg2.Error:
+                return JSONResponse({"deleted": False, "error": "delete failed"},
+                                    status_code=500)
+            return {"deleted": deleted}
         finally:
             if conn is not None:
                 try:

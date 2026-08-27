@@ -385,6 +385,29 @@ def test_reports_page_oaic_free_and_gated():
     assert "report.js" in html
 
 
+def test_reports_page_lists_reports_with_open_status_delete():
+    # The "Your reports" table: a built report (ready with panels) is Open-able,
+    # a ready-but-empty one reads as Failed (no Open link), a building one is not
+    # Open-able, and every row carries a Delete button.
+    import datetime
+    from site.pages import reports_page
+    when = datetime.datetime(2026, 8, 27, 9, 0)
+    html = reports_page({"username": "alice"}, [
+        {"id": 22, "request_text": "breakup by compliance", "status": "ready",
+         "created_at": when, "panel_count": 3},
+        {"id": 21, "request_text": "empty one", "status": "ready",
+         "created_at": when, "panel_count": 0},
+        {"id": 20, "request_text": "still building", "status": "building",
+         "created_at": when, "panel_count": 0},
+    ])
+    assert "Your reports" in html
+    assert 'href="/dashboards/22"' in html      # ready + panels -> Open
+    assert 'href="/dashboards/21"' not in html  # ready-but-empty -> Failed
+    assert 'href="/dashboards/20"' not in html  # building -> no Open
+    assert html.count("report-delete") == 3     # every row deletable
+    assert "Failed" in html
+
+
 def test_seed_script_shape():
     import sys
     sys.path.insert(0, "scripts")
