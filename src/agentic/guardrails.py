@@ -71,6 +71,64 @@ _FOI_TERMS = (
     "compare", "top", "contributor", "home affairs", "services australia",
 )
 
+_WORD_RE = re.compile(r"[a-z]+")
+
+# Agency NAMES stay substring-only in the fuzzy matcher: a one-edit slack on
+# "home" makes "come from" read as an FOI signal, and no router pattern uses
+# agency names, so nothing is lost by keeping them exact.
+_AGENCY_TERMS = ("home affairs", "services australia")
+_FUZZY_TERM_WORDS = frozenset(
+    w for term in _FOI_TERMS if term not in _AGENCY_TERMS
+    for w in _WORD_RE.findall(term))
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Edit distance, no deps. Requests and terms are short."""
+    if a == b:
+        return 0
+    if len(a) > len(b):
+        a, b = b, a
+    prev = list(range(len(a) + 1))
+    for i, cb in enumerate(b, 1):
+        cur = [i]
+        for j, ca in enumerate(a, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _fuzzy_typo_distance(token: str) -> int:
+    """The slack a token of this length gets against the FOI vocabulary: one
+    edit for ordinary words, two for long ones (a dropped letter in
+    "timeliness" writes "timlines", two edits from the term)."""
+    return 2 if len(token) >= 8 else 1
+
+
+def _has_foi_signal(text: str) -> bool:
+    """Does the request carry an FOI positive signal, typos included?
+
+    The exact substring check stays the fast path ("finalis" matches
+    "finalised"). The fuzzy pass then admits near-miss spellings a real user
+    types: "fio requets by agencie for home afairs" must clear the screen and
+    reach the router, not get refused at the door. One edit of slack for
+    ordinary words, two for long ones; a term word is only compared when its
+    length is within that slack, so "chart" cannot become "quarter".
+    """
+    lowered = text.lower()
+    if any(w in lowered for w in _FOI_TERMS):
+        return True
+    for token in _WORD_RE.findall(lowered):
+        if len(token) < 4:
+            continue
+        slack = _fuzzy_typo_distance(token)
+        for term in _FUZZY_TERM_WORDS:
+            if abs(len(token) - len(term)) <= slack \
+                    and _levenshtein(token, term) <= slack:
+                return True
+    return False
+
+
 def check_request(text: str) -> None:
     t = (text or "").strip()
     if not t:
@@ -80,5 +138,5 @@ def check_request(text: str) -> None:
     if _OUT_OF_SCOPE_RE.search(t) or _US_COUNTRY_RE.search(t) \
             or _FOREIGN_FOI_RE.search(t) or _FOREIGN_FOI_CODE_RE.search(t):
         raise ScopeRefusal("Bluebird FOI Insights builds dashboards and reports from Australian Government freedom-of-information statistics. That request is outside that scope — ask me about FOI requests, decision outcomes, timeliness, or agency/portfolio trends instead.")
-    if not any(w in t.lower() for w in _FOI_TERMS):
+    if not _has_foi_signal(t):
         raise ScopeRefusal("Bluebird FOI Insights is focused on Australian Government FOI statistics — that's what I can build dashboards for. Ask me about requests received, decision outcomes, timeliness, or an agency trend. If you are asking where a figure came from, name it — \"where did the requests received figures come from?\" — and you will get its source files, hashes and curation decisions.")

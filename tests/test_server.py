@@ -354,6 +354,95 @@ def test_dashboard_route_degrades_on_synthetic_nonint_id(monkeypatch):
     assert "Dashboard unavailable" in r.text
 
 
+def test_dashboard_route_degrades_when_spec_cannot_render(monkeypatch):
+    # A stored spec with an unresolvable citation pointer must degrade to the
+    # honest page instead of SystemExit-ing the whole service (the fail-loud
+    # renderer used to take the site down on one bad model output).
+    spec = {"title": "Broken", "panels": [
+        {"figure": "kpi", "stat": "{c:0.0.0.total}"}]}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return (json.dumps(spec),)
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        def cursor(self):
+            return _Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_mod, "get_conn", lambda: _Conn())
+    c = TestClient(create_app())
+    r = c.get("/dashboards/42")
+    assert r.status_code == 200
+    assert "This report cannot be rendered" in r.text
+
+
+def test_spec_renders_false_for_unresolvable_citation():
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return (json.dumps({"panels": []}),)
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        def cursor(self):
+            return _Cursor()
+
+    bad = {"panels": [{"figure": "kpi", "stat": "{c:0.0.0.total}"}]}
+    assert app_mod._spec_renders(bad, _Conn(), 42, app_mod._FRAME) is False
+    good = {"panels": [{"figure": "kpi", "stat": "requests_received_q1"}]}
+    assert app_mod._spec_renders(good, _Conn(), 42, app_mod._FRAME) is True
+
+
+def test_build_flips_unrenderable_spec_to_error(monkeypatch):
+    # A built spec that cannot render is flipped to status="error" and the
+    # caller gets an error (so the ask pipeline falls back), never a ready
+    # dashboard link that dies at read time.
+    async def fake_build_spec(*a, **k):
+        return {"title": "Broken", "panels": [
+            {"figure": "kpi", "stat": "{c:0.0.0.total}"}]}
+
+    statuses = []
+    conn = types.SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr(app_mod, "_DATASET_ID", 7)
+    monkeypatch.setattr(app_mod, "get_conn", lambda: conn)
+    monkeypatch.setattr(app_mod, "ensure_schema", lambda c: None)
+    monkeypatch.setattr(app_mod, "record_artifact", lambda *a, **k: 42)
+    monkeypatch.setattr(app_mod, "build_spec", fake_build_spec)
+    monkeypatch.setattr(app_mod, "_spec_renders", lambda spec, c, aid, f: False)
+    monkeypatch.setattr(app_mod, "update_artifact",
+                        lambda c, aid, **k: statuses.append(k.get("status")))
+    monkeypatch.setattr(app_mod, "_record_figure_ops", lambda *a, **k: None)
+    out = asyncio.run(app_mod._build_dashboard(app_mod._FRAME, "build x"))
+    assert out["error"] is not None
+    assert out["dashboard_url"] is None
+    assert statuses[-1] == "error"
+
+
 def test_ask_empty_spec_returns_error_not_broken_link(monkeypatch):
     # A builder that returns no panels must not be presented as "built": the
     # route returns an error (so /report escalates and /ask reports the failure)
@@ -817,6 +906,47 @@ def test_ask_question_builds_dashboard_on_explicit_intent(monkeypatch):
     assert body["kind"] == "dashboard"
     assert body["dashboard_url"] == "/dashboards/42"
     assert captured["user_id"] == 1
+
+
+def test_ask_question_compare_builds_a_dashboard(monkeypatch):
+    # a two-agency comparison is data work: it goes to the builder, not prose
+    import server.app as app_mod
+    c = TestClient(create_app())
+    app_mod = _ask_session(monkeypatch, c)
+
+    async def fake_build(frame, request_text, user_id=None):
+        return {"artifact_id": 7, "dashboard_url": "/dashboards/7",
+                "lineage_url": "/lineage/7", "error": None}
+
+    monkeypatch.setattr(app_mod, "_build_dashboard", fake_build)
+    monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
+    r = c.post("/ask-question",
+               json={"question": "compare Home Affairs and Services Australia"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "dashboard"
+    assert body["dashboard_url"] == "/dashboards/7"
+
+
+def test_ask_question_failed_build_falls_back_to_the_router(monkeypatch):
+    # build intent that produces nothing falls through to the stat router: an
+    # instant figure beats hiding the failure behind prose
+    import server.app as app_mod
+    c = TestClient(create_app())
+    app_mod = _ask_session(monkeypatch, c)
+
+    async def fake_build(frame, request_text, user_id=None):
+        return {"artifact_id": 9, "dashboard_url": None,
+                "lineage_url": None, "error": "could not build"}
+
+    monkeypatch.setattr(app_mod, "_build_dashboard", fake_build)
+    monkeypatch.setattr(app_mod, "_record_message", lambda *a, **k: None)
+    r = c.post("/ask-question",
+               json={"question": "build a dashboard of requests received by agency"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "stat"
+    assert body["stat_key"] == "received_top20"
 
 
 def test_ask_question_requires_session():

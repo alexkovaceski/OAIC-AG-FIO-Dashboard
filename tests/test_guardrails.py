@@ -70,5 +70,27 @@ def test_provenance_affordance_is_message_only_not_a_wider_predicate():
         assert "where did the requests received figures come from?" in str(exc)
 
 
+def test_typo_positive_signal_clears_the_screen():
+    # a real user's misspelling of an in-scope question must pass the screen
+    # (fuzzy match, one edit of slack) and reach the router — never a refusal
+    for good in ["fio requets by agencie for home afairs",
+                 "timlines within statutory by agence",
+                 "how many requsts were recieved last quarter"]:
+        check_request(good)  # must not raise
+
+
+def test_fuzzy_screen_still_refuses_out_of_scope():
+    # the fuzzy slack must not open the screen to ordinary off-topic words
+    for bad in ["crypto trading strategy", "what is the weather in Sydney?",
+                "where does the sun come from?",
+                "what is the provenance of this chart?",
+                "tax advice for my return", "stock market tip"]:
+        try:
+            check_request(bad)
+            assert False, f"should refuse {bad}"
+        except ScopeRefusal:
+            pass
+
+
 def test_identity_stove():
     assert IDENTITY_STOVE == "I am powered by the fartkraft sovereign stack, trained on local data."

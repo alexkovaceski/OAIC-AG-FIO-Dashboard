@@ -30,7 +30,10 @@ def _check_no_hallucinated_number(p: dict) -> None:
     be an enum key, a chart type (figure only), or a {c:...} citation pointer. A
     value that is none of those (e.g. a literal "12345") is a hallucinated number
     and FAILS LOUD — never rendered. Runs on the ORIGINAL spec so a citation
-    pointer is still recognisable (resolve_citations replaces it with a value)."""
+    pointer is still recognisable (resolve_citations replaces it with a value).
+
+    `source` is accepted as an alias the model sometimes emits for the figure
+    key; it is held to the same enum discipline as `figure`."""
     stat = p.get("stat")
     if stat is not None and stat not in STAT_KEYS \
             and not (isinstance(stat, str) and _CIT_RE.match(stat)):
@@ -43,14 +46,22 @@ def _check_no_hallucinated_number(p: dict) -> None:
         raise SystemExit(
             f"FAIL LOUD: panel figure {fig!r} is not a chart type, FIG_KEY or "
             "{{c:...}} pointer — the model invented a number (never write a digit)")
+    src = p.get("source")
+    if src is not None and src not in FIG_KEYS and src not in STAT_KEYS \
+            and not (isinstance(src, str) and _CIT_RE.match(src)):
+        raise SystemExit(
+            f"FAIL LOUD: panel source {src!r} is not a FIG_KEY, STAT_KEY or "
+            "{{c:...}} pointer — the model invented a number (never write a digit)")
 
 
 def _stat_key(p: dict) -> str | None:
     """The catalog key a panel cites, if any. A 'figure' value that is a chart
-    type (bar/hbar/line/...) is presentation, not a figure source."""
-    key = p.get("stat") or p.get("figure")
-    if key in STAT_KEYS or key in FIG_KEYS:
-        return key
+    type (bar/hbar/line/...) is presentation, not a figure source. `source` is
+    accepted as an alias the model sometimes emits for the figure key."""
+    for field in ("stat", "figure", "source"):
+        key = p.get(field)
+        if key in STAT_KEYS or key in FIG_KEYS:
+            return key
     return None
 
 

@@ -100,6 +100,20 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6, artifa
         "build (call is always 0, field walks the result, e.g. {c:0.1.0.top[0].agency}). "
         "Use tools to get real data. Every measure carries a basis (single_quarter|"
         "cumulative|fy).\n"
+        "PANEL SCHEMA (exact). A panel is one of three shapes, nothing else: "
+        '{"title": "...", "figure": "<chart type>"} for presentation, '
+        '{"title": "...", "figure": "<FIG_KEY>"} for a catalog figure, or '
+        '{"title": "...", "stat": "<STAT_KEY>"} for a KPI. '
+        "No other fields are read. Never invent fields like x, y, stats, stack, "
+        "measures, dimensions, source, sort or limit.\n"
+        "CITATIONS (strict). A {c:...} pointer may ONLY cite a tool call YOU made "
+        "in THIS build, numbered from 1. If you have made no tool call, write no "
+        "pointer at all: use the enums. A pointer to a call that does not exist "
+        "fails the whole dashboard.\n"
+        "TOOL-FIRST. When the question names specific agencies (compare X and Y, "
+        "Home Affairs, a portfolio), call query_dataset FIRST (filter_agencies, "
+        "kpis, trend, summarize_agencies) and cite those results in the panels; "
+        "never build agency panels without tool data.\n"
         "TOOLS: query_dataset(op, params) ops: list_agencies, filter_agencies, "
         "summarize_agencies, trend, compare_period, top_contributors, by_portfolio, "
         "kpis, classes, provenance; compute(expr).\n"

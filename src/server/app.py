@@ -346,6 +346,21 @@ async def _build_dashboard(frame, request_text: str, user_id=None) -> dict:
                               "published FOI data does not contain.")}
         if conn is not None and isinstance(build_id, int):
             update_artifact(conn, build_id, spec_json=spec, status="ready")
+            if not _spec_renders(spec, conn, build_id, frame):
+                # The spec the model produced cannot be rendered against the
+                # recorded transcript (an unresolvable citation pointer). Flip
+                # the artifact to error and hand back an error so the caller
+                # falls back — never ship a "ready" link to a page the renderer
+                # would refuse.
+                try:
+                    update_artifact(conn, build_id, status="error")
+                except Exception:
+                    pass
+                return {"artifact_id": response_id, "dashboard_url": None,
+                        "lineage_url": None,
+                        "error": ("The builder produced a dashboard this site "
+                                  "could not render, so it was marked failed. "
+                                  "Ask again with a narrower question.")}
             _record_figure_ops(conn, frame, build_id, dataset_id, spec)
         return {"artifact_id": response_id,
                 "dashboard_url": f"/dashboards/{response_id}",
@@ -418,6 +433,26 @@ def _load_dashboard(artifact_id, conn):
     return spec, transcript
 
 
+def _spec_renders(spec, conn, artifact_id, frame) -> bool:
+    """Does a built spec actually render against the recorded transcript?
+
+    The GET path degrades honestly when a stored spec cannot render, but the
+    build path can do better: verify BEFORE the artifact is marked ready, so a
+    model-output defect (an unresolvable {c:...} pointer, a hallucinated panel)
+    flips the row to error and the caller falls back, instead of shipping a
+    dashboard link that dies at read time. Best-effort: a verification failure
+    of any other kind returns True — verification must never fail a build.
+    """
+    try:
+        _, transcript = _load_dashboard(artifact_id, conn)
+        render_dashboard_page(spec, frame, artifact_id, transcript)
+        return True
+    except (SystemExit, KeyError, ValueError, TypeError):
+        return False
+    except Exception:
+        return True
+
+
 def _signed_in_page(full_html: str, page_key: str, user: dict) -> str:
     """Re-wrap a boot-rendered page with the signed-in chrome.
 
@@ -456,6 +491,20 @@ def _empty_dashboard_page(artifact_id) -> str:
         f"This usually means the request asked for something the published FOI "
         f"data does not contain (for example a dimension like "
         f"&ldquo;compliance&rdquo; that is not in the source workbooks).</p>"
+        f'<p><a href="/reports.html">← back to your reports</a></p>')
+    return chrome(f"Report — {artifact_id}", body)
+
+
+def _unrenderable_dashboard_page(artifact_id) -> str:
+    """A stored spec the renderer refused (an unresolvable citation pointer, a
+    hallucinated panel). The reader sees the honest page instead of a 500, and
+    the service stays up: a model-output defect must never take the site down."""
+    body = (
+        f"<h1>This report cannot be rendered</h1>"
+        f"<p>Report {html.escape(str(artifact_id))} was saved with a spec the "
+        f"renderer could not resolve — a panel cites a figure the recorded "
+        f"build did not produce. It has been marked failed; delete it from "
+        f"your reports and ask again.</p>"
         f'<p><a href="/reports.html">← back to your reports</a></p>')
     return chrome(f"Report — {artifact_id}", body)
 
@@ -866,8 +915,24 @@ def create_app():
                 # "FOI dashboard" page — the reader sees a broken link. Show the
                 # honest empty page instead.
                 return HTMLResponse(_empty_dashboard_page(artifact_id))
-            return HTMLResponse(
-                render_dashboard_page(spec, frame, artifact_id, transcript))
+            try:
+                page = render_dashboard_page(spec, frame, artifact_id, transcript)
+            except SystemExit as exc:
+                # The renderer fails loud on a spec it refuses (an unresolvable
+                # citation pointer, a hallucinated panel). That refusal is a
+                # MODEL-OUTPUT defect, not a code fault: it must degrade this
+                # one page, never kill the process (SystemExit inside a route
+                # handler exits the service, which took the whole site down
+                # while the audit battery ran).
+                _LOGGER.warning("dashboard %s: render refused the stored spec "
+                                "(%s); serving the unrenderable page",
+                                artifact_id, exc)
+                return HTMLResponse(_unrenderable_dashboard_page(artifact_id))
+            except (KeyError, ValueError, TypeError) as exc:
+                _LOGGER.warning("dashboard %s: render failed (%s); serving the "
+                                "unrenderable page", artifact_id, exc)
+                return HTMLResponse(_unrenderable_dashboard_page(artifact_id))
+            return HTMLResponse(page)
         finally:
             if conn is not None:
                 try:

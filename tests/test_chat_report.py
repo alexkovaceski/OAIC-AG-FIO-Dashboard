@@ -211,6 +211,75 @@ def test_report_last_quarter_still_routes_to_q1_stat():
     assert out["stat_key"] == "requests_received_q1"
     assert out["escalate"] is False
 
+
+def test_report_year_qualified_question_gets_the_annual_series():
+    # "in 2020" is not asking about Q1 2025-26: the Q1 figure would be the wrong
+    # number. The annual series covers those years.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("how many requests were received in 2020?", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "requests_received_trend"
+    assert out["data"]["categories"]  # the FY series, not a Q1 scalar
+
+
+def test_report_q1_window_year_keeps_the_q1_stat():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("requests received in Q1 2025-26", frame)
+    assert out["stat_key"] == "requests_received_q1"
+
+
+def test_report_agency_qualified_q1_question_gets_the_national_note():
+    # The Q1 figures have no per-agency breakdown: "by agency" gets the honest
+    # note, not the national number.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("what share of decisions were refused by agency?", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] is None
+    assert "national totals" in out["note"]
+
+
+def test_report_typo_request_routes_like_the_clean_one():
+    # "fio requets by agencie" normalises to "foi requests by agencies" for
+    # routing, so the misspelled question gets the same answer as the clean one.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("fio requets by agencie for home afairs", frame)
+    assert out["escalate"] is False
+    assert out["stat_key"] == "received_top20"
+
+
+def test_report_agencies_moved_on_timeliness_gets_movers():
+    # "which agencies moved most on timeliness" asks for the per-agency movers
+    # table, not the national slippage correlation.
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("which agencies moved most on timeliness?", frame)
+    assert out["stat_key"] == "timeliness_movers"
+    assert out["data"]["movers"]
+
+
+def test_report_requests_by_agency_gets_top20():
+    from ingest.normalise import normalise_all
+    from storage.frame import Frame
+    from agentic.report import build_report
+    frame = Frame(normalise_all())
+    out = build_report("requests by agency", frame)
+    assert out["stat_key"] == "received_top20"
+    assert out["escalate"] is False
+
 def test_report_unmappable_request_escalates():
     from ingest.normalise import normalise_all
     from storage.frame import Frame

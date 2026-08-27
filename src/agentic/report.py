@@ -32,7 +32,8 @@ import re
 from provenance import ProvenanceError, describe
 from stats.catalog import (FIG_CAPTIONS, FIG_KEYS, FIGURE_SPECS, STAT_KEYS,
                            foi_stats)
-from agentic.guardrails import check_request, ScopeRefusal, _FOI_TERMS
+from agentic.guardrails import (check_request, ScopeRefusal, _FOI_TERMS,
+                                _FUZZY_TERM_WORDS, _levenshtein)
 
 _ESCALATION = ("That request is beyond what the site can compute. For a "
                "custom FOI report, email contact@bluebirdadvisory.com.au.")
@@ -71,9 +72,17 @@ _ROUTER: list[tuple[re.Pattern, str]] = [
     (re.compile(r"top (?:20 )?agenc.*decid|decid.*top (?:20 )?agenc", re.I),
      "decided_top20"),
     (re.compile(r"top (?:20 )?agenc|agenc.*top|contribut", re.I), "received_top20"),
+    # per-agency breakdowns of the two volume measures, before the bare
+    # "received"/"decided" patterns they would otherwise fall to
+    (re.compile(r"received.*agenc|agenc.*received|requests?\s+by\s+agenc", re.I),
+     "received_top20"),
+    (re.compile(r"decided.*agenc|agenc.*decided", re.I), "decided_top20"),
     (re.compile(r"received", re.I), "requests_received_q1"),
     (re.compile(r"finalis", re.I), "requests_finalised_q1"),
     (re.compile(r"refus", re.I), "refused_share_q1"),
+    # "which agencies moved most on timeliness" asks for the per-agency movers
+    # table, not the national slippage correlation — the agency pattern wins
+    (re.compile(r"agenc.*timeliness|timeliness.*agenc", re.I), "timeliness_movers"),
     (re.compile(r"timeliness|slippage", re.I), "timeliness_slippage_corr"),
     # "decision outcome(s)" names the outcomes trend figure (granted full / part /
     # refused / withdrawn by FY), not the Q1 decided count — so it must win over
@@ -100,6 +109,72 @@ _SERIES_GRANULARITY_RE = re.compile(
     r"month\s+by\s+month|month\s+over\s+month|by\s+month|monthly|per\s+month|"
     r"week\s+by\s+week|week\s+over\s+week|by\s+week|weekly",
     re.I)
+
+# ------------------------------------------------------ qualifier guards ------
+
+# The golden Q1 figures are national totals for Q1 2025-26. A question that
+# names another year is not asking about that quarter; a question qualified by
+# agency asks for a breakdown the Q1 figures do not publish. Both get the
+# honest answer instead of the wrong number: the annual counterpart figure for
+# a year qualifier, a plain note for an agency qualifier.
+_Q1_ANNUAL = {
+    "requests_received_q1": "requests_received_trend",
+    "requests_finalised_q1": "requests_finalised_trend",
+    "decided_q1": "requests_decided_trend",
+    "within_statutory_pct_q1": "timeliness_trend",
+    "granted_full_share_q1": "decision_outcomes_trend",
+    "granted_part_share_q1": "decision_outcomes_trend",
+    "refused_share_q1": "decision_outcomes_trend",
+    "withdrawn_q1": "decision_outcomes_trend",
+}
+_Q1_WINDOW_YEARS = ("2025", "2026")
+_YEAR_TOKEN_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2})?\b")
+_AGENCY_QUALIFIER_RE = re.compile(r"\b(?:by|per|each|every)\s+agenc", re.I)
+
+
+def _q1_override(request: str, key: str):
+    """(new_key, None) for a year-qualified Q1 stat (route to the annual
+    figure), (None, note) for an agency-qualified one (national-only), or None
+    when the resolved stat stands."""
+    if key not in _Q1_ANNUAL:
+        return None
+    for token in _YEAR_TOKEN_RE.findall(request or ""):
+        if token[:4] not in _Q1_WINDOW_YEARS:
+            return _Q1_ANNUAL[key], None
+    if _AGENCY_QUALIFIER_RE.search(request or ""):
+        return None, ("The Q1 headline figures are national totals: the "
+                      "source publishes no per-agency breakdown for the "
+                      "quarter. The annual files do publish per-agency "
+                      "figures, so ask for the yearly view instead, e.g. "
+                      "'requests by agency, by year'.")
+    return None
+
+
+# Typo normalisation for ROUTING only: "fio requets by agencie" routes as
+# "foi requests by agencies". The reader-facing echo keeps the original words.
+# The vocabulary is the same fuzzy term set the scope screen uses (agency names
+# excluded, so "come from" never becomes "home from").
+_ALPHA_RE = re.compile(r"[a-z]+")
+_NORM_VOCAB = frozenset(_FUZZY_TERM_WORDS)
+
+
+def _normalise_request(text: str) -> str:
+    lowered = (text or "").lower()
+
+    def repl(match):
+        token = match.group(0)
+        if len(token) < 4:
+            return token
+        slack = 2 if len(token) >= 8 else 1
+        best = None
+        for term in _NORM_VOCAB:
+            if abs(len(token) - len(term)) <= slack \
+                    and _levenshtein(token, term) <= slack:
+                if best is None or len(term) > len(best):
+                    best = term
+        return best or token
+
+    return _ALPHA_RE.sub(repl, lowered)
 
 _LABELS = {
     "requests_received_q1": "Requests received, Q1 2025-26",
@@ -714,7 +789,11 @@ def build_report(request: str, frame) -> dict:
         return {"request": request, "stat_key": None, "stat_label": None,
                 "data": None, "basis": None, "dataset_registry": {},
                 "model": "scope", "escalate": True, "error": f"{exc} {_ESCALATION}"}
-    if _SERIES_GRANULARITY_RE.search(request) and not _PROVENANCE_RE.search(request):
+    # routing works on the typo-normalised text; the echoed request keeps the
+    # reader's own words
+    route_text = _normalise_request(request)
+    if _SERIES_GRANULARITY_RE.search(route_text) \
+            and not _PROVENANCE_RE.search(route_text):
         # answered BEFORE the router loop: the stat patterns must not grab a
         # "quarter by quarter" request and silently answer a different
         # granularity, and the no-match -> LLM-builder fallback must not either
@@ -723,7 +802,7 @@ def build_report(request: str, frame) -> dict:
         # from?") is EXCLUDED: the router's provenance subject gate owns those —
         # it must keep declining foreign subjects rather than have the
         # granularity note answer them.
-        return _granularity_answer(request, frame)
+        return _granularity_answer(route_text, frame)
     key = None
     # Only meaningful once `key == _PROVENANCE`: which figure the reader is
     # asking about, or None for the platform as a whole. It is resolved by
@@ -735,7 +814,7 @@ def build_report(request: str, frame) -> dict:
     # the identical expression, a few lines further down.
     figure_key = None
     for pattern, stat_key in _ROUTER:
-        if not pattern.search(request):
+        if not pattern.search(route_text):
             continue
         if stat_key == _PROVENANCE:
             # Provenance wording about something this platform cannot cite
@@ -748,7 +827,7 @@ def build_report(request: str, frame) -> dict:
             # answer. See _provenance_subject: every content word must be this
             # platform's, and the request must resolve a figure or name the
             # platform itself.
-            answerable, figure_key = _provenance_subject(request, frame)
+            answerable, figure_key = _provenance_subject(route_text, frame)
             if not answerable:
                 figure_key = None
                 break
@@ -796,9 +875,21 @@ def build_report(request: str, frame) -> dict:
                              f"{figure_key!r}, so it will not say where that "
                              f"figure came from ({exc.__cause__!r}). "
                              f"{_ESCALATION}"}
+    override = _q1_override(route_text, key)
+    if override is not None:
+        new_key, note = override
+        if note is not None:
+            # an agency-qualified Q1 question: the quarter figures are national
+            # totals only, so the honest answer is the note, not the number
+            return {"request": request, "stat_key": None, "stat_label": None,
+                    "data": None, "basis": None, "dataset_registry": {},
+                    "note": note, "model": "deterministic", "escalate": False}
+        # a year-qualified Q1 question: answer with the annual counterpart
+        key = new_key
     stat = foi_stats(frame, key)
     return {"request": request, "stat_key": key,
-            "stat_label": _LABELS.get(key, key.replace("_", " ")),
+            "stat_label": (_LABELS.get(key) or FIG_CAPTIONS.get(key)
+                           or key.replace("_", " ")),
             "data": stat["value"], "basis": stat["basis"],
             "dataset_registry": {"source_rows": stat["source_rows"],
                                  "rows_hash": stat["rows_hash"]},

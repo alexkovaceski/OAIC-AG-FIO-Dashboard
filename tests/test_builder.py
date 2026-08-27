@@ -402,6 +402,42 @@ def test_render_rejects_literal_digit_in_figure():
     assert "FAIL LOUD" in str(e.value)
 
 
+def test_render_accepts_source_alias_and_rejects_hallucinated_source():
+    # the model sometimes emits "source" for the figure key (audit finding):
+    # the alias renders the platform figure, and a hallucinated source still
+    # fails loud like a hallucinated figure
+    spec = {"title": "Test", "panels": [
+        {"title": "Top 20", "source": "decided_top20"}]}
+    page = render_dashboard_page(spec, Frame(normalise_all()), 42, [])
+    # the alias resolved to the platform figure: a real value rendered, not the
+    # empty-panel "&nbsp;" placeholder
+    assert "&nbsp;" not in page
+    assert 'class="value"' in page
+    bad = {"title": "Test", "panels": [{"source": "12345"}]}
+    with pytest.raises(SystemExit) as e:
+        render_dashboard_page(bad, Frame(normalise_all()), 42, [])
+    assert "FAIL LOUD" in str(e.value)
+
+
+def test_builder_prompt_pins_the_panel_schema_and_citations():
+    # audit finding: the model invented turn-0 citation pointers and x/y/stats
+    # panel schemas the renderer does not read. The prompt must pin the exact
+    # schema and forbid citations of calls that were never made.
+    captured = {}
+
+    def capture(messages):
+        captured["system"] = messages[0]["content"]
+        return _fake_complete(messages)
+
+    asyncio.run(build_spec(
+        "requests received", Frame(normalise_all()),
+        capture, Ledger(ledger_path=tempfile.mktemp()), None))
+    assert "PANEL SCHEMA" in captured["system"]
+    assert "CITATIONS (strict)" in captured["system"]
+    assert "TOOL-FIRST" in captured["system"]
+    assert "Never invent fields like x, y, stats, stack" in captured["system"]
+
+
 def test_render_allows_enum_keys_with_digits_and_citations():
     # the M4 guard must not reject legitimate enum keys that contain digits
     # (q1 stats, top20 figures) or citation pointers
