@@ -453,6 +453,49 @@ def test_builder_prompt_pins_the_panel_schema_and_citations():
     assert "Never invent fields like x, y, stats, stack" in captured["system"]
 
 
+def test_fmt_renders_categories_with_agency_names():
+    # audit finding: a top-N panel used to render "received: 17,120, 5,109, ..."
+    # with no agency names. Categories now render as rows beside their values.
+    from agentic.render import _fmt
+    out = _fmt({"categories": ["Agency A", "Agency B"],
+                "series": [{"name": "received", "values": [10, 20]}]})
+    assert "dash-table" in out
+    assert "Agency A" in out and "Agency B" in out
+    assert "received" in out
+    assert "<td>10</td>" in out and "<td>20</td>" in out
+
+
+def test_fmt_renders_movers_as_rows_not_raw_json():
+    from agentic.render import _fmt
+    out = _fmt({"fy_a": "2023-24", "fy_b": "2024-25", "measure": "received",
+                "movers": [{"agency": "Department of Home Affairs",
+                            "fy_a_value": 11771, "fy_b_value": 17120,
+                            "change": 5349}]})
+    assert "Department of Home Affairs" in out
+    assert "2023-24" in out and "2024-25" in out
+    assert "Change" in out
+    assert "fy_a_value" not in out           # never the raw JSON dump
+    assert "17,120" in out
+
+
+def test_fmt_never_dumps_raw_json_for_dicts():
+    from agentic.render import _fmt
+    out = _fmt({"some_key": "some value"})
+    assert "some_key" in out and "some value" in out
+    assert "{" not in out and "}" not in out
+
+
+def test_dashboard_page_embeds_panel_styles():
+    # the dashboard page is a bare document: it must carry its own styles so
+    # the panel cards and tables render like the rest of the site
+    page = render_dashboard_page(
+        {"title": "T", "panels": [{"figure": "kpi",
+                                   "stat": "requests_received_q1"}]},
+        Frame(normalise_all()), 42, [])
+    assert "<style>" in page
+    assert ".panel" in page and ".dash-table" in page
+
+
 def test_render_allows_enum_keys_with_digits_and_citations():
     # the M4 guard must not reject legitimate enum keys that contain digits
     # (q1 stats, top20 figures) or citation pointers
