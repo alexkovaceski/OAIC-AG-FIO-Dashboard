@@ -68,7 +68,8 @@ from storage.facts import ingest_facts  # noqa: E402
 from storage.lineage import (Ledger, record_artifact, record_op,  # noqa: E402
                              update_artifact, list_artifacts,
                              delete_artifact, append_progress,
-                             get_job_status, mark_interrupted, requeue_job)
+                             get_job_status, mark_interrupted, requeue_job,
+                             may_access_artifact)
 from server.dashboards import (load_dashboard as _load_dashboard,  # noqa: E402
                                spec_renders as _spec_renders)
 from site.pages import render_all_pages  # noqa: E402
@@ -475,6 +476,18 @@ def _unrenderable_dashboard_page(artifact_id) -> str:
     return chrome(f"Report — {artifact_id}", body)
 
 
+def _forbidden_dashboard_page(artifact_id) -> str:
+    """A report that belongs to another user. The URL is private per-owner, so
+    this reads as an honest refusal rather than leaking anything about it."""
+    body = (
+        f"<h1>This report is not yours</h1>"
+        f"<p>Report {html.escape(str(artifact_id))} belongs to another user "
+        f"and is not shared with this account. Reports are private to the "
+        f"account that asked for them.</p>"
+        f'<p><a href="/reports.html">← back to your reports</a></p>')
+    return chrome(f"Report — {artifact_id}", body)
+
+
 def _session_user(request: Request) -> dict | None:
     """The signed-cookie session payload, or None (tampered/expired/missing,
     or the session secret is the insecure default).
@@ -847,19 +860,28 @@ def create_app():
                 "lineage_url": result["lineage_url"]}
 
     @app.get("/lineage/{artifact_id}")
-    def lineage(artifact_id: str):
+    def lineage(artifact_id: str, request: Request):
         # Live Postgres wiring (Task 9/10): read the artifact/snapshot/ops/tool
         # calls from the horizon lineage tables so the explainability page shows
-        # the REAL transcript recorded by build_spec. Best-effort — an unreachable
-        # DB degrades to the honest "no live lineage" page (render_lineage_page
-        # handles conn=None), so the page never 500s on a down DB. The conn is
-        # closed in the finally, mirroring /dashboards below.
+        # the REAL transcript recorded by build_spec. Gated on a session and on
+        # ownership like /dashboards: a report's transcript is as private as the
+        # report. Best-effort — an unreachable DB degrades to the honest "no
+        # live lineage" page (render_lineage_page handles conn=None), so the
+        # page never 500s on a down DB. The conn is closed in the finally.
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
         conn = None
         try:
             try:
                 conn = get_conn()
             except (RuntimeError, psycopg2.OperationalError):
                 conn = None
+            if conn is not None:
+                access = may_access_artifact(conn, artifact_id, user["id"])
+                if access is False:
+                    return HTMLResponse(_forbidden_dashboard_page(artifact_id),
+                                        status_code=403)
             return HTMLResponse(render_lineage_page(artifact_id, conn))
         finally:
             if conn is not None:
@@ -869,18 +891,28 @@ def create_app():
                     pass
 
     @app.get("/dashboards/{artifact_id}")
-    def dashboard(artifact_id: str):
+    def dashboard(artifact_id: str, request: Request):
         # I4: render the artifact's OWN dashboard from its durable spec_json and
         # recorded tool-call transcript — not the static at-a-glance page. The
-        # conn is closed in the finally; a live-but-unreachable DB degrades to
-        # the honest "unavailable" page (never a 500).
+        # URL is private: a session is required, and a builder report renders
+        # only for the user who asked for it (an unowned legacy row renders for
+        # any signed-in user). The conn is closed in the finally; a
+        # live-but-unreachable DB degrades to the honest "unavailable" page
+        # (never a 500).
+        user = _session_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
         conn = None
         try:
             try:
                 conn = get_conn()
-                spec, transcript = _load_dashboard(artifact_id, conn)
             except (RuntimeError, psycopg2.OperationalError):
-                spec, transcript = None, []
+                conn = None
+            if conn is not None and may_access_artifact(
+                    conn, artifact_id, user["id"]) is False:
+                return HTMLResponse(_forbidden_dashboard_page(artifact_id),
+                                    status_code=403)
+            spec, transcript = _load_dashboard(artifact_id, conn)
             if spec is None:
                 return HTMLResponse(_degraded_dashboard_page(artifact_id))
             if not (isinstance(spec, dict) and spec.get("panels")):
@@ -889,7 +921,8 @@ def create_app():
                 # honest empty page instead.
                 return HTMLResponse(_empty_dashboard_page(artifact_id))
             try:
-                page = render_dashboard_page(spec, frame, artifact_id, transcript)
+                page = render_dashboard_page(spec, frame, artifact_id,
+                                             transcript)
             except SystemExit as exc:
                 # The renderer fails loud on a spec it refuses (an unresolvable
                 # citation pointer, a hallucinated panel). That refusal is a
@@ -906,6 +939,8 @@ def create_app():
                                 "unrenderable page", artifact_id, exc)
                 return HTMLResponse(_unrenderable_dashboard_page(artifact_id))
             return HTMLResponse(page)
+        except psycopg2.OperationalError:
+            return HTMLResponse(_degraded_dashboard_page(artifact_id))
         finally:
             if conn is not None:
                 try:
@@ -952,7 +987,8 @@ def create_app():
     @app.get("/dashboards/{artifact_id}/status")
     def dashboard_status(artifact_id: str, request: Request):
         # The theatre poll: the job's status, its step list, and the fallback
-        # answer when the build failed. Gated like the reports page.
+        # answer when the build failed. Gated on a session and on ownership
+        # like the report itself.
         user = _session_user(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
@@ -966,6 +1002,9 @@ def create_app():
                 conn = get_conn()
             except (RuntimeError, psycopg2.OperationalError):
                 return JSONResponse({"status": "unknown"}, status_code=503)
+            access = may_access_artifact(conn, aid, user["id"])
+            if access is False:
+                return JSONResponse({"status": "forbidden"}, status_code=403)
             row = get_job_status(conn, aid)
         finally:
             if conn is not None:

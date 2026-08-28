@@ -367,6 +367,32 @@ def get_job_status(conn, artifact_id) -> dict | None:
         return None
 
 
+def may_access_artifact(conn, artifact_id, user_id) -> bool | None:
+    """May this signed-in user view the artifact behind /dashboards or
+    /lineage? True = yes, False = someone else's report, None = no such row.
+
+    Builder reports are private to their owner. Every other artifact kind
+    (static_page, model_fit) is platform data, and a legacy builder row with no
+    owner is an orphan any signed-in user may see. Fails open on a transient DB
+    error: the caller's route still requires a session, and the page degrades
+    honestly when the store is unreachable.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id, artifact_type FROM horizon.lineage_artifacts "
+                "WHERE id = %s", (artifact_id,))
+            row = cur.fetchone()
+    except psycopg2.OperationalError:
+        return True
+    if row is None:
+        return None
+    owner, atype = row[0], row[1]
+    if atype != "builder_request" or owner is None:
+        return True
+    return owner == user_id
+
+
 def record_op(conn, *, artifact_id, dataset_id, kind, op, params, row_count, rows_hash, result_value):
     """Insert a lineage_ops row. Best-effort, same split as record_artifact."""
     try:

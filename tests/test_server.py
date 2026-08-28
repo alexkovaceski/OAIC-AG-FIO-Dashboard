@@ -64,11 +64,29 @@ def test_ask_returns_artifact_and_urls(monkeypatch):
     assert body["lineage_url"] == f"/lineage/{body['artifact_id']}"
 
 
-def test_lineage_page_renders():
+def test_lineage_page_renders(monkeypatch):
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/lineage/abc123")
     assert r.status_code == 200
     assert "fartkraft" in r.text.lower()
+
+
+def test_lineage_route_requires_session():
+    c = TestClient(create_app())
+    r = c.get("/lineage/42", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
+
+
+def test_lineage_route_forbidden_for_foreign_owner(monkeypatch):
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: False)
+    r = c.get("/lineage/42")
+    assert r.status_code == 403
+    assert "not yours" in r.text
 
 
 def test_lineage_route_reads_live_db_when_available(monkeypatch):
@@ -78,12 +96,14 @@ def test_lineage_route_reads_live_db_when_available(monkeypatch):
     captured = {}
     sentinel_conn = object()
     monkeypatch.setattr(app_mod, "get_conn", lambda: sentinel_conn)
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     monkeypatch.setattr(
         app_mod, "render_lineage_page",
         lambda artifact_id, conn: captured.update(artifact_id=artifact_id,
                                                   conn=conn)
         or "<!doctype html><p>ok</p>")
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/lineage/42")
     assert r.status_code == 200
     assert captured["artifact_id"] == "42"
@@ -92,12 +112,13 @@ def test_lineage_route_reads_live_db_when_available(monkeypatch):
 
 def test_lineage_route_degrades_when_db_down(monkeypatch):
     # an unreachable DB (get_conn raises RuntimeError) must still render the
-    # honest degraded page — never a 500.
+    # honest degraded page — never a 500. (The session still gates first.)
     def raise_conn():
         raise RuntimeError("no db")
 
     monkeypatch.setattr(app_mod, "get_conn", raise_conn)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/lineage/42")
     assert r.status_code == 200
     assert "fartkraft" in r.text.lower()
@@ -322,7 +343,9 @@ def test_dashboard_route_serves_built_spec(monkeypatch):
 
     conn = _Conn()
     monkeypatch.setattr(app_mod, "get_conn", lambda: conn)
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/dashboards/42")
     assert r.status_code == 200
     assert "Seeded dashboard" in r.text
@@ -330,14 +353,34 @@ def test_dashboard_route_serves_built_spec(monkeypatch):
     assert conn.closed                   # the per-request conn was closed
 
 
+def test_dashboard_route_requires_session():
+    # a report URL is private: no session, no page
+    c = TestClient(create_app())
+    r = c.get("/dashboards/42", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers.get("location", "")
+
+
+def test_dashboard_route_forbidden_for_foreign_owner(monkeypatch):
+    # a signed-in user cannot open another user's report, even with the URL
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: False)
+    r = c.get("/dashboards/42")
+    assert r.status_code == 403
+    assert "not yours" in r.text
+
+
 def test_dashboard_route_degrades_when_db_down(monkeypatch):
     # I4 fail-open: an unreachable DB renders the honest "unavailable" page,
-    # never a 500.
+    # never a 500. (The session still gates first.)
     def raise_conn():
         raise RuntimeError("no db")
 
     monkeypatch.setattr(app_mod, "get_conn", raise_conn)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/dashboards/42")
     assert r.status_code == 200
     assert "Dashboard unavailable" in r.text
@@ -348,7 +391,9 @@ def test_dashboard_route_degrades_on_synthetic_nonint_id(monkeypatch):
     # against a LIVE db must degrade, never 500 (the id = %s compare would raise
     # psycopg2.DataError, not OperationalError).
     monkeypatch.setattr(app_mod, "get_conn", lambda: object())  # a live conn
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/dashboards/local-2c")
     assert r.status_code == 200
     assert "Dashboard unavailable" in r.text
@@ -385,7 +430,9 @@ def test_dashboard_route_degrades_when_spec_cannot_render(monkeypatch):
             pass
 
     monkeypatch.setattr(app_mod, "get_conn", lambda: _Conn())
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/dashboards/42")
     assert r.status_code == 200
     assert "This report cannot be rendered" in r.text
@@ -491,7 +538,9 @@ def test_dashboard_route_serves_empty_spec_as_empty_page(monkeypatch):
 
     conn = _Conn()
     monkeypatch.setattr(app_mod, "get_conn", lambda: conn)
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
     r = c.get("/dashboards/42")
     assert r.status_code == 200
     assert "This report has no content" in r.text
@@ -1009,6 +1058,7 @@ def test_dashboard_status_endpoint(monkeypatch):
             pass
 
     monkeypatch.setattr(app_mod, "get_conn", lambda: _Conn())
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: True)
     r = c.get("/dashboards/42/status")
     assert r.status_code == 200
     body = r.json()
@@ -1021,6 +1071,15 @@ def test_dashboard_status_requires_session():
     c = TestClient(create_app())
     r = c.get("/dashboards/42/status", follow_redirects=False)
     assert r.status_code == 303
+
+
+def test_dashboard_status_forbidden_for_foreign_owner(monkeypatch):
+    c = TestClient(create_app())
+    _ask_session(monkeypatch, c)
+    monkeypatch.setattr(app_mod, "get_conn", lambda: object())
+    monkeypatch.setattr(app_mod, "may_access_artifact", lambda c, aid, uid: False)
+    r = c.get("/dashboards/42/status")
+    assert r.status_code == 403
 
 
 def test_dashboard_retry_endpoint(monkeypatch):
