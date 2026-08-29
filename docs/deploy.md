@@ -141,7 +141,7 @@ Worker calls):
 
 ```bash
 curl -s https://foi.axoquant.com/health
-# {"status":"ok","model":"fartkraft sovereign stack"}
+# {"status":"ok","model":"axoquant sovereign stack"}
 ```
 
 ## 4. The Cloudflare Worker

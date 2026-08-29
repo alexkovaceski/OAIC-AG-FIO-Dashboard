@@ -6,7 +6,7 @@ and violet "FOI INSIGHTS" product label, the top-level nav (Overview / Requests 
 Decisions / Timeliness / Reference — all internal, the POC must not link out to
 the source agency site), a breadcrumb, a two-column layout of sidenav + main,
 and a footer with the Acknowledgement of Country, in-site legal links, and the
-identity stovepipe (fartkraft sovereign stack). The stovepipe rides in the
+identity stovepipe (axoquant sovereign stack). The stovepipe rides in the
 footer on every page so it is never out of sight, exactly as the Task 6
 guardrail carries it on the chat path.
 """
@@ -185,7 +185,7 @@ def chrome(title: str, body_html: str = "", page_key: str | None = None,
 <footer class="sitefoot text-sm px-8 py-7">
   <div class="country">We acknowledge the Traditional Custodians of Country throughout Australia and pay our respects to Elders past, present and emerging.</div>
   <div class="legal"><a href="/data-notes.html">Data notes</a> <span class="sep">·</span> <a href="/how-to-use.html">How to use</a> <span class="sep">·</span> <a href="/api.html">API access</a></div>
-  <div class="stack">Bluebird FOI Insights — fartkraft sovereign stack · data from data.gov.au (FOI statistics)</div>
+  <div class="stack">Bluebird FOI Insights — axoquant sovereign stack · data from data.gov.au (FOI statistics)</div>
 </footer>
 {tail_scripts}</body>
 </html>"""

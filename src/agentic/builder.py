@@ -194,7 +194,7 @@ async def build_spec(text, frame, complete_fn, ledger, conn, max_turns=6,
                             conn, artifact_type="builder_request",
                             artifact_key=(text or "")[:40], user_id=None,
                             dataset_id=_dataset_id(frame), request_text=text,
-                            spec_json={}, model="fartkraft", status="building")
+                            spec_json={}, model="axoquant", status="building")
                     # I1: record_artifact is best-effort and may fail OPEN to None
                     # (DB unreachable). Never attempt a tool_call write with a NULL
                     # artifact_id — the schema declares lineage_tool_calls.artifact_id

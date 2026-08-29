@@ -38,7 +38,7 @@ def test_health():
     r = c.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert r.json()["model"] == "fartkraft sovereign stack"
+    assert r.json()["model"] == "axoquant sovereign stack"
 
 
 def test_static_pages_render():
@@ -46,7 +46,7 @@ def test_static_pages_render():
     for page in ["at-a-glance", "requests-received", "data-notes"]:
         r = c.get(f"/{page}.html")
         assert r.status_code == 200
-        assert "fartkraft" in r.text.lower()
+        assert "axoquant" in r.text.lower()
 
 
 def test_ask_returns_artifact_and_urls(monkeypatch):
@@ -69,7 +69,7 @@ def test_lineage_page_renders(monkeypatch):
     _ask_session(monkeypatch, c)
     r = c.get("/lineage/abc123")
     assert r.status_code == 200
-    assert "fartkraft" in r.text.lower()
+    assert "axoquant" in r.text.lower()
 
 
 def test_lineage_route_requires_session():
@@ -121,7 +121,7 @@ def test_lineage_route_degrades_when_db_down(monkeypatch):
     _ask_session(monkeypatch, c)
     r = c.get("/lineage/42")
     assert r.status_code == 200
-    assert "fartkraft" in r.text.lower()
+    assert "axoquant" in r.text.lower()
 
 
 def test_unknown_page_is_404():

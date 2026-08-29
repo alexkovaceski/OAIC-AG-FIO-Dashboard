@@ -48,7 +48,7 @@ def test_deploy_probe_survives_the_remote_single_quote_wrapper():
 
 def test_readme_advertises_the_live_hostname():
     src = Path("README.md").read_text(encoding="utf-8")
-    assert "foi.fartkraft.ai" not in src
+    assert "foi.axoquant.ai" not in src
     assert "foi.axoquant.com" in src
 
 

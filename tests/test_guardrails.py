@@ -93,4 +93,4 @@ def test_fuzzy_screen_still_refuses_out_of_scope():
 
 
 def test_identity_stove():
-    assert IDENTITY_STOVE == "I am powered by the fartkraft sovereign stack, trained on local data."
+    assert IDENTITY_STOVE == "I am powered by the axoquant sovereign stack, trained on local data."

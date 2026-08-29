@@ -13,7 +13,7 @@ import re
 class ScopeRefusal(Exception):
     pass
 
-IDENTITY_STOVE = "I am powered by the fartkraft sovereign stack, trained on local data."
+IDENTITY_STOVE = "I am powered by the axoquant sovereign stack, trained on local data."
 
 # Layer 1: deterministic regex scope screen (mirrors request_governor.rule_screen)
 _OUT_OF_SCOPE_RE = re.compile(

@@ -31,7 +31,7 @@ def test_all_12_pages_render():
     assert set(pages) == set(PAGE_KEYS)          # exactly the 12 pages, no more
     for name, html in pages.items():
         assert "<!doctype html>" in html.lower()
-        assert "fartkraft" in html.lower()        # identity stovepipe on every page
+        assert "axoquant" in html.lower()        # identity stovepipe on every page
         assert "/assets/site.css" in html         # bespoke component stylesheet linked
         assert "/assets/tailwind.css" in html     # Tailwind utility stylesheet linked
         assert "Traditional Custodians" in html   # Acknowledgement of Country footer
@@ -128,7 +128,7 @@ def test_lineage_viewer_renders_from_dict_without_db():
                         "output_json": {"top": [{"agency": "Department of Home Affairs"}]}}],
     }
     html = render_lineage_page(7, None, data=data)
-    assert "fartkraft" in html.lower()
+    assert "axoquant" in html.lower()
     assert "show me the Q1 headline figures" in html   # request text
     assert "single_quarter" in html                    # dataset window_mode
     assert "agency-foi-data-2019-20.xlsx" in html      # source files
@@ -141,7 +141,7 @@ def test_lineage_viewer_degrades_without_db_and_data():
     # no conn, no data dict -> an honest degraded page, never a crash
     html = render_lineage_page("at-a-glance", None)
     assert "<!doctype html>" in html.lower()
-    assert "fartkraft" in html.lower()
+    assert "axoquant" in html.lower()
     assert "unavailable" in html.lower()
 
 

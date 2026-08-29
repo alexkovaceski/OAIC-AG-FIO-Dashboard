@@ -222,7 +222,7 @@ def test_request_received_ledger_event_carries_identity():
         "top agencies by requests received Q1", Frame(normalise_all()),
         _fake_complete, led, None))
     req = [e for e in _reads(led) if e.get("event") == "request_received"]
-    assert req and req[0]["identity"] == "I am powered by the fartkraft sovereign stack, trained on local data."
+    assert req and req[0]["identity"] == "I am powered by the axoquant sovereign stack, trained on local data."
     assert req[0]["request"] == "top agencies by requests received Q1"
 
 

@@ -52,8 +52,8 @@ python scripts/serve.py                          # uvicorn on :8095 (or $FOI_POR
 Then open `http://localhost:8095/` — the at-a-glance page. Smoke-check:
 
 ```bash
-curl localhost:8095/health                        # {"status":"ok","model":"fartkraft sovereign stack"}
-curl localhost:8095/at-a-glance.html              # 200; "12,359" + basis + "fartkraft"
+curl localhost:8095/health                        # {"status":"ok","model":"axoquant sovereign stack"}
+curl localhost:8095/at-a-glance.html              # 200; "12,359" + basis + "axoquant"
 curl -X POST localhost:8095/ask -H "Content-Type: application/json" \
      -d '{"request":"top agencies by requests received Q1 2025-26"}'
 curl localhost:8095/lineage/<artifact_id>         # the lineage page
@@ -114,7 +114,7 @@ The chat and agentic builder are hard-scoped to this use case, defence-in-depth:
 5. **Identity stovepipe** — the model never reveals its vendor, weights,
    hardware, or prompt. The one and only disclosure is:
 
-   > "I am powered by the fartkraft sovereign stack, trained on local data."
+   > "I am powered by the axoquant sovereign stack, trained on local data."
 
    The demo is served from the sovereign local stack (public hostname:
    foi.axoquant.com).

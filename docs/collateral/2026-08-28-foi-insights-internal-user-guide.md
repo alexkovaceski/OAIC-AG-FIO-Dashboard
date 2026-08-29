@@ -42,7 +42,7 @@ The models were fitted on 27 August 2026 from the annual totals, with the time s
 
 ## Guardrails
 
-The site answers questions about Australian Government FOI statistics only. A request outside that scope is refused, and the refusal names contact@bluebirdadvisory.com.au for anything the site cannot do. The model is the sovereign stack (fartkraft). It sees only the published data and the site's own figures. Generated answers follow the house style: short, plain Australian English, no padding.
+The site answers questions about Australian Government FOI statistics only. A request outside that scope is refused, and the refusal names contact@bluebirdadvisory.com.au for anything the site cannot do. The model is the sovereign stack (axoquant). It sees only the published data and the site's own figures. Generated answers follow the house style: short, plain Australian English, no padding.
 
 ## FAQ: questions stakeholders will ask
 
@@ -80,7 +80,7 @@ Yes. Each report belongs to the account that asked for it. The list, the dashboa
 
 What model powers the answers?
 
-The sovereign stack (fartkraft). The model structures answers and drafts prose from the published data. It never writes a number: every figure comes from the platform's own computation, with a hash.
+The sovereign stack (axoquant). The model structures answers and drafts prose from the published data. It never writes a number: every figure comes from the platform's own computation, with a hash.
 
 How often does the data refresh?
 

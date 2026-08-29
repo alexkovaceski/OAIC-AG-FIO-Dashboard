@@ -1,7 +1,7 @@
 """app — the Bluebird FOI Insights FastAPI service (no auth, hosted demo).
 
 Routes:
-  GET  /health                    {"status":"ok","model":"fartkraft sovereign stack"}
+  GET  /health                    {"status":"ok","model":"axoquant sovereign stack"}
   GET  /                          at-a-glance page
   GET  /{page}.html               the 12 static pages (404 on unknown)
   GET  /assets/{file}             static assets (site.css, ...)
@@ -321,7 +321,7 @@ async def _build_dashboard(frame, request_text: str, user_id=None) -> dict:
                     raw, artifact_type="builder_request",
                     artifact_key=(request_text or "")[:40], user_id=user_id,
                     dataset_id=dataset_id, request_text=request_text,
-                    spec_json={}, model="fartkraft", status="building")
+                    spec_json={}, model="axoquant", status="building")
             if build_id is not None:
                 conn = raw
                 response_id = build_id
@@ -404,7 +404,7 @@ def _enqueue_dashboard(frame, request_text: str, user_id=None) -> dict:
             conn, artifact_type="builder_request",
             artifact_key=(request_text or "")[:40], user_id=user_id,
             dataset_id=dataset_id, request_text=request_text,
-            spec_json={}, model="fartkraft", status="queued")
+            spec_json={}, model="axoquant", status="queued")
         if job_id is None:
             return {"queued": True, "job_id": None, "dashboard_url": None,
                     "lineage_url": None,
@@ -619,7 +619,7 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "model": "fartkraft sovereign stack"}
+        return {"status": "ok", "model": "axoquant sovereign stack"}
 
     # ---- read-only data API (throttled) ------------------------------------
     # Exposes the SAME platform-computed figures + canonical facts the

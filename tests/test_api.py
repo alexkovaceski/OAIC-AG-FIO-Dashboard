@@ -114,4 +114,4 @@ def test_api_page_is_served():
     assert "API access" in r.text
     assert "/api/figures" in r.text
     assert "rate-limited" in r.text.lower()
-    assert "fartkraft" in r.text.lower()
+    assert "axoquant" in r.text.lower()
